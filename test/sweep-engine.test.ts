@@ -17,6 +17,7 @@ interface Over {
   poll?: (call: number) => PollResult;
   review?: (call: number) => Omit<ReviewVerdict, "sessionId">;
   worker?: (feedback: WorkerFeedback, call: number) => Omit<WorkerResult, "sessionId">;
+  maxCiWaits?: number;
 }
 interface Rec { spawns: WorkerFeedback[]; polls: number; reviews: number; waits: number; sessions: string[] }
 
@@ -30,6 +31,7 @@ function makeDeps(store: Store, over: Over = {}): { deps: SweepEngineDeps; rec: 
   };
   const deps: SweepEngineDeps = {
     ciPollMs: 0,
+    maxCiWaits: over.maxCiWaits ?? 30,
     async spawnWorker(_job, feedback) {
       rec.spawns.push(feedback);
       const n = rec.spawns.length;
@@ -145,6 +147,55 @@ describe("runSweepJob (sweep engine, PRD §4-§5)", () => {
     expect(final.state).toBe("failed");
     expect(final.reason).toContain("spawn boom");
     expect(s.listSweepEvents(job.id).map((e) => e.event)).toContain("error");
+  });
+
+  test("waits for pending CI, then proceeds once it settles", async () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "in_review", ticketId: "t9", ticketKey: "COR-9", prNumber: 11, headSha: "h0" });
+    const pending: PollResult = { checks: { ci: "pending", "secrets-scan": "pending" }, changedPaths: ["src/ui/x.ts"] };
+    const { deps, rec } = makeDeps(s, { poll: (n) => (n <= 2 ? pending : CLEAN_POLL) });
+
+    expect(await runSweepJob(job, s, deps)).toBe("ready");
+    expect(rec.waits).toBe(2); // waited twice while pending, then CI settled
+    expect(rec.reviews).toBe(1);
+  });
+
+  test("gives up on CI that never settles with a bounded ci-timeout", async () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "in_review", ticketId: "t10", ticketKey: "COR-10", prNumber: 12, headSha: "h0" });
+    const pending: PollResult = { checks: { ci: "pending", "secrets-scan": "pending" }, changedPaths: ["src/ui/x.ts"] };
+    const { deps, rec } = makeDeps(s, { poll: () => pending, maxCiWaits: 3 });
+
+    expect(await runSweepJob(job, s, deps)).toBe("needs_human");
+    expect(s.getSweepJob(job.id)!.reason).toContain("ci-timeout");
+    expect(rec.waits).toBe(3); // bounded by maxCiWaits, not the safety backstop
+  });
+
+  test("a fix cycle returning no PR number keeps the existing PR (no erase, no duplicate pr_open)", async () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "in_review", ticketId: "t11", ticketKey: "COR-11", prNumber: 42, headSha: "h0" });
+    const { deps } = makeDeps(s, {
+      review: (n) => (n === 1 ? redReview() : cleanReview()),
+      worker: () => ({ headSha: "h-fix", prNumber: null }), // pushed a new head to the SAME PR
+    });
+
+    expect(await runSweepJob(job, s, deps)).toBe("ready");
+    const final = s.getSweepJob(job.id)!;
+    expect(final.prNumber).toBe(42); // preserved, not nulled out
+    expect(final.headSha).toBe("h-fix"); // head advanced
+    expect(s.listSweepEvents(job.id).filter((e) => e.event === "pr_open")).toHaveLength(0);
+  });
+
+  test("a review with 0 red but unproven preservation still triggers a fix cycle", async () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "in_review", ticketId: "t12", ticketKey: "COR-12", prNumber: 13, headSha: "h0" });
+    const { deps, rec } = makeDeps(s, {
+      review: (n) => (n === 1 ? { redFindings: 0, preservationProven: false, judgmentCall: null } : cleanReview()),
+    });
+
+    expect(await runSweepJob(job, s, deps)).toBe("ready");
+    expect(rec.spawns.length).toBe(1);
+    expect(rec.spawns[0]!.blockers).toContain("regression-unproven");
   });
 
   test("a judgment-call verdict from the reviewer escalates with its reason", async () => {

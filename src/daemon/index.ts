@@ -26,6 +26,7 @@ import { reapWorktrees } from "./worktree.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer } from "./uds-server.ts";
+import { httpLinearClient, syncLinearIssues } from "./linear.ts";
 
 export interface Daemon {
   store: Store;
@@ -132,7 +133,18 @@ export function startDaemon(home = stateHome()): Daemon {
   const federation: BoxFederation | null = config.devbox && !boxMonitorOff
     ? startBoxFederation({ store, dest: config.devbox }) : null;
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy });
+  // In-review sweep trigger (build order #2): optionally refresh linear_issues from Linear (when an API
+  // key + team keys are configured), then enqueue an in-review job per eligible issue. Idempotent.
+  const scanInReview = async (stateName = "In Review"): Promise<{ synced: number; created: number }> => {
+    let synced = 0;
+    const teamKeys = config.linearTeamKeys ?? [];
+    if (config.linearApiKey && teamKeys.length > 0) {
+      ({ synced } = await syncLinearIssues(store, httpLinearClient(config.linearApiKey), teamKeys));
+    }
+    return { synced, created: store.enqueueInReviewSweeps(stateName).length };
+  };
+
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview });
 
   // Broadcast runtime status transitions to all clients (design §8.2 manager fan-out).
   tracker.onChange(({ sessionId, status }) =>

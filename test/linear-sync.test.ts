@@ -38,6 +38,7 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
       url: "https://linear.app/cornell-ewb-softdev/issue/COR-1",
       stateName: "In Review", stateType: "started", assignee: "user-1",
       projectId: "proj-1", teamKey: "COR", priority: 2,
+      dueDate: null, labels: [],
       updatedAt: Date.parse("2026-10-06T18:00:00.000Z"),
     });
     expect(hasNextPage).toBe(true);
@@ -60,6 +61,14 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
     expect(parseIssuesResponse(page([]))).toEqual({ issues: [], hasNextPage: false, endCursor: null });
   });
 
+  test("maps dueDate (date → epoch) and label names (PRD §5 rescue data)", () => {
+    const { issues } = parseIssuesResponse(page([node({
+      dueDate: "2026-10-01", labels: { nodes: [{ name: "lead-level" }, { name: "intermediate" }] },
+    })]));
+    expect(issues[0]!.dueDate).toBe(Date.parse("2026-10-01"));
+    expect(issues[0]!.labels).toEqual(["lead-level", "intermediate"]);
+  });
+
   test("issuesVariables filters by team key and carries the cursor", () => {
     expect(issuesVariables("COR")).toEqual({ filter: { team: { key: { eq: "COR" } } }, after: null });
     expect(issuesVariables("COR", "cur-9").after).toBe("cur-9");
@@ -67,6 +76,15 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
 });
 
 describe("syncLinearIssues (orchestration via injected client, PRD §4)", () => {
+  test("persists dueDate and labels through the store", async () => {
+    const s = new Store(":memory:");
+    const client = recordingClient([page([node({ id: "u1", identifier: "COR-1", dueDate: "2026-10-01", labels: { nodes: [{ name: "lead-level" }] } })])]);
+    await syncLinearIssues(s, client, ["COR"]);
+    const row = s.listLinearIssues()[0]!;
+    expect(row.dueDate).toBe(Date.parse("2026-10-01"));
+    expect(row.labels).toEqual(["lead-level"]);
+  });
+
   test("upserts a single page into linear_issues", async () => {
     const s = new Store(":memory:");
     const client = recordingClient([page([node({ id: "u1", identifier: "COR-1" }), node({ id: "u2", identifier: "COR-2" })])]);

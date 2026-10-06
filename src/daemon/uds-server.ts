@@ -34,8 +34,8 @@ export interface UdsServerDeps {
   nudge: NudgeDelivery;
   autonomyState: () => unknown;
   extendAutonomy: (hours: number) => { until: number };
-  /** Build order #2: refresh linear_issues (if configured) then enqueue in-review sweep jobs. */
-  scanInReview: (stateName?: string) => Promise<{ synced: number; created: number }>;
+  /** Build order #2/#3c: refresh linear_issues (if configured), enqueue in-review sweep jobs, then run them. */
+  scanInReview: (stateName?: string) => Promise<{ synced: number; created: number; started: number }>;
 }
 
 export interface UdsServer {

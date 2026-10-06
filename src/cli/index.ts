@@ -44,10 +44,10 @@ export async function main(argv: string[]): Promise<void> {
     });
     try {
       const stateName = rest[0];
-      const r = await client.request<{ synced: number; created: number }>(
+      const r = await client.request<{ synced: number; created: number; started: number }>(
         "sweep.scanInReview", stateName ? { stateName } : {},
       );
-      console.log(`sweep: synced ${r.synced} issue(s) from Linear, enqueued ${r.created} in-review job(s)`);
+      console.log(`sweep: synced ${r.synced} issue(s), enqueued ${r.created} job(s), started ${r.started} run(s)`);
     } finally {
       client.close();
     }

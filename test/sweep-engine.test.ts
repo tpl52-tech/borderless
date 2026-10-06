@@ -198,6 +198,16 @@ describe("runSweepJob (sweep engine, PRD §4-§5)", () => {
     expect(rec.spawns[0]!.blockers).toContain("regression-unproven");
   });
 
+  test("in_review with no PR (unhydrated) stops for a human — never implements blindly", async () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "in_review", ticketId: "t13", ticketKey: "COR-13" }); // no prNumber/headSha
+    const { deps, rec } = makeDeps(s);
+
+    expect(await runSweepJob(job, s, deps)).toBe("needs_human");
+    expect(s.getSweepJob(job.id)!.reason).toContain("no PR");
+    expect(rec.spawns.length).toBe(0); // no bootstrap/implement for an in-review job
+  });
+
   test("a judgment-call verdict from the reviewer escalates with its reason", async () => {
     const s = new Store(":memory:");
     const job = s.createSweepJob({ kind: "in_review", ticketId: "t8", ticketKey: "COR-8", prNumber: 10, headSha: "h0" });

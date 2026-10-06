@@ -1,5 +1,6 @@
 import { test, expect, describe } from "bun:test";
-import { checkStates, parseReviewVerdict } from "../src/daemon/sweep-deps.ts";
+import { checkStates, parseReviewVerdict, needsHydration } from "../src/daemon/sweep-deps.ts";
+import type { SweepJob } from "../src/shared/types.ts";
 
 const rollup = (nodes: unknown[]): unknown => ({ contexts: { nodes } });
 
@@ -19,11 +20,24 @@ describe("checkStates (gh statusCheckRollup → required checks)", () => {
     expect(checkStates(rollup([{ __typename: "StatusContext", context: "ci", state: "ERROR" }]))).toEqual({ ci: "failure" });
   });
 
+  test("SKIPPED/NEUTRAL conclusions are pending — not a pass, not a fixable failure", () => {
+    expect(checkStates(rollup([{ __typename: "CheckRun", name: "ci", status: "COMPLETED", conclusion: "SKIPPED" }]))).toEqual({ ci: "pending" });
+    expect(checkStates(rollup([{ __typename: "CheckRun", name: "secrets-scan", status: "COMPLETED", conclusion: "NEUTRAL" }]))).toEqual({ "secrets-scan": "pending" });
+  });
+
   test("non-required checks are ignored; absent/garbled rollup yields {} (gate reads missing as pending)", () => {
     expect(checkStates(rollup([{ __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" }]))).toEqual({});
     expect(checkStates(rollup([]))).toEqual({});
     expect(checkStates(null)).toEqual({});
     expect(checkStates({})).toEqual({});
+  });
+});
+
+describe("needsHydration", () => {
+  test("true only for an in_review job that has no PR yet", () => {
+    expect(needsHydration({ kind: "in_review", prNumber: null } as SweepJob)).toBe(true);
+    expect(needsHydration({ kind: "in_review", prNumber: 5 } as SweepJob)).toBe(false);
+    expect(needsHydration({ kind: "rescue", prNumber: null } as SweepJob)).toBe(false);
   });
 });
 

@@ -150,6 +150,7 @@ export type RequestType =
   | "workitem.list" | "workitem.refresh" | "workitem.add" | "workitem.remove"
   | "workitem.action"
   | "project.setHidden" | "linear.refresh" | "linear.list"
+  | "sweep.scanInReview"
   | "usage.get" | "quota.get";
 
 export function controlFrame(msg: ControlMessage): Frame {

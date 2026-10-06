@@ -34,6 +34,8 @@ export interface UdsServerDeps {
   nudge: NudgeDelivery;
   autonomyState: () => unknown;
   extendAutonomy: (hours: number) => { until: number };
+  /** Build order #2: refresh linear_issues (if configured) then enqueue in-review sweep jobs. */
+  scanInReview: (stateName?: string) => Promise<{ synced: number; created: number }>;
 }
 
 export interface UdsServer {
@@ -200,6 +202,10 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
         return store.listActions(p.limit ?? 40);
       case "autonomy.extend":
         return deps.extendAutonomy(Number(p.hours ?? 2));
+
+      // --- sweeps ---
+      case "sweep.scanInReview":
+        return deps.scanInReview(typeof p.stateName === "string" ? p.stateName : undefined);
 
       // --- usage / quota ---
       case "usage.get":

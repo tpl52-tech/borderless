@@ -129,6 +129,8 @@ export interface OperatorConfigLite {
   devbox?: string;
   linearWorkspace?: string;
   linearTeamKeys?: string[];
+  /** Linear personal API key for the issue sync (secret; lives only in the 0600 operator config). */
+  linearApiKey?: string;
   ctoLogin?: string;
   ctoBotLogin?: string;
   operatorLogin?: string;
@@ -162,6 +164,7 @@ export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
     devbox: typeof raw.devbox === "string" ? raw.devbox : undefined,
     linearWorkspace: typeof raw.linearWorkspace === "string" ? raw.linearWorkspace : undefined,
     linearTeamKeys: Array.isArray(raw.linearTeamKeys) ? raw.linearTeamKeys : undefined,
+    linearApiKey: typeof raw.linearApiKey === "string" ? raw.linearApiKey : undefined,
     ctoLogin: typeof raw.ctoLogin === "string" ? raw.ctoLogin : undefined,
     ctoBotLogin: typeof raw.ctoBotLogin === "string" ? raw.ctoBotLogin : undefined,
     operatorLogin: typeof raw.operatorLogin === "string" ? raw.operatorLogin : undefined,

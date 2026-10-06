@@ -15,6 +15,7 @@
  *   ao pr list|resolve <n> [--all|--outdated|indexes|ids] [-R repo]
  *   ao issue list|view
  *   ao awake [duration|off|status]
+ *   ao sweep ["In Review"]                     sync Linear issues + enqueue in-review sweep jobs
  */
 
 const SUBCOMMANDS = [
@@ -30,6 +31,26 @@ export async function main(argv: string[]): Promise<void> {
     if (!sessionId) throw new Error("usage: ao attach <sessionId>");
     const { attach } = await import("../client/attach.ts");
     await attach(sessionId);
+    return;
+  }
+
+  // `ao sweep ["In Review"]` — refresh linear_issues (if a Linear key is configured) + enqueue
+  // in-review sweep jobs. A thin client over the daemon's sweep.scanInReview (build order #2).
+  if (sub === "sweep") {
+    const { connectDaemon } = await import("../client/daemon-client.ts");
+    const { paths } = await import("../shared/paths.ts");
+    const client = await connectDaemon(paths().socket).catch(() => {
+      throw new Error("ao sweep: daemon not running — start it with `ao` (the TUI) or `bun run src/daemon/index.ts`");
+    });
+    try {
+      const stateName = rest[0];
+      const r = await client.request<{ synced: number; created: number }>(
+        "sweep.scanInReview", stateName ? { stateName } : {},
+      );
+      console.log(`sweep: synced ${r.synced} issue(s) from Linear, enqueued ${r.created} in-review job(s)`);
+    } finally {
+      client.close();
+    }
     return;
   }
 

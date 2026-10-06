@@ -16,6 +16,7 @@
  *   ao issue list|view
  *   ao awake [duration|off|status]
  *   ao sweep ["In Review"]                     sync Linear issues + enqueue in-review sweep jobs
+ *   ao rescue [authorize <ticketKey>]          list eligible overdue tickets / authorize a rescue
  */
 
 const SUBCOMMANDS = [
@@ -48,6 +49,31 @@ export async function main(argv: string[]): Promise<void> {
         "sweep.scanInReview", stateName ? { stateName } : {},
       );
       console.log(`sweep: synced ${r.synced} issue(s), enqueued ${r.created} job(s), started ${r.started} run(s)`);
+    } finally {
+      client.close();
+    }
+    return;
+  }
+
+  // `ao rescue [authorize <ticket>]` — the Rescues queue (overdue, no-progress tickets) + per-ticket
+  // authorization. Nothing auto-starts; authorize is the lead's explicit go-ahead (build order #4b).
+  if (sub === "rescue") {
+    const { connectDaemon } = await import("../client/daemon-client.ts");
+    const { paths } = await import("../shared/paths.ts");
+    const client = await connectDaemon(paths().socket).catch(() => {
+      throw new Error("ao rescue: daemon not running — start it with `ao` (the TUI) or `bun run src/daemon/index.ts`");
+    });
+    try {
+      if (rest[0] === "authorize") {
+        const ticket = rest[1];
+        if (!ticket) throw new Error("usage: ao rescue authorize <ticketKey>");
+        const r = await client.request<{ ticketKey: string; created: boolean; started: boolean }>("rescue.authorize", { ticket });
+        console.log(`rescue ${r.ticketKey}: ${r.created ? "authorized" : "already queued"}${r.started ? ", started" : ""}`);
+      } else {
+        const queue = await client.request<Array<{ ticketKey: string; title: string; daysOverdue: number }>>("rescue.scan");
+        if (queue.length === 0) console.log("rescue: no eligible overdue tickets");
+        else for (const c of queue) console.log(`  ${c.ticketKey}  ${c.daysOverdue}d overdue  ${c.title}`);
+      }
     } finally {
       client.close();
     }

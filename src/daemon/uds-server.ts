@@ -36,6 +36,10 @@ export interface UdsServerDeps {
   extendAutonomy: (hours: number) => { until: number };
   /** Build order #2/#3c: refresh linear_issues (if configured), enqueue in-review sweep jobs, then run them. */
   scanInReview: (stateName?: string) => Promise<{ synced: number; created: number; started: number }>;
+  /** Build order #4b: the Rescues queue — eligible overdue tickets (PRD §5). */
+  rescueScan: () => Promise<Array<{ ticketId: string; ticketKey: string; title: string; daysOverdue: number }>>;
+  /** Build order #4b: authorize a rescue for one ticket (id or identifier) → a rescue sweep_job + run it. */
+  rescueAuthorize: (ticket: string) => { ticketKey: string; created: boolean; started: boolean };
 }
 
 export interface UdsServer {
@@ -206,6 +210,10 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
       // --- sweeps ---
       case "sweep.scanInReview":
         return deps.scanInReview(typeof p.stateName === "string" ? p.stateName : undefined);
+      case "rescue.scan":
+        return deps.rescueScan();
+      case "rescue.authorize":
+        return deps.rescueAuthorize(String(p.ticket ?? ""));
 
       // --- usage / quota ---
       case "usage.get":

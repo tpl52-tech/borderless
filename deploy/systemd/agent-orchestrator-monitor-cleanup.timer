@@ -1,0 +1,10 @@
+# 03:17 daily, Persistent so a missed run (box asleep) fires on next boot (design §17.5).
+[Unit]
+Description=agent-orchestrator daily cleanup timer
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

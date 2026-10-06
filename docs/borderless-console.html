@@ -1,0 +1,471 @@
+<title>Borderless Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap">
+<style>
+  /* committed single-theme terminal UI — pink + green (reUSE: nature + feminine) */
+  :root {
+    --bg:      #0b0f0c;
+    --panel:   #0f1511;
+    --panel-2: #131c16;
+    --line:    #243029;
+    --line-2:  #35463b;
+    --ink:     #d6e4db;
+    --ink-2:   #89a093;
+    --dim:     #5d7067;
+    --green:   #7ce7a6;
+    --green-2: #4b946e;
+    --pink:    #ff9ed4;
+    --pink-2:  #c870a6;
+    --amber:   #f0ca6c;
+    --red:     #ff818d;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--mono);
+    font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  .crt { position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background: repeating-linear-gradient(to bottom, rgba(255,255,255,.012) 0 1px, transparent 1px 3px); }
+
+  .app { min-height: 100%; display: flex; flex-direction: column; }
+
+  /* top bar */
+  .topbar { display: flex; align-items: center; gap: 1.1rem; padding: .55rem .9rem;
+    border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  .brand { font-weight: 800; letter-spacing: .06em; color: var(--pink); }
+  .brand .ver { font-weight: 500; color: var(--dim); font-size: .78em; letter-spacing: .1em; margin-left: .5rem; }
+  .crumb { color: var(--ink-2); letter-spacing: .08em; font-size: .82em; }
+  .crumb b { color: var(--green); }
+  .status { margin-left: auto; display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
+  .badge { font-size: .74em; letter-spacing: .06em; padding: .22em .5em; border: 1px solid var(--line-2); border-radius: 3px; color: var(--ink-2); white-space: nowrap; }
+  .badge.ok { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--line-2)); }
+  .badge.pink { color: var(--pink); border-color: color-mix(in srgb, var(--pink) 45%, var(--line-2)); }
+  .select { font-size: .78em; color: var(--ink); border: 1px solid var(--line-2); border-radius: 3px; padding: .22em .55em; }
+
+  .main { flex: 1; display: flex; }
+
+  /* sidebar */
+  .side { width: 176px; flex: none; border-right: 1px solid var(--line); background: var(--panel);
+    display: flex; flex-direction: column; padding: .8rem 0; }
+  .nav { display: block; width: 100%; text-align: left; font-family: var(--mono); font-size: .82em;
+    padding: .5rem 1rem; color: var(--ink-2); letter-spacing: .09em; border: 0; border-left: 2px solid transparent;
+    background: transparent; cursor: pointer; }
+  .nav:hover { color: var(--ink); background: var(--panel-2); }
+  .nav.active { color: var(--pink); border-left-color: var(--pink); background: color-mix(in srgb, var(--pink) 8%, transparent); }
+  .side-foot { margin-top: auto; padding: .9rem 1rem .2rem; border-top: 1px solid var(--line); font-size: .8em; color: var(--ink-2); }
+  .online { color: var(--green); letter-spacing: .05em; }
+  .cursor { animation: blink 1.1s steps(1) infinite; color: var(--green); }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+
+  .content { flex: 1; min-width: 0; padding: 1rem; }
+  .view[hidden] { display: none; }
+
+  /* hero */
+  .hero { position: relative; border: 1px solid var(--line); background: var(--panel); padding: 1.2rem 1.4rem; overflow: hidden; margin-bottom: 1rem; }
+  .hero-num { position: absolute; right: .7rem; top: -.7rem; font-size: 6.5rem; font-weight: 800; line-height: 1;
+    color: color-mix(in srgb, var(--pink) 9%, transparent); user-select: none; }
+  .hero h1 { margin: 0 0 .45rem; font-size: 1.7rem; font-weight: 800; letter-spacing: .02em; color: var(--pink); }
+  .hero-sub { margin: 0 0 1rem; color: var(--ink-2); max-width: 62ch; }
+  .hero-actions { display: flex; gap: .55rem; flex-wrap: wrap; }
+  .vhead { margin: .1rem 0 1rem; } .vhead h1 { margin: 0 0 .3rem; font-size: 1.45rem; color: var(--pink); letter-spacing: .02em; }
+  .vhead p { margin: 0; color: var(--ink-2); max-width: 72ch; }
+
+  /* buttons */
+  .btn { font-family: var(--mono); font-size: .8rem; font-weight: 700; letter-spacing: .04em; padding: .5em .85em;
+    border: 1px solid var(--line-2); background: transparent; color: var(--ink); border-radius: 3px; cursor: pointer; }
+  .btn:hover { border-color: var(--ink-2); }
+  .btn.green { background: var(--green); color: #063018; border-color: var(--green); }
+  .btn.green:hover { background: color-mix(in srgb, var(--green) 88%, white); }
+  .btn.pink { background: var(--pink); color: #3a0c28; border-color: var(--pink); }
+  .btn.pink:hover { background: color-mix(in srgb, var(--pink) 88%, white); }
+  .btn.o-green { color: var(--green); border-color: color-mix(in srgb, var(--green) 50%, var(--line-2)); }
+  .btn.o-pink { color: var(--pink); border-color: color-mix(in srgb, var(--pink) 50%, var(--line-2)); }
+  .btn.ghost { color: var(--ink-2); }
+  .btn.full { width: 100%; margin-top: .5rem; }
+  .btn.sm { font-size: .72rem; padding: .4em .7em; } .btn.xs { font-size: .68rem; padding: .25em .55em; }
+
+  /* layout cols */
+  .cols { display: grid; gap: 1rem; align-items: start; }
+  .cols.c-2a { grid-template-columns: 1.6fr 1fr; }
+  .cols.c-2 { grid-template-columns: 1fr 1fr; }
+  .cols.c-stack { grid-template-columns: 1fr; }
+  .col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+
+  /* panels */
+  .panel { border: 1px solid var(--line); background: var(--panel); }
+  .panel.g { border-color: color-mix(in srgb, var(--green) 28%, var(--line)); }
+  .panel.p { border-color: color-mix(in srgb, var(--pink) 28%, var(--line)); }
+  .ph { display: flex; justify-content: space-between; align-items: center; padding: .5rem .8rem;
+    border-bottom: 1px solid var(--line); color: var(--green); letter-spacing: .1em; font-size: .78rem; font-weight: 700; }
+  .ph.pink { color: var(--pink); }
+  .ph-meta { color: var(--dim); font-weight: 500; font-size: .88em; letter-spacing: .04em; }
+  .pb { padding: .85rem .8rem; } .pb.nopad { padding: 0; }
+  .note { font-size: .78rem; color: var(--ink-2); margin: 0 0 .7rem; }
+
+  /* tables */
+  .table-wrap { overflow-x: auto; }
+  table.tbl { border-collapse: collapse; width: 100%; font-size: .8rem; min-width: 24rem; }
+  .tbl th { text-align: left; color: var(--dim); font-weight: 500; letter-spacing: .07em; padding: .5rem .8rem; border-bottom: 1px solid var(--line); }
+  .tbl td { padding: .5rem .8rem; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); font-variant-numeric: tabular-nums; }
+  .tbl tbody tr:last-child td { border-bottom: none; }
+  .tbl tr.sel td { background: color-mix(in srgb, var(--green) 11%, transparent); }
+  .tbl tr.sel td:first-child { box-shadow: inset 2px 0 0 var(--pink); }
+  .k-rescue { color: var(--pink); } .k-review { color: var(--ink-2); }
+  .s-green { color: var(--green); } .s-ink { color: var(--ink); } .s-dim { color: var(--dim); }
+  .s-pink { color: var(--pink); } .s-amber { color: var(--amber); }
+  .phase { font-size: .68rem; color: var(--green); border: 1px solid color-mix(in srgb, var(--green) 32%, var(--line-2)); border-radius: 3px; padding: .04em .35em; }
+
+  /* event log */
+  .log { display: flex; flex-direction: column; gap: .3rem; font-size: .78rem; }
+  .log .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
+  .log .t { color: var(--dim); }
+  .tag { font-weight: 700; }
+  .tag.green { color: var(--green); } .tag.pink { color: var(--pink); } .tag.amber { color: var(--amber); }
+  .tag.red { color: var(--red); } .tag.dim { color: var(--dim); }
+
+  /* merge / needs-you rows */
+  .row-card { border: 1px solid var(--line); border-radius: 3px; padding: .65rem .7rem; margin-bottom: .6rem; }
+  .row-card:last-child { margin-bottom: 0; }
+  .rc-top { font-size: .85rem; } .rc-top b { color: var(--green); } .muted { color: var(--ink-2); }
+  .rc-meta { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .45rem; }
+  .chip { font-size: .68rem; letter-spacing: .03em; padding: .16em .45em; border: 1px solid var(--line-2); border-radius: 3px; color: var(--ink-2); }
+  .chip.green { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--line-2)); }
+  .chip.pink { color: var(--pink); border-color: color-mix(in srgb, var(--pink) 45%, var(--line-2)); }
+
+  /* ranked list (do-next) */
+  .rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
+  .rank li { display: flex; align-items: center; gap: .6rem; font-size: .82rem; }
+  .rank .n { color: var(--pink); font-weight: 800; width: 1rem; }
+  .rank .nm { color: var(--ink); }
+  .rank .u { margin-left: auto; color: var(--green); }
+  .rank .u b { color: var(--green); }
+
+  /* task list (lead desk) */
+  .tasks { list-style: none; margin: 0 0 .8rem; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
+  .tasks li { display: flex; align-items: center; gap: .55rem; font-size: .82rem; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .dot.open { background: var(--pink); } .dot.done { background: var(--dim); }
+  .done-txt { color: var(--dim); text-decoration: line-through; }
+  .tasks .to { margin-left: auto; color: var(--green-2); }
+  .tasks .due { color: var(--amber); font-size: .9em; }
+
+  /* roster-load mini list */
+  .load { list-style: none; margin: 0; padding: 0; font-size: .8rem; }
+  .load li { display: flex; justify-content: space-between; padding: .28rem 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+  .load li:last-child { border-bottom: none; }
+  .load .cnt { color: var(--dim); } .load .cnt.free { color: var(--green); }
+
+  :focus-visible { outline: 1px solid var(--pink); outline-offset: 2px; }
+
+  /* ask ao — plain chat (deliberately NOT the terminal panels; PRD §10) */
+  .chat-wrap { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; min-height: calc(100vh - 120px); }
+  .chat-top { padding-bottom: .8rem; border-bottom: 1px solid var(--line); margin-bottom: 1.4rem; }
+  .chat-title { font-family: -apple-system, system-ui, sans-serif; font-size: 1.25rem; font-weight: 600; color: var(--ink); }
+  .chat-ctx { margin-top: .3rem; font-size: .74rem; color: var(--dim); }
+  .chat-stream { flex: 1; display: flex; flex-direction: column; gap: 1.5rem; padding-bottom: 1.3rem; }
+  .cmsg { display: flex; flex-direction: column; gap: .35rem; }
+  .crole { font-size: .72rem; font-weight: 700; letter-spacing: .02em; }
+  .cmsg.user .crole { color: var(--pink); }
+  .cmsg.ai .crole { color: var(--green); }
+  .ctext { font-family: -apple-system, system-ui, sans-serif; font-size: .93rem; line-height: 1.62; color: var(--ink); white-space: pre-wrap; max-width: 68ch; }
+  .cmsg.user .ctext { background: color-mix(in srgb, var(--pink) 8%, transparent); border: 1px solid color-mix(in srgb, var(--pink) 20%, var(--line)); border-radius: 12px; padding: .7rem .9rem; }
+  .chat-input { position: sticky; bottom: 0; background: var(--bg); padding: .8rem 0 .2rem; display: flex; gap: .6rem; align-items: center; }
+  .ci-field { flex: 1; border: 1px solid var(--line-2); border-radius: 12px; padding: .75rem .95rem; color: var(--dim); font-family: -apple-system, system-ui, sans-serif; font-size: .9rem; }
+  .ci-send { background: var(--pink); color: #3a0c28; border: 0; border-radius: 12px; padding: .7rem 1.2rem; font-weight: 700; font-family: -apple-system, system-ui, sans-serif; cursor: pointer; }
+  .ci-send:hover { background: color-mix(in srgb, var(--pink) 88%, white); }
+
+  @media (max-width: 880px) {
+    .cols.c-2a, .cols.c-2 { grid-template-columns: 1fr; }
+    .main { flex-direction: column; }
+    .side { width: auto; flex-direction: row; overflow-x: auto; padding: .4rem; border-right: none; border-bottom: 1px solid var(--line); }
+    .nav { width: auto; border-left: none; border-bottom: 2px solid transparent; white-space: nowrap; }
+    .nav.active { border-left: none; border-bottom-color: var(--pink); }
+    .side-foot { display: none; }
+  }
+</style>
+
+<div class="crt"></div>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">BORDERLESS<span class="ver">v0.3 // DRAFT</span></div>
+    <div class="crumb">ROOT / <b id="crumb-view">SWEEPS</b></div>
+    <div class="status">
+      <span class="badge ok">DAEMON: OK</span>
+      <span class="badge pink">2 NEED YOU</span>
+      <span class="select">ReUse &middot; Fall 2026 &#9662;</span>
+    </div>
+  </header>
+
+  <div class="main">
+    <nav class="side">
+      <button class="nav active" data-view="sweeps">SWEEPS</button>
+      <button class="nav" data-view="boards">BOARDS</button>
+      <button class="nav" data-view="assign">ASSIGN</button>
+      <button class="nav" data-view="leaddesk">LEAD_DESK</button>
+      <button class="nav" data-view="roster">ROSTER</button>
+      <button class="nav" data-view="chat">ASK</button>
+      <div class="side-foot">LEAD: tpl52<br><span class="online">&#9679; ONLINE<span class="cursor">&#9612;</span></span></div>
+    </nav>
+
+    <div class="content">
+
+      <!-- ============ SWEEPS ============ -->
+      <section class="view" id="sweeps">
+        <div class="hero">
+          <div class="hero-num">2</div>
+          <h1>SWEEP CONSOLE</h1>
+          <p class="hero-sub">6 in scope &middot; <b style="color:var(--green)">2 ready to merge</b> &middot; <b style="color:var(--pink)">2 to authorize</b> &middot; <b style="color:var(--pink)">1 needs you</b>. Agents drive to the gate; you decide.</p>
+          <div class="hero-actions">
+            <button class="btn green">&#9654; SWEEP IN REVIEW</button>
+            <button class="btn o-pink">&#10227; SCAN OVERDUE</button>
+          </div>
+        </div>
+
+        <div class="cols c-2a">
+          <div class="col">
+            <div class="panel">
+              <div class="ph">SWEEP_QUEUE <span class="ph-meta">6 JOBS</span></div>
+              <div class="pb nopad"><div class="table-wrap">
+                <table class="tbl">
+                  <thead><tr><th>TICKET</th><th>KIND</th><th>OWNER</th><th>STATE</th><th>CYC</th></tr></thead>
+                  <tbody>
+                    <tr class="sel"><td>COR-24</td><td class="k-review">review</td><td>neha</td><td class="s-green">READY</td><td>2</td></tr>
+                    <tr><td>COR-35</td><td class="k-review">review</td><td>willow</td><td class="s-ink">REVIEWING</td><td>3</td></tr>
+                    <tr><td>COR-23</td><td class="k-review">review</td><td>kenan</td><td class="s-dim">CI</td><td>1</td></tr>
+                    <tr><td>COR-29</td><td class="k-rescue">rescue</td><td>tess <span class="s-dim">&larr;dana</span></td><td class="s-ink">IMPLEMENTING</td><td>1</td></tr>
+                    <tr><td>COR-30</td><td class="k-rescue">rescue</td><td>tess <span class="s-dim">&larr;roma</span></td><td class="s-dim">QUEUED</td><td>0</td></tr>
+                    <tr><td>COR-36</td><td class="k-rescue">rescue</td><td>tess</td><td class="s-pink">NEEDS_HUMAN</td><td>8</td></tr>
+                  </tbody>
+                </table>
+              </div></div>
+            </div>
+
+            <div class="panel">
+              <div class="ph">EVENT_LOG</div>
+              <div class="pb log">
+                <div class="line"><span class="t">14:02:11</span> <span class="tag green">[MERGE]</span> COR-27 merged &rarr; Verifying &middot; QA: sabrina</div>
+                <div class="line"><span class="t">14:02:09</span> <span class="tag pink">[SLACK]</span> DM'd neha re COR-27 change summary</div>
+                <div class="line"><span class="t">14:01:58</span> <span class="tag green">[GATE ]</span> COR-24 ready &middot; grade A &middot; 0 blocking</div>
+                <div class="line"><span class="t">14:01:30</span> <span class="tag green">[IMPL ]</span> COR-29 building lib/api/photos.ts</div>
+                <div class="line"><span class="t">14:00:52</span> <span class="tag pink">[HOLD ]</span> COR-36 needs-human: 8 cycles, AC unmet</div>
+                <div class="line"><span class="t">14:00:33</span> <span class="tag dim">[REV  ]</span> COR-35 reviewer: 1 blocking &rarr; fixer</div>
+                <div class="line"><span class="t">14:00:04</span> <span class="tag red">[ERR  ]</span> COR-30 spawn retry 1/3 &middot; pty timeout</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col">
+            <div class="panel g">
+              <div class="ph">READY_TO_MERGE <span class="ph-meta">2</span></div>
+              <div class="pb">
+                <div class="row-card">
+                  <div class="rc-top"><b>COR-24</b> <span class="muted">signup screen</span></div>
+                  <div class="rc-meta"><span class="chip green">GRADE A</span><span class="chip green">CI &#10003;</span><span class="chip green">no-regress &#10003;</span></div>
+                  <button class="btn green full">&#9166; MERGE &rarr; VERIFYING</button>
+                </div>
+                <div class="row-card">
+                  <div class="rc-top"><b>COR-17</b> <span class="muted">search list</span></div>
+                  <div class="rc-meta"><span class="chip green">GRADE A</span><span class="chip green">CI &#10003;</span></div>
+                  <button class="btn green full">&#9166; MERGE &rarr; VERIFYING</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel p">
+              <div class="ph pink">NEEDS_YOU <span class="ph-meta">1</span></div>
+              <div class="pb">
+                <div class="row-card">
+                  <div class="rc-top"><b style="color:var(--pink)">COR-36</b> <span class="muted">notifications (rescue)</span></div>
+                  <p class="note" style="margin:.45rem 0 0">Paused at a schema call it can't make (the Realtime trigger). It's waiting in its session with <b style="color:var(--pink)">3 options</b> &mdash; open it to talk it through and pick one.</p>
+                  <button class="btn pink sm full" style="margin-top:.55rem">&#9166; OPEN SESSION</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel p">
+              <div class="ph pink">RESCUES &mdash; AWAITING YOU <span class="ph-meta">2 ELIGIBLE</span></div>
+              <div class="pb">
+                <p class="note">Overdue + no progress. Nothing runs until you authorize it.</p>
+                <div class="row-card">
+                  <div class="rc-top"><b style="color:var(--pink)">COR-31</b> <span class="muted">pickup scheduling</span></div>
+                  <div class="rc-meta"><span class="chip">4d overdue</span><span class="chip">no branch</span><span class="chip">was: roma</span></div>
+                  <div style="display:flex; gap:.4rem; margin-top:.55rem"><button class="btn pink sm" style="flex:1">&#9166; AUTHORIZE</button><button class="btn ghost sm">SKIP</button></div>
+                </div>
+                <div class="row-card">
+                  <div class="rc-top"><b style="color:var(--pink)">COR-33</b> <span class="muted">profile screen</span></div>
+                  <div class="rc-meta"><span class="chip">2d overdue</span><span class="chip">no commits</span><span class="chip">was: sabrina</span></div>
+                  <div style="display:flex; gap:.4rem; margin-top:.55rem"><button class="btn pink sm" style="flex:1">&#9166; AUTHORIZE</button><button class="btn ghost sm">SKIP</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ BOARDS ============ -->
+      <section class="view" id="boards" hidden>
+        <div class="vhead"><h1>BOARDS</h1><p>What&rsquo;s workable right now, and what to attack first.</p></div>
+        <div class="cols c-2">
+          <div class="panel">
+            <div class="ph">UNBLOCKED <span class="ph-meta">5 &middot; BY PHASE</span></div>
+            <div class="pb nopad"><div class="table-wrap">
+              <table class="tbl">
+                <thead><tr><th>TICKET</th><th>TITLE</th><th>PHASE</th><th>OWNER</th></tr></thead>
+                <tbody>
+                  <tr><td>COR-28</td><td>Donate form</td><td><span class="phase">P2</span></td><td class="s-dim">&mdash;</td></tr>
+                  <tr><td>COR-36</td><td>Notifications table</td><td><span class="phase">P3</span></td><td>kenan</td></tr>
+                  <tr><td>COR-19</td><td>Home sections</td><td><span class="phase">P1a</span></td><td>lahari</td></tr>
+                  <tr><td>COR-25</td><td>Forgot password</td><td><span class="phase">P1b</span></td><td class="s-dim">&mdash;</td></tr>
+                  <tr><td>COR-34</td><td>Favorited items list</td><td><span class="phase">P3</span></td><td>willow</td></tr>
+                </tbody>
+              </table>
+            </div></div>
+          </div>
+
+          <div class="panel p">
+            <div class="ph pink">DO NEXT <span class="ph-meta">BY LEVERAGE</span></div>
+            <div class="pb">
+              <p class="note">Unblocked tickets ranked by how much downstream work each one frees up. Start at the top.</p>
+              <ol class="rank">
+                <li><span class="n">1</span><span class="nm">COR-28 Donate form</span><span class="u">unblocks <b>4</b></span></li>
+                <li><span class="n">2</span><span class="nm">COR-36 Notifications</span><span class="u">unblocks <b>3</b></span></li>
+                <li><span class="n">3</span><span class="nm">COR-19 Home sections</span><span class="u">unblocks <b>2</b></span></li>
+                <li><span class="n">4</span><span class="nm">COR-34 Favorites list</span><span class="u">unblocks <b>1</b></span></li>
+                <li><span class="n">5</span><span class="nm">COR-25 Forgot password</span><span class="u">unblocks <b>0</b></span></li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ASSIGN ============ -->
+      <section class="view" id="assign" hidden>
+        <div class="vhead"><h1>ASSIGN</h1><p>Suggested owner for each unblocked ticket &mdash; from load, past fit, and the DO-NEXT order. You approve; nothing auto-assigns.</p></div>
+        <div class="cols c-2a">
+          <div class="panel">
+            <div class="ph">SUGGESTIONS <span class="ph-meta">4</span></div>
+            <div class="pb nopad"><div class="table-wrap">
+              <table class="tbl">
+                <thead><tr><th>TICKET</th><th>&rarr; SUGGEST</th><th>WHY</th><th></th></tr></thead>
+                <tbody>
+                  <tr><td>COR-28 Donate</td><td class="s-pink">kenan</td><td class="s-dim">backend/RLS fit &middot; 1 active</td><td><button class="btn o-green xs">APPROVE</button></td></tr>
+                  <tr><td>COR-25 Forgot-pw</td><td class="s-pink">roma</td><td class="s-dim">free &middot; good beginner tkt</td><td><button class="btn o-green xs">APPROVE</button></td></tr>
+                  <tr><td>COR-19 Home</td><td class="s-pink">lahari</td><td class="s-dim">owns Home (COR-19)</td><td><button class="btn o-green xs">APPROVE</button></td></tr>
+                  <tr><td>COR-34 Favorites</td><td class="s-pink">willow</td><td class="s-dim">owns favorites track</td><td><button class="btn o-green xs">APPROVE</button></td></tr>
+                </tbody>
+              </table>
+            </div></div>
+          </div>
+          <div class="panel">
+            <div class="ph">ROSTER_LOAD <span class="ph-meta">ACTIVE TKTS</span></div>
+            <div class="pb">
+              <ul class="load">
+                <li><span>tess <span class="muted">lead</span></span><span class="cnt free">0</span></li>
+                <li><span>kenan <span class="muted">lead</span></span><span class="cnt">1</span></li>
+                <li><span>neha <span class="muted">lead</span></span><span class="cnt">1</span></li>
+                <li><span>roma</span><span class="cnt free">0</span></li>
+                <li><span>enaika</span><span class="cnt">1</span></li>
+                <li><span>willow</span><span class="cnt">1</span></li>
+                <li><span>lahari</span><span class="cnt">1</span></li>
+                <li><span>dana</span><span class="cnt">1</span></li>
+                <li><span>samantha</span><span class="cnt free">0</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ LEAD_DESK ============ -->
+      <section class="view" id="leaddesk" hidden>
+        <div class="vhead"><h1>LEAD DESK</h1><p>Ad-hoc lead / ops work you hand to another lead. Writes to the <b style="color:var(--green)">Lead Ops</b> Linear project + Slack-DMs them. The sweeps never touch these.</p></div>
+        <div class="cols c-2a">
+          <div class="panel p">
+            <div class="ph pink">DELEGATED <span class="ph-meta">2 OPEN</span></div>
+            <div class="pb">
+              <ul class="tasks">
+                <li><span class="dot open"></span>Schedule Diane single-merchant meeting<span class="due">Fri</span><span class="to">&rarr; neha</span></li>
+                <li><span class="dot open"></span>Chase faculty advisor: GitHub Team<span class="to">&rarr; kenan</span></li>
+                <li><span class="dot done"></span><span class="done-txt">Create Lead Ops Linear project</span><span class="to">&rarr; me</span></li>
+                <li><span class="dot done"></span><span class="done-txt">Book room &middot; next work session</span><span class="to">&rarr; neha</span></li>
+              </ul>
+              <button class="btn pink sm">+ DELEGATE</button>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="ph">NEW_TASK</div>
+            <div class="pb">
+              <p class="note">title &middot; assignee &middot; optional due date. On save it creates a Lead Ops issue assigned to them and pings them on Slack.</p>
+              <div style="color:var(--dim);font-size:.8rem">&gt; title_____________________________<span class="cursor">&#9612;</span><br>&gt; to: <span class="s-pink">neha</span> &nbsp; due: <span class="s-amber">—</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ROSTER ============ -->
+      <section class="view" id="roster" hidden>
+        <div class="vhead"><h1>ROSTER</h1><p>The team, from <b style="color:var(--green)">shared/roster.ts</b> &mdash; the Linear&harr;GitHub&harr;Slack identity map the sweeps and lead desk resolve people through.</p></div>
+        <div class="panel">
+          <div class="ph">MEMBERS <span class="ph-meta">12</span></div>
+          <div class="pb nopad"><div class="table-wrap">
+            <table class="tbl">
+              <thead><tr><th>NAME</th><th>NETID</th><th>GITHUB</th><th>ROLE</th></tr></thead>
+              <tbody>
+                <tr><td>Hyunsuh (Tess) Lee</td><td class="s-dim">tpl52</td><td>tpl52-tech</td><td class="s-pink">lead</td></tr>
+                <tr><td>Kenan Tat</td><td class="s-dim">ktt38</td><td>Kenan-t</td><td class="s-pink">lead</td></tr>
+                <tr><td>Neha Bommireddy</td><td class="s-dim">nb644</td><td>nehabommireddy</td><td class="s-pink">lead</td></tr>
+                <tr><td>Enaika Kishnani</td><td class="s-dim">ek756</td><td>enaikak</td><td class="s-dim">member</td></tr>
+                <tr><td>Willow Chen</td><td class="s-dim">wc697</td><td>willowchen2</td><td class="s-dim">member</td></tr>
+                <tr><td>Renee Gowda</td><td class="s-dim">rsg276</td><td>reneegowda</td><td class="s-dim">member</td></tr>
+                <tr><td>Roma Rangaswamy</td><td class="s-dim">rr829</td><td>RomaR2007</td><td class="s-dim">member</td></tr>
+                <tr><td>Sabrina Gerson</td><td class="s-dim">sjg326</td><td>sjg326</td><td class="s-dim">member</td></tr>
+                <tr><td>Samantha Ahn</td><td class="s-dim">sa2389</td><td>SamanthaAhn17</td><td class="s-dim">member</td></tr>
+                <tr><td>Karan Singh Madia</td><td class="s-dim">km2253</td><td>ksm0712</td><td class="s-dim">member</td></tr>
+                <tr><td>Lahari Bandaru</td><td class="s-dim">lb825</td><td>Liribee</td><td class="s-dim">member</td></tr>
+                <tr><td>Dana Ryu</td><td class="s-dim">er559</td><td>danaryu2007-oss</td><td class="s-dim">member</td></tr>
+              </tbody>
+            </table>
+          </div></div>
+        </div>
+      </section>
+
+      <!-- ============ ASK AO (plain chat, not the TUI) ============ -->
+      <section class="view" id="chat" hidden>
+        <div class="chat-wrap">
+          <div class="chat-top">
+            <div class="chat-title">Ask Borderless</div>
+            <div class="chat-ctx">context loaded &middot; sweeps &middot; tickets &middot; roster &middot; events &middot; PRD &middot; ARCHITECTURE.md</div>
+          </div>
+          <div class="chat-stream">
+            <div class="cmsg user"><div class="crole">You</div><div class="ctext">I'm confused how Verifying works after a merge. We have no staging env — how does a QA engineer actually test on prod? And when does the app hit the App Store / OTAs?</div></div>
+            <div class="cmsg ai"><div class="crole">Borderless</div><div class="ctext">Right now your "environment" IS Expo Go pointed at the one Supabase/Firebase project. To verify a merged ticket, QA pulls main, runs it in Expo Go, and checks against the real backend — no deploy, no staging. The backend is a single shared project, so tests do write to the real DB (safe enough: RLS + throwaway accounts + seed data).
+
+The app only leaves Expo Go at the first EAS build (Phase 4, when Stripe's native SDK forces it) → TestFlight / internal. App Store / Play submission is a post-Phase-4 launch milestone, and EAS Update (OTA for JS-only changes) exists only once you have EAS builds. Before that, pulling the repo IS the update.</div></div>
+            <div class="cmsg user"><div class="crole">You</div><div class="ctext">COR-36 gave up after 8 cycles. Merge the partial, or reassign?</div></div>
+            <div class="cmsg ai"><div class="crole">Borderless</div><div class="ctext">Reassign — don't merge. The reviewer flagged the acceptance criteria as unmet (the Realtime trigger), and the late assignee never submitted anything to coach on. It's also on the critical path (unblocks 3), so it's worth a real owner: suggest kenan (owns the RLS / notifications area, 1 active). Want me to reassign + comment why?</div></div>
+          </div>
+          <div class="chat-input">
+            <div class="ci-field">Ask anything about the project or what Borderless is working on…<span class="cursor">&#9612;</span></div>
+            <button class="ci-send">Send</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  const navs = document.querySelectorAll(".nav[data-view]");
+  const views = document.querySelectorAll(".view");
+  const crumb = document.getElementById("crumb-view");
+  navs.forEach((n) => n.addEventListener("click", () => {
+    navs.forEach((x) => x.classList.remove("active"));
+    n.classList.add("active");
+    const id = n.dataset.view;
+    views.forEach((v) => { v.hidden = v.id !== id; });
+    crumb.textContent = n.textContent;
+    window.scrollTo(0, 0);
+  }));
+</script>

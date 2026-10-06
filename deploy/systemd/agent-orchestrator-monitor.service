@@ -1,0 +1,21 @@
+# The box monitor daemon (design §17.2, §17.5). Installed as a systemd --user unit on the devbox.
+# FLOTILLA -> AO. Autonomy/alerts authority is carried in the EnvironmentFile, never here
+# ("a deploy ships code, not authority" — design §17.5).
+[Unit]
+Description=agent-orchestrator box monitor daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=AO_HOME=%h/.agent-orchestrator-monitor
+Environment=AO_LOCAL_DEVBOX=1
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=%h/.agent-orchestrator-monitor/env
+WorkingDirectory=%h/agent-orchestrator-monitor
+ExecStart=%h/.bun/bin/bun run %h/agent-orchestrator-monitor/src/daemon/box/index.ts
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,29 @@
+{
+  "name": "borderless",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Borderless — the lead console for the ao fleet supervisor: autonomous in-review & rescue sweeps, live boards, assignment, lead desk, and a context-loaded chat.",
+  "type": "module",
+  "bin": {
+    "ao": "./src/cli/index.ts"
+  },
+  "scripts": {
+    "ao": "bun run src/cli/index.ts",
+    "daemon": "bun run src/daemon/index.ts",
+    "box": "bun run src/daemon/box/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "ink": "^5.0.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.5",
+    "bun-types": "latest",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}

@@ -1,0 +1,8 @@
+# Daily disk hygiene on the box (design §17.6): docker prune, orphaned compose stacks, ad-hoc
+# containers older than 5 days, non-ao worktrees whose remote branch vanished, journal + log vacuum.
+[Unit]
+Description=agent-orchestrator daily disk cleanup
+
+[Service]
+Type=oneshot
+ExecStart=%h/agent-orchestrator-monitor/deploy/box/cleanup.sh

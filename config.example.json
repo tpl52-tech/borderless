@@ -1,0 +1,59 @@
+{
+  "__note__": "Copy to ~/.agent-orchestrator/config.json (mode 0600) or run `ao setup`. This file holds ONLY facts about you and your team. Nothing personal is ever defaulted — an absent identity key is a startup error that names the key. Team facts (repo, ctoLogin, ...) may instead live in the tracked defaults.json.",
+
+  "branchOwner": "your-name",
+  "devbox": "ubuntu@devbox.your-tailnet.ts.net",
+  "operatorName": "Your Name",
+  "operatorLogin": "your-github-login",
+  "linearAssignee": "your-linear-user-id",
+  "alertSlackId": "U0XXXXXXXX",
+
+  "repo": "your-org/your-repo",
+  "defaultRemoteCwd": "/home/ubuntu/repos/your-repo",
+  "ctoLogin": "reviewer-login",
+  "ctoBotLogin": "reviewer-bot",
+  "ctoLogins": ["reviewer-login", "reviewer-app[bot]"],
+  "ctoRepo": "your-org/your-repo",
+  "ctoHostMatch": "github.com",
+  "linearWorkspace": "your-workspace-slug",
+  "linearTeamKeys": ["ENG", "OPS"],
+
+  "profiles": [
+    {
+      "id": "your-org-your-repo",
+      "repo": "your-org/your-repo",
+      "defaultBranch": "main",
+      "localCwd": "",
+      "remoteCwd": "/home/ubuntu/repos/your-repo",
+      "ticketProvider": "linear",
+      "githubIssuePrefix": "GH",
+      "linearWorkspace": "your-workspace-slug",
+      "linearTeamKeys": ["ENG"],
+      "ctoLogin": "reviewer-login",
+      "ctoBotLogin": "reviewer-bot",
+      "ctoLogins": ["reviewer-login", "reviewer-app[bot]"],
+      "ctoRepo": "your-org/your-repo",
+      "ctoHostMatch": "github.com",
+      "reviewPolicy": { "codex": true, "cto": true, "reviewBot": true, "ctoFollowups": true }
+    }
+  ],
+
+  "settings": {
+    "spawnDefaults": {
+      "tool": "claude",
+      "model": "auto",
+      "effort": "medium",
+      "location": "local",
+      "usesWorktree": true,
+      "permissions": "full-access"
+    },
+    "ticketPrompt": "",
+    "ticketPromptCodex": "",
+    "ticketPromptCopilot": "",
+    "ticketPromptOpenRouter": "",
+    "focus": {
+      "agentSilenceMs": 600000,
+      "prSilenceMs": 1200000
+    }
+  }
+}

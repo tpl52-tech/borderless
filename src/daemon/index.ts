@@ -27,6 +27,9 @@ import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer } from "./uds-server.ts";
 import { httpLinearClient, syncLinearIssues } from "./linear.ts";
+import { runSweepJob } from "./sweep-engine.ts";
+import { liveSweepDeps } from "./sweep-deps.ts";
+import { createSweepSupervisor, type SweepSupervisor } from "./sweep-supervisor.ts";
 
 export interface Daemon {
   store: Store;
@@ -135,13 +138,32 @@ export function startDaemon(home = stateHome()): Daemon {
 
   // In-review sweep trigger (build order #2): optionally refresh linear_issues from Linear (when an API
   // key + team keys are configured), then enqueue an in-review job per eligible issue. Idempotent.
-  const scanInReview = async (stateName = "In Review"): Promise<{ synced: number; created: number }> => {
+  // Sweep supervisor (build order #3c): run queued sweep jobs through the engine. Live path — wired only
+  // when a repo + its local checkout are configured; otherwise scanInReview just enqueues (as in Phase 2).
+  let sweepSupervisor: SweepSupervisor | null = null;
+  const sweepProfile = config.profiles.find((pr) => pr.repo === config.repo && pr.localCwd);
+  if (config.repo && config.branchOwner && sweepProfile?.localCwd) {
+    const sweepsTask = store.listTasks(true).find((t) => t.name === "Sweeps") ?? store.createTask({ name: "Sweeps" });
+    const sweepDeps = liveSweepDeps({
+      manager, tracker, repo: config.repo, branchOwner: config.branchOwner,
+      taskId: sweepsTask.id, cwd: sweepProfile.localCwd,
+    });
+    sweepSupervisor = createSweepSupervisor({
+      store,
+      run: (job) => runSweepJob(job, store, sweepDeps),
+      onError: (job, err) => console.error(`sweep ${job.ticketKey}:`, err instanceof Error ? err.message : err),
+    });
+  }
+
+  const scanInReview = async (stateName = "In Review"): Promise<{ synced: number; created: number; started: number }> => {
     let synced = 0;
     const teamKeys = config.linearTeamKeys ?? [];
     if (config.linearApiKey && teamKeys.length > 0) {
       ({ synced } = await syncLinearIssues(store, httpLinearClient(config.linearApiKey), teamKeys));
     }
-    return { synced, created: store.enqueueInReviewSweeps(stateName).length };
+    const created = store.enqueueInReviewSweeps(stateName).length;
+    const started = sweepSupervisor?.pickup().length ?? 0; // kick the engine on the newly-queued jobs
+    return { synced, created, started };
   };
 
   server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview });

@@ -312,5 +312,7 @@ export interface LinearIssue {
   url: string | null;
   priority: number | null;
   blockedBy: string[];       // issue ids this one is blocked by
+  dueDate: number | null;    // epoch ms; feeds the rescue overdue check (PRD §5)
+  labels: string[];          // label names; `lead-level` excludes a ticket from rescue
   updatedAt: number | null;
 }

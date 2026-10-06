@@ -268,6 +268,11 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE sweep_job ADD COLUMN session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL;
   `,
+  // --- step 3: rescue-sweep eligibility data on linear_issues (PRD §5: overdue + not lead-level) -----
+  `
+  ALTER TABLE linear_issues ADD COLUMN due_date INTEGER;
+  ALTER TABLE linear_issues ADD COLUMN labels TEXT NOT NULL DEFAULT '[]';
+  `,
 ];
 
 /**
@@ -279,6 +284,8 @@ export const MIGRATIONS: string[] = [
  */
 export const HEAL_COLUMNS: Array<[table: string, column: string, ddl: string]> = [
   ["sweep_job", "session_id", "TEXT REFERENCES sessions(id) ON DELETE SET NULL"], // step 2
+  ["linear_issues", "due_date", "INTEGER"], // step 3
+  ["linear_issues", "labels", "TEXT NOT NULL DEFAULT '[]'"], // step 3
 ];
 
 /**
@@ -342,6 +349,7 @@ function rowToLinearIssue(r: Row): LinearIssue {
     stateName: r.state_name ?? null, stateType: r.state_type ?? null, assignee: r.assignee ?? null,
     projectId: r.project_id ?? null, teamKey: r.team_key ?? null, url: r.url ?? null,
     priority: r.priority ?? null, blockedBy: r.blocked_by ? JSON.parse(r.blocked_by) : [],
+    dueDate: r.due_date ?? null, labels: r.labels ? JSON.parse(r.labels) : [],
     updatedAt: r.updated_at ?? null,
   };
 }
@@ -814,19 +822,21 @@ export class Store {
     id: string; identifier: string; title?: string;
     stateName?: string | null; stateType?: string | null; assignee?: string | null;
     projectId?: string | null; teamKey?: string | null; url?: string | null;
-    priority?: number | null; blockedBy?: string[]; updatedAt?: number | null;
+    priority?: number | null; blockedBy?: string[]; dueDate?: number | null; labels?: string[];
+    updatedAt?: number | null;
   }): void {
     this.db.run(
-      `INSERT INTO linear_issues (id, identifier, project_id, team_key, title, url, state_name, state_type, assignee, priority, blocked_by, updated_at, synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO linear_issues (id, identifier, project_id, team_key, title, url, state_name, state_type, assignee, priority, blocked_by, due_date, labels, updated_at, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          identifier = excluded.identifier, project_id = excluded.project_id, team_key = excluded.team_key,
          title = excluded.title, url = excluded.url, state_name = excluded.state_name,
          state_type = excluded.state_type, assignee = excluded.assignee, priority = excluded.priority,
-         blocked_by = excluded.blocked_by, updated_at = excluded.updated_at, synced_at = excluded.synced_at`,
+         blocked_by = excluded.blocked_by, due_date = excluded.due_date, labels = excluded.labels,
+         updated_at = excluded.updated_at, synced_at = excluded.synced_at`,
       [i.id, i.identifier, i.projectId ?? null, i.teamKey ?? null, i.title ?? "", i.url ?? null,
        i.stateName ?? null, i.stateType ?? null, i.assignee ?? null, i.priority ?? null,
-       JSON.stringify(i.blockedBy ?? []), i.updatedAt ?? null, Date.now()],
+       JSON.stringify(i.blockedBy ?? []), i.dueDate ?? null, JSON.stringify(i.labels ?? []), i.updatedAt ?? null, Date.now()],
     );
   }
 

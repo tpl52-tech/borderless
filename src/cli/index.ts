@@ -17,6 +17,7 @@
  *   ao awake [duration|off|status]
  *   ao sweep ["In Review"]                     sync Linear issues + enqueue in-review sweep jobs
  *   ao rescue [authorize <ticketKey>]          list eligible overdue tickets / authorize a rescue
+ *   ao boards                                  unblocked tickets, ranked by critical-path impact
  */
 
 const SUBCOMMANDS = [
@@ -74,6 +75,23 @@ export async function main(argv: string[]): Promise<void> {
         if (queue.length === 0) console.log("rescue: no eligible overdue tickets");
         else for (const c of queue) console.log(`  ${c.ticketKey}  ${c.daysOverdue}d overdue  ${c.title}`);
       }
+    } finally {
+      client.close();
+    }
+    return;
+  }
+
+  // `ao boards` — the "do next" board: unblocked tickets ranked by how much each unblocks (build order #6).
+  if (sub === "boards") {
+    const { connectDaemon } = await import("../client/daemon-client.ts");
+    const { paths } = await import("../shared/paths.ts");
+    const client = await connectDaemon(paths().socket).catch(() => {
+      throw new Error("ao boards: daemon not running — start it with `ao` (the TUI) or `bun run src/daemon/index.ts`");
+    });
+    try {
+      const rows = await client.request<Array<{ ticketKey: string; title: string; downstream: number }>>("boards.get");
+      if (rows.length === 0) console.log("boards: nothing unblocked (sync Linear first with `ao sweep`)");
+      else for (const r of rows) console.log(`  ${r.ticketKey}  unblocks ${r.downstream}  ${r.title}`);
     } finally {
       client.close();
     }

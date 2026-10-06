@@ -15,6 +15,7 @@ import {
   FrameKind, FrameDecoder, createFrameWriter, controlFrame, parseControl, parseResize,
   ptyOutputFrame, type Frame, type FrameWriter, type ControlRequest, type ControlEvent,
 } from "../shared/wire.ts";
+import { doNext } from "../shared/boards.ts";
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { WorkItemMonitor } from "./monitors/work-item.ts";
@@ -214,6 +215,12 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
         return deps.rescueScan();
       case "rescue.authorize":
         return deps.rescueAuthorize(String(p.ticket ?? ""));
+
+      // --- boards (PRD §7): pure read over synced linear_issues, no live I/O ---
+      case "boards.get":
+        return doNext(store.listLinearIssues()).map((e) => ({
+          ticketKey: e.issue.identifier, title: e.issue.title, downstream: e.downstream,
+        }));
 
       // --- usage / quota ---
       case "usage.get":

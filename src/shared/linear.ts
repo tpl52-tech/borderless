@@ -22,6 +22,8 @@ export interface LinearIssueUpsert {
   projectId: string | null;
   teamKey: string | null;
   priority: number | null;
+  dueDate: number | null; // epoch ms; feeds the rescue overdue check (PRD §5)
+  labels: string[]; // label names; `lead-level` excludes a ticket from rescue
   updatedAt: number | null; // epoch ms
 }
 
@@ -38,11 +40,12 @@ query BorderlessIssues($filter: IssueFilter, $after: String) {
   issues(filter: $filter, first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      id identifier title url priority updatedAt
+      id identifier title url priority updatedAt dueDate
       state { name type }
       assignee { id }
       project { id }
       team { key }
+      labels(first: 20) { nodes { name } }
     }
   }
 }`;
@@ -61,10 +64,12 @@ interface RawIssueNode {
   url?: string | null;
   priority?: number | null;
   updatedAt?: string | null;
+  dueDate?: string | null;
   state?: { name?: string | null; type?: string | null } | null;
   assignee?: { id?: string | null } | null;
   project?: { id?: string | null } | null;
   team?: { key?: string | null } | null;
+  labels?: { nodes?: Array<{ name?: string | null }> } | null;
 }
 interface RawIssuesResponse {
   data?: { issues?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }; nodes?: RawIssueNode[] } };
@@ -76,6 +81,7 @@ export function parseIssuesResponse(json: unknown): IssuesPage {
   const nodes = conn?.nodes ?? [];
   const issues = nodes.map((n): LinearIssueUpsert => {
     const t = n.updatedAt ? Date.parse(n.updatedAt) : NaN;
+    const due = n.dueDate ? Date.parse(n.dueDate) : NaN;
     return {
       id: n.id,
       identifier: n.identifier,
@@ -87,6 +93,8 @@ export function parseIssuesResponse(json: unknown): IssuesPage {
       projectId: n.project?.id ?? null,
       teamKey: n.team?.key ?? null,
       priority: typeof n.priority === "number" ? n.priority : null,
+      dueDate: Number.isNaN(due) ? null : due,
+      labels: (n.labels?.nodes ?? []).map((l) => l.name).filter((name): name is string => typeof name === "string"),
       updatedAt: Number.isNaN(t) ? null : t,
     };
   });

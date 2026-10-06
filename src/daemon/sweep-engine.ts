@@ -11,8 +11,10 @@
  *  - the brain owns the 8-cycle cap + the escalation rules; the engine only executes the decision;
  *  - a new head resets the reviewer verdict, so a stale green review can never clear a fresh head
  *    (the head-freshness contract the pure gate deliberately delegates to the caller);
- *  - the job's session_id always points at the agent currently driving it, so the TUI can attach;
- *  - a failing dep ends the job as `failed`; a safety-iteration bound backstops the loop.
+ *  - the job's session_id points at the agent currently driving it, so the TUI can attach (it stays
+ *    null until an agent spawns — e.g. an in_review PR escalated on sight has no agent to attach to);
+ *  - a failing dep ends the job as `failed`; CI waiting has its own per-head bound (ci-timeout), and a
+ *    separate safety-iteration backstop catches only a genuine logic bug.
  */
 
 import type { Store } from "./store.ts";
@@ -62,13 +64,11 @@ export interface SweepEngineDeps {
   wait(ms: number): Promise<void>;
   /** CI poll interval, ms. */
   ciPollMs: number;
+  /** Max CI polls to wait per head before giving up on CI as a ci-timeout (bounds the wait, not the loop). */
+  maxCiWaits: number;
 }
 
 export type SweepOutcome = "ready" | "needs_human" | "failed";
-
-// The brain's 8-cycle cap is the real limit; this only bounds total loop iterations so a logic/dep bug
-// can't spin forever. A cycle is at most worker + a few CI polls + a review.
-const SAFETY_ITERATIONS = MAX_CYCLES * 4 + 8;
 
 const WORKER_STATE: Record<SweepKind, SweepState> = { in_review: "fixing", rescue: "implementing" };
 
@@ -84,8 +84,13 @@ function deriveEscalation(tiers: DangerTier[], judgmentCall: string | null): str
 export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngineDeps): Promise<SweepOutcome> {
   let current = seed;
   let cycles = seed.cycles;
+  let ciWaits = 0; // consecutive CI polls for the current head (reset on every new head)
   let review: ReviewVerdict | null = null;
   let hasHead = seed.prNumber != null || seed.headSha != null;
+
+  // Pure logic-bug backstop: generously bounded so legitimate CI waiting (which has its own per-head
+  // ci-timeout below) can never reach it — only a genuine loop bug can.
+  const safetyMax = MAX_CYCLES * (deps.maxCiWaits + 4) + 8;
 
   const transition = (patch: Parameters<Store["transitionSweepJob"]>[1]): void => {
     current = store.transitionSweepJob(seed.id, patch);
@@ -100,14 +105,19 @@ export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngin
     transition({ state: WORKER_STATE[seed.kind] });
     const result = await deps.spawnWorker(current, feedback);
     const hadPr = current.prNumber != null;
-    transition({ sessionId: result.sessionId, headSha: result.headSha, prNumber: result.prNumber });
+    // Coalesce: a fix cycle pushes a new head but keeps the same PR; never null out an existing PR/head.
+    transition({
+      sessionId: result.sessionId,
+      headSha: result.headSha ?? current.headSha,
+      prNumber: result.prNumber ?? current.prNumber,
+    });
     store.recordSweepEvent(seed.id, "spawn", { role: "worker", sessionId: result.sessionId, head: result.headSha });
     if (!hadPr && result.prNumber != null) store.recordSweepEvent(seed.id, "pr_open", { prNumber: result.prNumber });
     return result;
   };
 
   try {
-    for (let iter = 0; iter < SAFETY_ITERATIONS; iter++) {
+    for (let iter = 0; iter < safetyMax; iter++) {
       // No PR/head yet (a fresh rescue): the only move is to build it. Honor the cap here too.
       if (!hasHead) {
         if (cycles >= MAX_CYCLES) return finish("needs_human", "8-cycle cap reached before a PR existed");
@@ -116,13 +126,14 @@ export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngin
         transition({ cycles });
         hasHead = built.prNumber != null || built.headSha != null;
         review = null;
+        ciWaits = 0; // new head
         continue;
       }
 
       const poll = await deps.pollCi(current);
       const escalation = deriveEscalation(dangerousTiers(poll.changedPaths), review?.judgmentCall ?? null);
       const gate = evaluateGate({
-        kind: current.kind,
+        kind: seed.kind,
         preservationProven: review?.preservationProven ?? null,
         checks: poll.checks,
         reviewerRedFindings: review?.redFindings ?? null,
@@ -136,6 +147,11 @@ export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngin
         case "needs-human":
           return finish("needs_human", action.reason);
         case "wait-ci":
+          // Per-head bound: give up on CI that never settles with a distinct, legible reason.
+          if (ciWaits >= deps.maxCiWaits) {
+            return finish("needs_human", `CI never settled after ${deps.maxCiWaits} polls (ci-timeout)`);
+          }
+          ciWaits++;
           transition({ state: "ci" });
           await deps.wait(deps.ciPollMs);
           break;
@@ -150,10 +166,15 @@ export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngin
           cycles++;
           transition({ cycles });
           review = null; // new head — the reviewer must re-run and CI re-polls fresh
+          ciWaits = 0;
           break;
+        default: {
+          const _exhaustive: never = action.kind; // compile-time guard: every action kind is handled
+          throw new Error(`sweep-engine: unhandled action ${String(_exhaustive)}`);
+        }
       }
     }
-    return finish("needs_human", "engine safety-iteration bound exceeded");
+    return finish("needs_human", "engine safety-iteration bound exceeded (logic bug)");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     store.recordSweepEvent(seed.id, "error", { message });

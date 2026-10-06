@@ -272,10 +272,14 @@ export const MIGRATIONS: string[] = [
 
 /**
  * Columns re-added on every open as a backstop against a spliced/rolled-back migration history
- * (design §6 healMissingColumns). Each entry: [table, column, DDL fragment].
- * TODO: populate as columns are added post-step-0.
+ * (design §6 healMissingColumns). Each entry is [table, column, DDL fragment] where the fragment is
+ * what follows `ALTER TABLE <table> ADD COLUMN <column> ...`. Register every column added after step 0.
+ * NOTE: the apply pass in migrate() is still a TODO, so these entries are a forward-looking register —
+ * nothing consumes them yet; wiring the heal pass is a later slice.
  */
-export const HEAL_COLUMNS: Array<[table: string, column: string, ddl: string]> = [];
+export const HEAL_COLUMNS: Array<[table: string, column: string, ddl: string]> = [
+  ["sweep_job", "session_id", "TEXT REFERENCES sessions(id) ON DELETE SET NULL"], // step 2
+];
 
 /**
  * Run the append-only migrations under `PRAGMA user_version`, each step in one transaction, then

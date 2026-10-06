@@ -277,6 +277,7 @@ export interface SweepJob {
   assignee: string | null;
   prNumber: number | null;
   headSha: string | null;  // in_review: PR head; rescue: null until a PR opens
+  sessionId: string | null; // the agent session driving this job; null while queued, set on spawn
   state: SweepState;
   cycles: number;          // fix/implement -> review loop; cap 8
   gate: unknown | null;    // { ac, ci, findings, grade }

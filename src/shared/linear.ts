@@ -6,7 +6,11 @@
  * so `roster.memberByLinearId` can resolve it to a person (see `src/shared/roster.ts`).
  */
 
-/** One `linear_issues` upsert row, mapped from a Linear GraphQL issue node. */
+/**
+ * One `linear_issues` upsert row, mapped from a Linear GraphQL issue node. Intentionally omits
+ * `blockedBy`: the issues query doesn't fetch blocking relations, so the sync doesn't own that field —
+ * the boards / critical-path work (build order #6) populates it.
+ */
 export interface LinearIssueUpsert {
   id: string; // Linear issue UUID (primary key)
   identifier: string; // e.g. COR-42
@@ -73,8 +77,8 @@ export function parseIssuesResponse(json: unknown): IssuesPage {
   const issues = nodes.map((n): LinearIssueUpsert => {
     const t = n.updatedAt ? Date.parse(n.updatedAt) : NaN;
     return {
-      id: String(n.id),
-      identifier: String(n.identifier),
+      id: n.id,
+      identifier: n.identifier,
       title: n.title ?? "",
       url: n.url ?? null,
       stateName: n.state?.name ?? null,

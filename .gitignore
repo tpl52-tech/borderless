@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+# npm lockfile — this is a Bun project; commit bun.lockb / bun.lock instead
+package-lock.json
+
+# build output
+dist/
+*.tsbuildinfo
+
+# operator config & local state (NEVER commit — identity + secrets live here)
+config.json
+*.env
+.borderless/
+.agent-orchestrator/
+.agent-orchestrator-monitor/
+openrouter-key
+
+# sqlite (state dir only; never in repo, but guard anyway)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# logs
+*.log
+
+# os
+.DS_Store

@@ -1,0 +1,8 @@
+# Watchdog (design §17.5): an enabled lingering unit once never started after a reboot for 75 min,
+# so a timer nudges it. Idempotent `start --no-block` — a no-op if already running.
+[Unit]
+Description=agent-orchestrator monitor watchdog (ensure the service is running)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --user start --no-block agent-orchestrator-monitor.service

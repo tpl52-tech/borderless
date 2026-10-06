@@ -126,12 +126,23 @@ function nextStep(blockers: GateBlocker[]): "spawn-worker" | "spawn-reviewer" | 
 /** The dangerous tiers that always get a human, however the sweep feels about the change (PRD §4). */
 export type DangerTier = "auth" | "money" | "schema" | "ci-config";
 
-// Segment keywords per tier. Matched against path segments (split on / . _ -), so `src/auth/login.ts`
-// flags `auth` without `author.ts` doing so. Conservative on purpose: the independent reviewer is the
-// backstop, and a missed tier is worse than an extra human glance, so extend these as the app grows.
+// Segment keywords per tier, matched against path segments (split on / . _ -), so `src/auth/login.ts`
+// flags `auth` while `author.ts` does not. Because a MISSED dangerous tier is worse than an extra human
+// glance, the auth list spells out the common variants (authentication/authorize/authz/authn/...) instead
+// of leaning on a bare "auth" segment. Two bare words are deliberately EXCLUDED to avoid self-collisions
+// in this codebase: "token"/"tokens" (design tokens, push_tokens — not auth) and "price"/"pricing" (LLM
+// usage cost in shared/pricing.ts — not money-movement); real auth/money code is caught by the folder and
+// feature words below. Extend the lists as the app grows.
 const DANGER_KEYWORDS: Record<Exclude<DangerTier, "ci-config">, readonly string[]> = {
-  auth: ["auth", "login", "logout", "session", "sessions", "password", "credential", "credentials", "oauth", "jwt", "token", "tokens"],
-  money: ["billing", "payment", "payments", "payout", "payouts", "charge", "charges", "stripe", "invoice", "checkout", "subscription", "price", "pricing"],
+  auth: [
+    "auth", "authn", "authz", "authentication", "authenticate", "authenticator",
+    "authorization", "authorize", "login", "logout", "session", "sessions",
+    "password", "credential", "credentials", "oauth", "jwt",
+  ],
+  money: [
+    "billing", "payment", "payments", "payout", "payouts", "charge", "charges",
+    "stripe", "invoice", "checkout", "subscription",
+  ],
   schema: ["migration", "migrations", "schema", "rls"],
 };
 

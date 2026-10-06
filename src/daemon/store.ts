@@ -846,6 +846,11 @@ export class Store {
     return rows.map(rowToLinearIssue);
   }
 
+  getLinearIssue(id: string): LinearIssue | null {
+    const row = this.db.query("SELECT * FROM linear_issues WHERE id = ?").get(id) as Row | null;
+    return row ? rowToLinearIssue(row) : null;
+  }
+
   /**
    * Enqueue an in-review sweep job for every Linear issue in `stateName` that does not
    * already have an active in-review job. The first live slice: linear_issues -> sweep_job.

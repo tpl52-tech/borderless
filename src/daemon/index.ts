@@ -25,11 +25,13 @@ import { startUsageLedger, type UsageLedger } from "./monitors/usage.ts";
 import { reapWorktrees } from "./worktree.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
-import { startUdsServer, type UdsServer } from "./uds-server.ts";
+import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
 import { httpLinearClient, syncLinearIssues } from "./linear.ts";
 import { runSweepJob } from "./sweep-engine.ts";
 import { liveSweepDeps, needsHydration, hydrateInReviewJob } from "./sweep-deps.ts";
 import { createSweepSupervisor, type SweepSupervisor } from "./sweep-supervisor.ts";
+import { scanRescues, authorizeRescue, liveProgressCheck } from "./rescue-scan.ts";
+import { memberByLinearId } from "../shared/roster.ts";
 
 export interface Daemon {
   store: Store;
@@ -141,6 +143,13 @@ export function startDaemon(home = stateHome()): Daemon {
   // Sweep supervisor (build order #3c): run queued sweep jobs through the engine. Live path — wired only
   // when a repo + its local checkout are configured; otherwise scanInReview just enqueues (as in Phase 2).
   let sweepSupervisor: SweepSupervisor | null = null;
+  // Rescue deps fall back to no-ops when no repo is configured: scan finds nothing, authorize still records
+  // a rescue job (a configured daemon would run it) but can't start one without a supervisor.
+  let rescueScan: UdsServerDeps["rescueScan"] = async () => [];
+  let rescueAuthorize: UdsServerDeps["rescueAuthorize"] = (ticket) => {
+    const r = authorizeRescue(store, ticket);
+    return { ticketKey: r.job.ticketKey, created: r.created, started: false };
+  };
   const sweepProfile = config.profiles.find((pr) => pr.repo === config.repo && pr.localCwd);
   if (config.repo && config.branchOwner && sweepProfile?.localCwd) {
     const repo = config.repo;
@@ -149,7 +158,7 @@ export function startDaemon(home = stateHome()): Daemon {
     const sweepDeps = liveSweepDeps({
       manager, tracker, repo, branchOwner, taskId: sweepsTask.id, cwd: sweepProfile.localCwd, home,
     });
-    sweepSupervisor = createSweepSupervisor({
+    const supervisor = createSweepSupervisor({
       store,
       run: async (job) => {
         // in-review jobs are enqueued with no PR; discover + persist it before the engine drives them.
@@ -158,6 +167,21 @@ export function startDaemon(home = stateHome()): Daemon {
       },
       onError: (job, err) => console.error(`sweep ${job.ticketKey}:`, err instanceof Error ? err.message : err),
     });
+    sweepSupervisor = supervisor;
+
+    const progress = liveProgressCheck(repo, branchOwner);
+    rescueScan = async () => {
+      const candidates = await scanRescues(store, {
+        now: Date.now(), checkProgress: progress,
+        isRosterMember: (id) => id != null && memberByLinearId(id) != null,
+      });
+      return candidates.map((c) => ({ ticketId: c.issue.id, ticketKey: c.issue.identifier, title: c.issue.title, daysOverdue: c.daysOverdue }));
+    };
+    rescueAuthorize = (ticket) => {
+      const r = authorizeRescue(store, ticket);
+      const started = r.created && supervisor.pickup().includes(r.job.id);
+      return { ticketKey: r.job.ticketKey, created: r.created, started };
+    };
   }
 
   const scanInReview = async (stateName = "In Review"): Promise<{ synced: number; created: number; started: number }> => {
@@ -171,7 +195,7 @@ export function startDaemon(home = stateHome()): Daemon {
     return { synced, created, started };
   };
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview });
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize });
 
   // Broadcast runtime status transitions to all clients (design §8.2 manager fan-out).
   tracker.onChange(({ sessionId, status }) =>

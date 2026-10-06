@@ -100,8 +100,11 @@ export interface SweepDecisionInput {
 export function nextSweepAction(input: SweepDecisionInput): SweepAction {
   const { gate, cycles, escalation } = input;
 
-  if (gate.pass) return { kind: "ready" };
+  // Escalation outranks everything, including a passing gate: a dangerous tier or a no-clearly-better
+  // judgment call always gets an explicit human decision, never an auto-"ready" rubber-stamp (PRD §4,
+  // "risky tiers always get explicit human review").
   if (escalation) return { kind: "needs-human", reason: escalation };
+  if (gate.pass) return { kind: "ready" };
 
   const step = nextStep(gate.blockers);
 

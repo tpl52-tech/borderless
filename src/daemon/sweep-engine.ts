@@ -118,8 +118,11 @@ export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngin
 
   try {
     for (let iter = 0; iter < safetyMax; iter++) {
-      // No PR/head yet (a fresh rescue): the only move is to build it. Honor the cap here too.
+      // No PR/head yet. Only a rescue builds from scratch; an in-review sweep must arrive with its PR
+      // (hydrated by the wiring), so with no PR there is nothing to drive — stop for a human rather than
+      // "implement" an existing PR blindly. Honor the cap for the rescue bootstrap too.
       if (!hasHead) {
+        if (seed.kind !== "rescue") return finish("needs_human", "in-review sweep has no PR to drive");
         if (cycles >= MAX_CYCLES) return finish("needs_human", "8-cycle cap reached before a PR existed");
         const built = await runWorker({ initial: true, blockers: [], review: null });
         cycles++;

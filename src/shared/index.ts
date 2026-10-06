@@ -22,3 +22,4 @@ export * from "./remote.ts";
 export * from "./roster.ts";
 export * from "./sweep-gate.ts";
 export * from "./rescue.ts";
+export * from "./boards.ts";

@@ -24,26 +24,37 @@ export interface RescueEligibility {
 }
 
 const LEAD_LEVEL = "lead-level";
+const DAY_MS = 86_400_000;
 
 /**
- * Eligible iff ALL hold (PRD §5): the due date has passed · NOT labeled `lead-level` · no meaningful
- * progress · the assignee is a roster member · the ticket isn't already done/canceled. Returns the
- * failing reasons so the console can explain why a ticket is or isn't a rescue candidate.
+ * Eligible iff ALL of PRD §5's four conditions hold — the due date has passed · NOT labeled `lead-level` ·
+ * no meaningful progress · the assignee is a roster member — plus one added safety guard: the ticket isn't
+ * already done/canceled. Returns the failing reasons so the console can explain a ticket's status.
+ *
+ * Overdue uses "the due day has fully elapsed": Linear's dueDate is a timeless UTC date, so a ticket due D
+ * is overdue only once `now >= D + 1 day` — never while the due day is still in progress (PRD §5 "passed").
  */
 export function rescueEligibility(
   issue: Pick<LinearIssue, "dueDate" | "labels" | "assignee" | "stateType">,
   ctx: RescueContext,
 ): RescueEligibility {
   const reasons: string[] = [];
-  if (issue.dueDate == null || issue.dueDate >= ctx.now) reasons.push("not overdue");
+  if (issue.dueDate == null) reasons.push("no due date");
+  else if (ctx.now < issue.dueDate + DAY_MS) reasons.push("not overdue");
   if (issue.labels.includes(LEAD_LEVEL)) reasons.push("lead-level");
   if (ctx.hasProgress) reasons.push("has progress");
   if (!issue.assignee || !ctx.isRosterMember) reasons.push("assignee not a roster member");
+  // Beyond §5's four: a manually done/canceled ticket isn't work to rescue (and hasProgress alone can
+  // miss a ticket closed with no branch/commits/PR).
   if (issue.stateType === "completed" || issue.stateType === "canceled") reasons.push("already done/canceled");
   return { eligible: reasons.length === 0, reasons };
 }
 
-/** Whole days a ticket is overdue (for the "auto-implemented … N days overdue" comment, PRD §5). */
+/**
+ * Whole days a ticket is overdue, from its due date (for the "auto-implemented … N days overdue" comment,
+ * PRD §5). Since {@link rescueEligibility} only fires once the due day has elapsed, this is ≥ 1 for any
+ * actually-overdue ticket.
+ */
 export function daysOverdue(dueDate: number, now: number): number {
-  return Math.max(0, Math.floor((now - dueDate) / 86_400_000));
+  return Math.max(0, Math.floor((now - dueDate) / DAY_MS));
 }

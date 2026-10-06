@@ -262,14 +262,24 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS ix_sweep_event_job ON sweep_event(job_id, at);
   `,
+  // --- step 2: link a sweep job to the agent session driving it (PRD §4; the TUI attaches via it) ---
+  // Nullable: a job is queued before any agent exists, and the link is set when the fixer/implementer
+  // is spawned. ON DELETE SET NULL keeps the durable job row if its session is later reaped.
+  `
+  ALTER TABLE sweep_job ADD COLUMN session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL;
+  `,
 ];
 
 /**
  * Columns re-added on every open as a backstop against a spliced/rolled-back migration history
- * (design §6 healMissingColumns). Each entry: [table, column, DDL fragment].
- * TODO: populate as columns are added post-step-0.
+ * (design §6 healMissingColumns). Each entry is [table, column, DDL fragment] where the fragment is
+ * what follows `ALTER TABLE <table> ADD COLUMN <column> ...`. Register every column added after step 0.
+ * NOTE: the apply pass in migrate() is still a TODO, so these entries are a forward-looking register —
+ * nothing consumes them yet; wiring the heal pass is a later slice.
  */
-export const HEAL_COLUMNS: Array<[table: string, column: string, ddl: string]> = [];
+export const HEAL_COLUMNS: Array<[table: string, column: string, ddl: string]> = [
+  ["sweep_job", "session_id", "TEXT REFERENCES sessions(id) ON DELETE SET NULL"], // step 2
+];
 
 /**
  * Run the append-only migrations under `PRAGMA user_version`, each step in one transaction, then
@@ -340,6 +350,7 @@ function rowToSweepJob(r: Row): SweepJob {
   return {
     id: r.id, kind: r.kind as SweepKind, ticketId: r.ticket_id, ticketKey: r.ticket_key,
     assignee: r.assignee ?? null, prNumber: r.pr_number ?? null, headSha: r.head_sha ?? null,
+    sessionId: r.session_id ?? null,
     state: r.state as SweepState, cycles: r.cycles,
     gate: r.gate == null ? null : JSON.parse(r.gate), reason: r.reason ?? null,
     createdAt: r.created_at, updatedAt: r.updated_at,
@@ -767,19 +778,20 @@ export class Store {
     return (this.db.query(sql).all(...vals) as Row[]).map(rowToSweepJob);
   }
 
-  /** Patch a job's mutable fields (state, cycles, pr, head, gate, reason); bumps updated_at. */
+  /** Patch a job's mutable fields (state, cycles, pr, head, session, gate, reason); bumps updated_at. */
   transitionSweepJob(id: string, patch: {
     state?: SweepState; cycles?: number; prNumber?: number | null;
-    headSha?: string | null; gate?: unknown; reason?: string | null;
+    headSha?: string | null; sessionId?: string | null; gate?: unknown; reason?: string | null;
   }): SweepJob {
     const sets: string[] = ["updated_at = ?"];
     const vals: any[] = [Date.now()];
-    if (patch.state !== undefined)    { sets.push("state = ?");     vals.push(patch.state); }
-    if (patch.cycles !== undefined)   { sets.push("cycles = ?");    vals.push(patch.cycles); }
-    if (patch.prNumber !== undefined) { sets.push("pr_number = ?"); vals.push(patch.prNumber); }
-    if (patch.headSha !== undefined)  { sets.push("head_sha = ?");  vals.push(patch.headSha); }
-    if (patch.gate !== undefined)     { sets.push("gate = ?");      vals.push(patch.gate === null ? null : JSON.stringify(patch.gate)); }
-    if (patch.reason !== undefined)   { sets.push("reason = ?");    vals.push(patch.reason); }
+    if (patch.state !== undefined)     { sets.push("state = ?");      vals.push(patch.state); }
+    if (patch.cycles !== undefined)    { sets.push("cycles = ?");     vals.push(patch.cycles); }
+    if (patch.prNumber !== undefined)  { sets.push("pr_number = ?");  vals.push(patch.prNumber); }
+    if (patch.headSha !== undefined)   { sets.push("head_sha = ?");   vals.push(patch.headSha); }
+    if (patch.sessionId !== undefined) { sets.push("session_id = ?"); vals.push(patch.sessionId); }
+    if (patch.gate !== undefined)      { sets.push("gate = ?");       vals.push(patch.gate === null ? null : JSON.stringify(patch.gate)); }
+    if (patch.reason !== undefined)    { sets.push("reason = ?");     vals.push(patch.reason); }
     this.db.run(`UPDATE sweep_job SET ${sets.join(", ")} WHERE id = ?`, [...vals, id]);
     return this.getSweepJob(id)!;
   }

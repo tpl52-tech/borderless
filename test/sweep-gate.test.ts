@@ -61,6 +61,11 @@ describe("nextSweepAction (PRD §4-§5)", () => {
     expect(a).toEqual({ kind: "needs-human", reason: "dangerous tier: auth" });
   });
 
+  test("escalation outranks even a passing gate (dangerous tiers never auto-ready)", () => {
+    const a = decide({ gate: result([]), escalation: "dangerous tier: auth" });
+    expect(a).toEqual({ kind: "needs-human", reason: "dangerous tier: auth" });
+  });
+
   test("blocker routing: fail CI → worker; pending CI → wait; unrun reviewer → reviewer; red → worker", () => {
     expect(decide({ gate: result(["ci-failing"]) }).kind).toBe("spawn-worker");
     expect(decide({ gate: result(["ci-pending"]) }).kind).toBe("wait-ci");

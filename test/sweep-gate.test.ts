@@ -86,6 +86,11 @@ describe("nextSweepAction (PRD §4-§5)", () => {
     expect(decide({ gate: result(["reviewer-unrun"]), cycles: MAX_CYCLES }).kind).toBe("spawn-reviewer");
   });
 
+  test("escalation outranks the cycle cap (the reason is the escalation, not the cap)", () => {
+    const a = decide({ gate: result(["reviewer-red"]), escalation: "dangerous tier: money", cycles: MAX_CYCLES });
+    expect(a).toEqual({ kind: "needs-human", reason: "dangerous tier: money" });
+  });
+
   test("end to end: evaluateGate → nextSweepAction on a fresh in-review job wants CI to settle", () => {
     const g = evaluateGate({ kind: "in_review", preservationProven: null, checks: { ci: "pending", "secrets-scan": "pending" }, reviewerRedFindings: null });
     expect(nextSweepAction({ cycles: 1, gate: g, escalation: null }).kind).toBe("wait-ci");
@@ -104,6 +109,21 @@ describe("dangerousTiers (PRD §4)", () => {
   test("does not false-positive on lookalike segments or ordinary files", () => {
     expect(dangerousTiers(["src/author.ts"])).toEqual([]); // "author" != "auth" (segment match, not substring)
     expect(dangerousTiers(["src/shared/linear.ts", "README.md"])).toEqual([]);
+  });
+
+  test("auth: catches the common variants, not just a bare 'auth' segment", () => {
+    expect(dangerousTiers(["src/authentication/index.ts"])).toEqual(["auth"]);
+    expect(dangerousTiers(["lib/authenticate.ts"])).toEqual(["auth"]);
+    expect(dangerousTiers(["api/authorization.ts"])).toEqual(["auth"]);
+    expect(dangerousTiers(["src/authz.ts"])).toEqual(["auth"]);
+    expect(dangerousTiers(["src/authn/guard.ts"])).toEqual(["auth"]);
+  });
+
+  test("deliberate exclusions: design tokens and LLM-cost pricing are not dangerous tiers", () => {
+    expect(dangerousTiers(["src/styles/tokens.css"])).toEqual([]);
+    expect(dangerousTiers(["src/design-tokens.ts"])).toEqual([]);
+    expect(dangerousTiers(["src/shared/pricing.ts"])).toEqual([]); // LLM usage cost, not money-movement
+    expect(dangerousTiers(["src/features/price-tag.tsx"])).toEqual([]);
   });
 
   test("collects the distinct tiers across a changeset", () => {

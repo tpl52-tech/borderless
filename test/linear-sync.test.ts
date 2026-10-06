@@ -69,6 +69,14 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
     expect(issues[0]!.labels).toEqual(["lead-level", "intermediate"]);
   });
 
+  test("tolerates a garbled dueDate and null label names", () => {
+    const { issues } = parseIssuesResponse(page([node({
+      dueDate: "not-a-date", labels: { nodes: [{ name: "ok" }, { name: null }] },
+    })]));
+    expect(issues[0]!.dueDate).toBeNull();
+    expect(issues[0]!.labels).toEqual(["ok"]); // null name filtered out
+  });
+
   test("issuesVariables filters by team key and carries the cursor", () => {
     expect(issuesVariables("COR")).toEqual({ filter: { team: { key: { eq: "COR" } } }, after: null });
     expect(issuesVariables("COR", "cur-9").after).toBe("cur-9");

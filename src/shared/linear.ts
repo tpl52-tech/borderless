@@ -45,7 +45,7 @@ query BorderlessIssues($filter: IssueFilter, $after: String) {
       assignee { id }
       project { id }
       team { key }
-      labels(first: 20) { nodes { name } }
+      labels(first: 50) { nodes { name } }  # cap high: missing a lead-level label would mis-admit a rescue
     }
   }
 }`;

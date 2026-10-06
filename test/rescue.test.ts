@@ -18,10 +18,19 @@ describe("rescueEligibility (PRD §5)", () => {
     expect(rescueEligibility(issue(), ctx())).toEqual({ eligible: true, reasons: [] });
   });
 
-  test("not overdue blocks (future due date, or none)", () => {
+  test("overdue only once the due day has fully elapsed (PRD §5 'passed')", () => {
+    // due today (00:00 UTC): still not overdue partway through the day...
+    expect(rescueEligibility(issue({ dueDate: NOW }), ctx({ now: NOW + 14 * 3_600_000 })).reasons).toContain("not overdue");
+    // ...overdue only after a full day has elapsed
+    expect(rescueEligibility(issue({ dueDate: NOW }), ctx({ now: NOW + DAY })).reasons).not.toContain("not overdue");
+    // a future due date is not overdue
     expect(rescueEligibility(issue({ dueDate: NOW + DAY }), ctx()).reasons).toContain("not overdue");
-    expect(rescueEligibility(issue({ dueDate: null }), ctx()).reasons).toContain("not overdue");
-    expect(rescueEligibility(issue({ dueDate: NOW }), ctx()).reasons).toContain("not overdue"); // due exactly now = not yet passed
+  });
+
+  test("a ticket with no due date is reported distinctly (not 'not overdue')", () => {
+    const r = rescueEligibility(issue({ dueDate: null }), ctx());
+    expect(r.reasons).toContain("no due date");
+    expect(r.reasons).not.toContain("not overdue");
   });
 
   test("lead-level tickets are never rescued", () => {

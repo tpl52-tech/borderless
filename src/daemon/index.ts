@@ -28,7 +28,7 @@ import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer } from "./uds-server.ts";
 import { httpLinearClient, syncLinearIssues } from "./linear.ts";
 import { runSweepJob } from "./sweep-engine.ts";
-import { liveSweepDeps } from "./sweep-deps.ts";
+import { liveSweepDeps, needsHydration, hydrateInReviewJob } from "./sweep-deps.ts";
 import { createSweepSupervisor, type SweepSupervisor } from "./sweep-supervisor.ts";
 
 export interface Daemon {
@@ -143,14 +143,19 @@ export function startDaemon(home = stateHome()): Daemon {
   let sweepSupervisor: SweepSupervisor | null = null;
   const sweepProfile = config.profiles.find((pr) => pr.repo === config.repo && pr.localCwd);
   if (config.repo && config.branchOwner && sweepProfile?.localCwd) {
+    const repo = config.repo;
+    const branchOwner = config.branchOwner;
     const sweepsTask = store.listTasks(true).find((t) => t.name === "Sweeps") ?? store.createTask({ name: "Sweeps" });
     const sweepDeps = liveSweepDeps({
-      manager, tracker, repo: config.repo, branchOwner: config.branchOwner,
-      taskId: sweepsTask.id, cwd: sweepProfile.localCwd,
+      manager, tracker, repo, branchOwner, taskId: sweepsTask.id, cwd: sweepProfile.localCwd, home,
     });
     sweepSupervisor = createSweepSupervisor({
       store,
-      run: (job) => runSweepJob(job, store, sweepDeps),
+      run: async (job) => {
+        // in-review jobs are enqueued with no PR; discover + persist it before the engine drives them.
+        const ready = needsHydration(job) ? await hydrateInReviewJob(store, job, { repo, branchOwner }) : job;
+        return runSweepJob(ready, store, sweepDeps);
+      },
       onError: (job, err) => console.error(`sweep ${job.ticketKey}:`, err instanceof Error ? err.message : err),
     });
   }

@@ -7,7 +7,7 @@
  * a rescue needs explicit per-ticket lead authorization (PRD §5, §12).
  */
 
-import type { LinearIssue } from "./types.ts";
+import { LEAD_LEVEL, type LinearIssue } from "./types.ts";
 import { isTerminalState } from "./boards.ts";
 
 export interface RescueContext {
@@ -24,7 +24,6 @@ export interface RescueEligibility {
   reasons: string[];
 }
 
-const LEAD_LEVEL = "lead-level";
 const DAY_MS = 86_400_000;
 
 /**

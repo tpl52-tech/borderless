@@ -338,7 +338,7 @@ async function runDashboard(client: DaemonClient): Promise<Action> {
   return action;
 }
 
-async function ensureDaemon(): Promise<DaemonClient> {
+export async function ensureDaemon(): Promise<DaemonClient> {
   const socket = paths().socket;
   try {
     return await connectDaemon(socket);

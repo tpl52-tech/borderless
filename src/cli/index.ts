@@ -21,6 +21,7 @@
  *   ao assign                                  suggested assignee per unblocked ticket (load-balanced)
  *   ao desk [delegate <who> "<title>" [notes]] list Lead Ops tasks / delegate one (PRD §9 lead desk)
  *   ao ask "<question>" [--yes]                Ask Borderless over live fleet state (PRD §10; --yes acts)
+ *   ao console                                 the lead console TUI (SWEEPS/BOARDS/ASSIGN/LEAD DESK/ROSTER)
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
@@ -140,6 +141,13 @@ export async function main(argv: string[]): Promise<void> {
       const cost = r.costMicros ? ` · $${(r.costMicros / 1e6).toFixed(4)}` : "";
       console.error(`(${r.steps} step${r.steps === 1 ? "" : "s"}${cost})`); // stderr: keeps the answer clean on stdout
     });
+    return;
+  }
+
+  // `ao console` — the Borderless lead console (PRD §11): SWEEPS/BOARDS/ASSIGN/LEAD DESK/ROSTER screens.
+  if (sub === "console") {
+    const { runConsole } = await import("../client/console.tsx");
+    await runConsole();
     return;
   }
 

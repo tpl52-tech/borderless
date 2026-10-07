@@ -244,6 +244,15 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
       case "ask.run":
         return deps.askRun(String(p.question ?? ""), p.allowActions === true);
 
+      // --- console reads (PRD §11 Ink TUI): plain reads for the SWEEPS + ROSTER screens -----------------
+      case "sweep.list":
+        return store.listSweepJobs().map((j) => ({
+          ticketKey: j.ticketKey, kind: j.kind, state: j.state,
+          prNumber: j.prNumber, cycles: j.cycles, reason: j.reason, sessionId: j.sessionId,
+        }));
+      case "roster.get":
+        return ROSTER.map((m) => ({ name: m.name, netid: m.netid, github: m.github, lead: Boolean(m.lead) }));
+
       // --- usage / quota ---
       case "usage.get":
         return store.usageTotals();

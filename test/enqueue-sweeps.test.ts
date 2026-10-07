@@ -21,11 +21,18 @@ describe("enqueueInReviewSweeps (first live slice: linear_issues -> sweep_job)",
     expect(s.enqueueInReviewSweeps().map((j) => j.ticketKey)).toEqual([first[0]!.ticketKey]);
   });
 
-  test("skips lead-level In-Review issues (lead-level work stays off the automation, PRD §2)", () => {
+  test("sweeps lead-level In-Review issues too (lead-level gates only the rescue sweep, not in-review)", () => {
     const s = new Store(":memory:");
     s.upsertLinearIssue({ id: "lead", identifier: "COR-24", stateName: "In Review", labels: ["lead-level"] });
     s.upsertLinearIssue({ id: "normal", identifier: "COR-35", stateName: "In Review", labels: ["intermediate"] });
-    expect(s.enqueueInReviewSweeps().map((j) => j.ticketKey)).toEqual(["COR-35"]); // the lead-level one is skipped
+    expect(s.enqueueInReviewSweeps().map((j) => j.ticketKey).sort()).toEqual(["COR-24", "COR-35"]); // both driven
+  });
+
+  test("still skips Lead Ops project issues (human to-dos, excluded from both sweeps)", () => {
+    const s = new Store(":memory:");
+    s.upsertLinearIssue({ id: "ops", identifier: "COR-7", stateName: "In Review", projectName: "Lead Ops" });
+    s.upsertLinearIssue({ id: "app", identifier: "COR-8", stateName: "In Review", projectName: "ReUse App" });
+    expect(s.enqueueInReviewSweeps("In Review", "Lead Ops").map((j) => j.ticketKey)).toEqual(["COR-8"]);
   });
 
   test("upsert updates an existing issue (state change), not a duplicate row", () => {

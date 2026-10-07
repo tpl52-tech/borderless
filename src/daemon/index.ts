@@ -190,9 +190,10 @@ export function startDaemon(home = stateHome()): Daemon {
   // Lead-desk delegation (PRD §9): materialize a Lead Ops issue + DM the assignee. Needs a Linear key
   // (and a team) to write; without one it's a guarded no-op. The Slack DM is best-effort (no token → no DM).
   const sendDm = liveSlackDm(config.slackBotToken);
-  const leadTeamKey = (config.linearTeamKeys ?? [])[0];
+  const leadTeamKey = (config.linearTeamKeys ?? [])[0]; // single-team org: the Lead Ops issue is created here
   let leadDelegate: UdsServerDeps["leadDelegate"] = async (): Promise<DelegateResult> =>
-    ({ ticketKey: null, url: null, created: false, dmSent: false, reason: "Linear API key + team not configured" });
+    ({ ticketKey: null, url: null, created: false, dmSent: false,
+       reason: config.linearApiKey ? "no Linear team configured" : "Linear API key not configured" });
   if (config.linearApiKey && leadTeamKey) {
     const createIssue = liveCreateIssue(httpLinearClient(config.linearApiKey), leadTeamKey);
     leadDelegate = (req) => delegate({ roster: ROSTER, leadOpsProject: config.leadOpsProject, createIssue, sendDm }, req);

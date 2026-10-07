@@ -9,12 +9,12 @@
 
 const SLACK_API = "https://slack.com/api";
 
-interface SlackResponse { ok?: boolean; user?: { id?: string }; error?: string }
+interface SlackResponse { ok?: boolean; user?: { id?: string } }
 
 async function slackGet(token: string, method: string, params: Record<string, string>): Promise<SlackResponse> {
   const url = `${SLACK_API}/${method}?${new URLSearchParams(params)}`;
   const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
-  return res.ok ? ((await res.json()) as SlackResponse) : { ok: false, error: `HTTP ${res.status}` };
+  return res.ok ? ((await res.json()) as SlackResponse) : { ok: false };
 }
 
 async function slackPost(token: string, method: string, body: unknown): Promise<SlackResponse> {
@@ -23,7 +23,7 @@ async function slackPost(token: string, method: string, body: unknown): Promise<
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json; charset=utf-8" },
     body: JSON.stringify(body),
   });
-  return res.ok ? ((await res.json()) as SlackResponse) : { ok: false, error: `HTTP ${res.status}` };
+  return res.ok ? ((await res.json()) as SlackResponse) : { ok: false };
 }
 
 /**

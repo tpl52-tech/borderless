@@ -2,10 +2,10 @@
  * Team roster — Linear <-> GitHub <-> Slack identity map (lead-console PRD §5).
  *
  * Slack users are NOT stored statically: resolve each at runtime via
- * `slack.users.lookupByEmail`, trying `emails` in order, then falling back to a
- * display-name match (names are identical across Linear and Slack), then skipping
- * the DM (the Linear comment still posts). Built 2026-10-06 from the
- * "Cornell EWB SoftDev" Linear workspace; Slack handles are resolved, never hard-coded.
+ * `slack.users.lookupByEmail`, trying `emails` in order, then skipping the DM if
+ * none resolves (best-effort — the task's Linear issue is the source of truth).
+ * Built 2026-10-06 from the "Cornell EWB SoftDev" Linear workspace; Slack handles
+ * are resolved, never hard-coded.
  */
 
 /** One person, across Linear, GitHub, and Slack. */

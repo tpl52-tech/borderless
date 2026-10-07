@@ -144,17 +144,13 @@ mutation BorderlessIssueCreate($input: IssueCreateInput!) {
   }
 }`;
 
-/** The Linear-API-shaped input to {@link ISSUE_CREATE_MUTATION}. */
+/** The Linear-API-shaped input to {@link ISSUE_CREATE_MUTATION} (passed as `{ input }` in the variables). */
 export interface IssueCreateInput {
   teamId: string;
   projectId: string;
   title: string;
   description: string;
   assigneeId: string | null;
-}
-
-export function issueCreateVariables(input: IssueCreateInput): { input: IssueCreateInput } {
-  return { input };
 }
 
 export interface CreatedIssue { ticketKey: string; url: string | null; }

@@ -97,3 +97,16 @@ export function delegationDmText(assignee: Member, issue: { ticketKey: string; t
   const link = issue.url ? `\n${issue.url}` : "";
   return `Hi ${firstName} — you've been assigned a lead-desk task: ${issue.title} (${issue.ticketKey}).${link}`;
 }
+
+/** A lead-desk delegation request: who to assign, the task title, and optional notes (PRD §9). */
+export interface DelegateRequest { who: string; title: string; notes?: string }
+
+/** The outcome of a delegation (PRD §9): the created Lead Ops issue + whether the courtesy DM went out. */
+export interface DelegateResult {
+  ticketKey: string | null;
+  url: string | null;
+  created: boolean;
+  dmSent: boolean;
+  assignee?: string; // resolved member name, for the console's confirmation line
+  reason?: string;   // why nothing was created (e.g. no Linear key), when created is false
+}

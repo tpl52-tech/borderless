@@ -39,13 +39,20 @@ function safeArgs(raw: unknown): Record<string, any> {
   try { const v = JSON.parse(raw); return v && typeof v === "object" ? v : {}; } catch { return {}; }
 }
 
+// A narrow view of the OpenAI/OpenRouter completion body — the boundary is explicit here (house style),
+// rather than reaching through `any`. External JSON, so every field is optional.
+interface RawCompletion {
+  choices?: Array<{ message?: { content?: unknown; tool_calls?: Array<{ id?: unknown; function?: { name?: unknown; arguments?: unknown } }> } }>;
+  usage?: { cost?: unknown };
+}
+
 /** OpenAI-style completion JSON → ChatResponse (text + tool calls + cost, all tolerant of a shapeless body). */
 export function parseChatCompletion(json: unknown): ChatResponse {
-  const msg = (json as any)?.choices?.[0]?.message;
-  const toolCalls: ToolCall[] = ((msg?.tool_calls as any[]) ?? [])
+  const msg = (json as RawCompletion | null)?.choices?.[0]?.message;
+  const toolCalls: ToolCall[] = (msg?.tool_calls ?? [])
     .map((tc) => ({ id: String(tc?.id ?? ""), name: String(tc?.function?.name ?? ""), args: safeArgs(tc?.function?.arguments) }))
     .filter((c) => c.name);
-  const cost = (json as any)?.usage?.cost;
+  const cost = (json as RawCompletion | null)?.usage?.cost;
   return {
     text: typeof msg?.content === "string" ? msg.content : undefined,
     toolCalls: toolCalls.length ? toolCalls : undefined,

@@ -137,6 +137,8 @@ export async function main(argv: string[]): Promise<void> {
       const r = await client.request<{ answer: string; steps: number; costMicros: number; configured: boolean }>("ask.run", { question, allowActions });
       if (!r.configured) { console.log("ask: set `openRouterApiKey` in ~/.borderless/config.json to enable Ask Borderless"); return; }
       console.log(r.answer || "(no answer)");
+      const cost = r.costMicros ? ` · $${(r.costMicros / 1e6).toFixed(4)}` : "";
+      console.error(`(${r.steps} step${r.steps === 1 ? "" : "s"}${cost})`); // stderr: keeps the answer clean on stdout
     });
     return;
   }

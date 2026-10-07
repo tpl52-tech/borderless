@@ -11,6 +11,7 @@
  */
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { paths, stateHome } from "../shared/paths.ts";
 import { loadOperatorConfig, BUILTIN_DEFAULTS, DEFAULT_OPENROUTER_MODEL } from "../shared/config.ts";
 import { ISSUE_UPDATE_MUTATION, parseIssueUpdate, COMMENT_CREATE_MUTATION, parseCommentCreate } from "../shared/linear.ts";
@@ -55,7 +56,7 @@ export interface Daemon {
 /** Load the design docs for Ask Borderless's fleet context (PRD §10); tolerant — a missing doc is omitted. */
 function askDocs(): FleetDocs {
   const read = (name: string): string | undefined => {
-    try { return readFileSync(new URL(`../../docs/${name}`, import.meta.url).pathname, "utf8"); } catch { return undefined; }
+    try { return readFileSync(fileURLToPath(new URL(`../../docs/${name}`, import.meta.url)), "utf8"); } catch { return undefined; }
   };
   return { prd: read("borderless-prd.md"), handoff: read("borderless-handoff.md") };
 }
@@ -218,17 +219,19 @@ export function startDaemon(home = stateHome()): Daemon {
     const chat = httpOpenRouterChat(config.openRouterApiKey, config.openRouterModel ?? DEFAULT_OPENROUTER_MODEL);
     const linear = config.linearApiKey ? httpLinearClient(config.linearApiKey) : null;
     const issueUuid = (ticketKey: string) => store.listLinearIssues().find((i) => i.identifier === ticketKey)?.id ?? null;
+    // These throw on a guard miss so the fleet tool reports it as an error (not a false success); the
+    // ask-borderless runTool catches it. The happy path returns the human-readable result line.
     const reassign = async (ticketKey: string, assigneeLinearId: string): Promise<string> => {
-      if (!linear) return "Linear API key not configured";
+      if (!linear) throw new Error("Linear API key not configured");
       const id = issueUuid(ticketKey);
-      if (!id) return `unknown ticket ${ticketKey} (not synced)`;
+      if (!id) throw new Error(`unknown ticket ${ticketKey} (not synced)`);
       const r = parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id, input: { assigneeId: assigneeLinearId } }));
       return `reassigned ${r.ticketKey}`;
     };
     const comment = async (ticketKey: string, body: string): Promise<string> => {
-      if (!linear) return "Linear API key not configured";
+      if (!linear) throw new Error("Linear API key not configured");
       const id = issueUuid(ticketKey);
-      if (!id) return `unknown ticket ${ticketKey} (not synced)`;
+      if (!id) throw new Error(`unknown ticket ${ticketKey} (not synced)`);
       const r = parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId: id, body } }));
       return `commented on ${ticketKey}${r.url ? ` (${r.url})` : ""}`;
     };

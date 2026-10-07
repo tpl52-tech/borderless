@@ -70,9 +70,9 @@ export function buildFleetContext(store: Store, docs: FleetDocs = {}, roster: Me
 export interface FleetToolDeps {
   store: Store;
   roster: Member[];
-  /** Reassign a Linear ticket to a member; returns a human-readable result line. */
+  /** Reassign a Linear ticket to a member; returns a result line, or throws (→ tool error) on failure. */
   reassign: (ticketKey: string, assigneeLinearId: string) => Promise<string>;
-  /** Post a comment on a Linear ticket; returns a human-readable result line. */
+  /** Post a comment on a Linear ticket; returns a result line, or throws (→ tool error) on failure. */
   comment: (ticketKey: string, body: string) => Promise<string>;
 }
 

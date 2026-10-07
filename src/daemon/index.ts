@@ -28,7 +28,7 @@ import { reapWorktrees } from "./worktree.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
-import { startWebServer } from "./web.ts";
+import { startWebServer, type WebServer } from "./web.ts";
 import { httpLinearClient, syncLinearIssues } from "./linear.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
 import { buildTerritory } from "../shared/collision.ts";
@@ -272,9 +272,15 @@ export function startDaemon(home = stateHome()): Daemon {
 
   server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun });
 
-  // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only.
-  const web = startWebServer({ store, leadOpsProject: config.leadOpsProject, askRun, port: config.webPort ?? DEFAULT_WEB_PORT });
-  console.log(`borderless web console on ${web.url}`);
+  // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only. It is
+  // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
+  let web: WebServer | undefined;
+  try {
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, askRun, port: config.webPort ?? DEFAULT_WEB_PORT });
+    console.log(`borderless web console on ${web.url}`);
+  } catch (err) {
+    console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);
+  }
 
   // Broadcast runtime status transitions to all clients (design §8.2 manager fan-out).
   tracker.onChange(({ sessionId, status }) =>
@@ -297,7 +303,7 @@ export function startDaemon(home = stateHome()): Daemon {
     socketPath: p.socket,
     stop() {
       server.stop();
-      web.stop();
+      web?.stop();
       autonomy.stop();
       alerts?.stop();
       usage.stop();

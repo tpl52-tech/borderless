@@ -198,7 +198,7 @@ export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
     askModel: typeof raw.askModel === "string" && raw.askModel.trim() ? raw.askModel.trim() : undefined,
     openRouterApiKey: typeof raw.openRouterApiKey === "string" && raw.openRouterApiKey.trim() ? raw.openRouterApiKey.trim() : undefined,
     openRouterModel: typeof raw.openRouterModel === "string" && raw.openRouterModel.trim() ? raw.openRouterModel.trim() : undefined,
-    webPort: Number.isInteger(raw.webPort) ? raw.webPort : undefined,
+    webPort: Number.isInteger(raw.webPort) && raw.webPort >= 1 && raw.webPort <= 65535 ? raw.webPort : undefined,
   };
 }
 

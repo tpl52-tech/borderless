@@ -6,37 +6,8 @@
  * read (tested); the HTTP wiring is thin + live.
  */
 
-import { doNext } from "../shared/boards.ts";
-import { activeLoads, suggestAssignments } from "../shared/assign.ts";
-import { deskOverview } from "../shared/lead-desk.ts";
-import { ROSTER, memberByLinearId } from "../shared/roster.ts";
+import { consolePayload } from "../shared/console-rows.ts";
 import type { Store } from "./store.ts";
-
-/** The OWNER cell for a sweep job: the assignee's roster first name, else the raw id, else null. */
-function sweepOwner(assignee: string | null): string | null {
-  if (!assignee) return null;
-  return memberByLinearId(assignee)?.name.split(" ")[0] ?? assignee;
-}
-
-/** The live snapshot the browser console renders — one JSON read spanning all six screens. Store reads only. */
-export function consolePayload(store: Store, leadOpsProject?: string) {
-  const issues = store.listLinearIssues();
-  const loads = activeLoads(issues, ROSTER);
-  const ranked = doNext(issues);
-  return {
-    sweeps: store.listSweepJobs().map((j) => ({
-      ticketKey: j.ticketKey, kind: j.kind, state: j.state, owner: sweepOwner(j.assignee),
-      prNumber: j.prNumber, cycles: j.cycles, reason: j.reason, sessionId: j.sessionId,
-    })),
-    boards: ranked.map((e) => ({ ticketKey: e.issue.identifier, title: e.issue.title, downstream: e.downstream })),
-    assign: suggestAssignments(ranked, ROSTER, loads).map((s) => ({ ticketKey: s.ticketKey, netid: s.netid, name: s.name, load: s.load })),
-    desk: deskOverview(issues, ROSTER, leadOpsProject),
-    roster: ROSTER.map((m) => ({ name: m.name, netid: m.netid, github: m.github, lead: Boolean(m.lead) })),
-    rosterLoad: ROSTER.map((m) => ({ name: m.name.split(" ")[0], netid: m.netid, lead: Boolean(m.lead), load: loads.get(m.netid) ?? 0 })),
-    project: "ReUse · Fall 2026",
-    now: Date.now(),
-  };
-}
 
 export interface WebServerDeps {
   store: Store;
@@ -60,7 +31,7 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         return new Response(Bun.file(pagePath), { headers: { "content-type": "text/html; charset=utf-8" } });
       }
       if (pathname === "/api/console") {
-        return Response.json(consolePayload(deps.store, deps.leadOpsProject));
+        return Response.json(consolePayload(deps.store.listLinearIssues(), deps.store.listSweepJobs(), deps.leadOpsProject));
       }
       if (pathname === "/api/ask" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { question?: unknown };

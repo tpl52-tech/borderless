@@ -55,8 +55,9 @@ export interface WorkerFeedback {
 
 /** The engine's only I/O — real in the daemon (3c), faked in tests. */
 export interface SweepEngineDeps {
-  /** Spawn the fixer (in_review) / implementer (rescue); await it finishing + pushing; return new head/PR. */
-  spawnWorker(job: SweepJob, feedback: WorkerFeedback): Promise<WorkerResult>;
+  /** Spawn the fixer (in_review) / implementer (rescue); await it finishing + pushing; return new head/PR.
+   *  `territory` = the deliverables other active tickets own, so the worker's seed can warn it off them. */
+  spawnWorker(job: SweepJob, feedback: WorkerFeedback, territory: Territory): Promise<WorkerResult>;
   /** Poll CI for the job's current head: required-check states + the PR's changed paths. */
   pollCi(job: SweepJob): Promise<PollResult>;
   /** Spawn a FRESH independent reviewer on the current head; await its verdict. */
@@ -114,7 +115,7 @@ export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngin
   // Spawn a worker, persist the new head/PR/session, record events. The caller owns the cycle counter.
   const runWorker = async (feedback: WorkerFeedback): Promise<WorkerResult> => {
     transition({ state: WORKER_STATE[seed.kind] });
-    const result = await deps.spawnWorker(current, feedback);
+    const result = await deps.spawnWorker(current, feedback, territory);
     const hadPr = current.prNumber != null;
     // Coalesce: a fix cycle pushes a new head but keeps the same PR; never null out an existing PR/head.
     transition({

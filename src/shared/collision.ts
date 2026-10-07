@@ -105,3 +105,24 @@ export function collisionEscalation(collisions: TicketOwner[]): string | null {
   const tail = extra > 0 ? `, +${extra} more` : "";
   return `coordination: PR touches ${listed.join("; ")}${tail} — another assigned ticket owns this; coordinate before merging`;
 }
+
+const MAX_WARNED = 25; // keep the seed bounded even on a busy board
+
+/**
+ * The PREVENTIVE half of the guard: a worker-seed block listing the deliverables other active tickets own,
+ * so the agent avoids creating/extracting them up front (saving the wasted cycle the gate would otherwise
+ * catch). One line per owned deliverable, capped. Null when the territory is empty. Pure.
+ */
+export function territoryWarning(territory: Territory): string | null {
+  if (territory.size === 0) return null;
+  // No dedup needed: the territory map has one entry per lowercased token, each with a unique deliverable.
+  const all = [...territory.values()].map((o) => `  - ${o.deliverable} — owned by ${o.ticketKey} (${o.owner}, ${o.state})`);
+  const shown = all.slice(0, MAX_WARNED);
+  const extra = all.length - shown.length;
+  if (extra > 0) shown.push(`  - …and ${extra} more`);
+  return [
+    "Another teammate's assigned ticket owns these files/components — do NOT create, extract, or rewrite them:",
+    ...shown,
+    "If your change needs one of these, STOP and say so in your output rather than duplicating it; the lead will coordinate.",
+  ].join("\n");
+}

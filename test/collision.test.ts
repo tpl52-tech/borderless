@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import {
-  deliverableTokens, buildTerritory, detectCollisions, collisionEscalation,
+  deliverableTokens, buildTerritory, detectCollisions, collisionEscalation, territoryWarning,
   type Territory,
 } from "../src/shared/collision.ts";
 import type { LinearIssue } from "../src/shared/types.ts";
@@ -88,5 +88,28 @@ describe("collisionEscalation — the human-facing reason", () => {
   test("caps the list and summarizes the overflow", () => {
     const many = Array.from({ length: 5 }, (_, i) => ({ deliverable: `C${i}`, ticketKey: `COR-${i}`, owner: "x", state: "s" }));
     expect(collisionEscalation(many)).toContain("+2 more");
+  });
+});
+
+describe("territoryWarning — the preventive worker-seed block", () => {
+  test("null when the territory is empty", () => {
+    expect(territoryWarning(new Map())).toBeNull();
+  });
+  test("lists each owned deliverable with its ticket/owner/state + a stop instruction", () => {
+    const territory: Territory = new Map([
+      ["conditionstars", { ticketKey: "COR-54", owner: "Renee Gowda", state: "In Progress", deliverable: "ConditionStars" }],
+      ["itemcard", { ticketKey: "COR-30", owner: "Dana Ryu", state: "Todo", deliverable: "ItemCard" }],
+    ]);
+    const warning = territoryWarning(territory)!;
+    expect(warning).toContain("do NOT create, extract, or rewrite them");
+    expect(warning).toContain("ConditionStars — owned by COR-54 (Renee Gowda, In Progress)");
+    expect(warning).toContain("ItemCard — owned by COR-30 (Dana Ryu, Todo)");
+    expect(warning).toContain("STOP and say so");
+  });
+  test("caps the list and summarizes the overflow", () => {
+    const territory: Territory = new Map(
+      Array.from({ length: 30 }, (_, i) => [`c${i}`, { ticketKey: `COR-${i}`, owner: "x", state: "Todo", deliverable: `C${i}` }] as const),
+    );
+    expect(territoryWarning(territory)).toContain("…and 5 more");
   });
 });

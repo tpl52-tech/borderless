@@ -20,6 +20,7 @@
  *   ao boards                                  unblocked tickets, ranked by critical-path impact
  *   ao assign                                  suggested assignee per unblocked ticket (load-balanced)
  *   ao desk [delegate <who> "<title>" [notes]] list Lead Ops tasks / delegate one (PRD §9 lead desk)
+ *   ao ask "<question>" [--yes]                Ask Borderless over live fleet state (PRD §10; --yes acts)
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
@@ -122,6 +123,20 @@ export async function main(argv: string[]): Promise<void> {
       const rows = await client.request<Array<{ ticketKey: string; title: string; assignee: string; state: string }>>("lead.desk");
       if (rows.length === 0) console.log("desk: no open Lead Ops tasks");
       else for (const r of rows) console.log(`  ${r.ticketKey}  [${r.state}]  →  ${r.assignee}  ${r.title}`);
+    });
+    return;
+  }
+
+  // `ao ask "<question>" [--yes]` — Ask Borderless (PRD §10): a one-shot fleet-aware question. Advisory by
+  // default; --yes auto-confirms the consequential tools (reassign/enqueue/resolve/comment).
+  if (sub === "ask") {
+    const allowActions = rest.includes("--yes");
+    const question = rest.filter((a) => a !== "--yes").join(" ").trim();
+    if (!question) throw new Error('usage: ao ask "<question>" [--yes]');
+    await withDaemon("ask", async (client) => {
+      const r = await client.request<{ answer: string; steps: number; costMicros: number; configured: boolean }>("ask.run", { question, allowActions });
+      if (!r.configured) { console.log("ask: set `openRouterApiKey` in ~/.borderless/config.json to enable Ask Borderless"); return; }
+      console.log(r.answer || "(no answer)");
     });
     return;
   }

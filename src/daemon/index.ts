@@ -12,7 +12,8 @@
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from "node:fs";
 import { paths, stateHome } from "../shared/paths.ts";
-import { loadOperatorConfig, BUILTIN_DEFAULTS } from "../shared/config.ts";
+import { loadOperatorConfig, BUILTIN_DEFAULTS, DEFAULT_OPENROUTER_MODEL } from "../shared/config.ts";
+import { ISSUE_UPDATE_MUTATION, parseIssueUpdate, COMMENT_CREATE_MUTATION, parseCommentCreate } from "../shared/linear.ts";
 import { windowLabel, parseExtensionDeadline, AUTONOMY_EXTENSION_CAP_MS, type WindowConfig } from "../shared/autonomy-window.ts";
 import { Store } from "./store.ts";
 import { createSessionManager, type SessionManager } from "./session-manager.ts";
@@ -33,6 +34,8 @@ import { createSweepSupervisor, type SweepSupervisor } from "./sweep-supervisor.
 import { scanRescues, authorizeRescue, liveProgressCheck } from "./rescue-scan.ts";
 import { delegate, liveCreateIssue, type DelegateResult } from "./lead-delegate.ts";
 import { liveSlackDm } from "./slack.ts";
+import { askBorderless, type FleetDocs } from "./ask-borderless.ts";
+import { httpOpenRouterChat } from "./openrouter/chat.ts";
 import { memberByLinearId, ROSTER } from "../shared/roster.ts";
 
 export interface Daemon {
@@ -47,6 +50,14 @@ export interface Daemon {
   server: UdsServer;
   socketPath: string;
   stop(): void;
+}
+
+/** Load the design docs for Ask Borderless's fleet context (PRD §10); tolerant — a missing doc is omitted. */
+function askDocs(): FleetDocs {
+  const read = (name: string): string | undefined => {
+    try { return readFileSync(new URL(`../../docs/${name}`, import.meta.url).pathname, "utf8"); } catch { return undefined; }
+  };
+  return { prd: read("borderless-prd.md"), handoff: read("borderless-handoff.md") };
 }
 
 /** Start the daemon in-process (also used by integration tests). */
@@ -200,6 +211,32 @@ export function startDaemon(home = stateHome()): Daemon {
     leadDelegate = (req) => delegate({ roster: ROSTER, leadOpsProject: config.leadOpsProject, createIssue, sendDm }, req);
   }
 
+  // Ask Borderless (PRD §10): fleet-aware chat over OpenRouter + the fleet tools. Needs an OpenRouter key;
+  // without one it's a guarded no-op (configured:false). The Linear-write tools need a Linear key too.
+  const askRun: UdsServerDeps["askRun"] = async (question, allowActions) => {
+    if (!config.openRouterApiKey) return { answer: "", steps: 0, costMicros: 0, configured: false };
+    const chat = httpOpenRouterChat(config.openRouterApiKey, config.openRouterModel ?? DEFAULT_OPENROUTER_MODEL);
+    const linear = config.linearApiKey ? httpLinearClient(config.linearApiKey) : null;
+    const issueUuid = (ticketKey: string) => store.listLinearIssues().find((i) => i.identifier === ticketKey)?.id ?? null;
+    const reassign = async (ticketKey: string, assigneeLinearId: string): Promise<string> => {
+      if (!linear) return "Linear API key not configured";
+      const id = issueUuid(ticketKey);
+      if (!id) return `unknown ticket ${ticketKey} (not synced)`;
+      const r = parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id, input: { assigneeId: assigneeLinearId } }));
+      return `reassigned ${r.ticketKey}`;
+    };
+    const comment = async (ticketKey: string, body: string): Promise<string> => {
+      if (!linear) return "Linear API key not configured";
+      const id = issueUuid(ticketKey);
+      if (!id) return `unknown ticket ${ticketKey} (not synced)`;
+      const r = parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId: id, body } }));
+      return `commented on ${ticketKey}${r.url ? ` (${r.url})` : ""}`;
+    };
+    const confirm = async () => allowActions; // CLI: deny by default (advisory); --yes auto-confirms
+    const { answer, result } = await askBorderless(question, { chat, store, reassign, comment, docs: askDocs(), confirm });
+    return { answer, steps: result.steps, costMicros: result.costMicros, configured: true };
+  };
+
   const scanInReview = async (stateName = "In Review"): Promise<{ synced: number; created: number; started: number }> => {
     let synced = 0;
     const teamKeys = config.linearTeamKeys ?? [];
@@ -211,7 +248,7 @@ export function startDaemon(home = stateHome()): Daemon {
     return { synced, created, started };
   };
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate });
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun });
 
   // Broadcast runtime status transitions to all clients (design §8.2 manager fan-out).
   tracker.onChange(({ sessionId, status }) =>

@@ -151,7 +151,7 @@ export type RequestType =
   | "workitem.action"
   | "project.setHidden" | "linear.refresh" | "linear.list"
   | "sweep.scanInReview" | "rescue.scan" | "rescue.authorize"
-  | "boards.get" | "assign.suggest" | "lead.desk" | "lead.delegate"
+  | "boards.get" | "assign.suggest" | "lead.desk" | "lead.delegate" | "ask.run"
   | "usage.get" | "quota.get";
 
 export function controlFrame(msg: ControlMessage): Frame {

@@ -11,15 +11,12 @@
 import React, { useEffect, useState } from "react";
 import { render, Box, Text, useInput, useApp } from "ink";
 import { type DaemonClient } from "./daemon-client.ts";
-import { ensureDaemon } from "./index.tsx";
-import { attachSession } from "./attach.ts";
+import { ensureDaemon, navDirection, runSurface, type SurfaceAction } from "./runtime.ts";
 import {
   CONSOLE_SCREENS, formatRow, clampCursor, moveCursor, attachTarget,
 } from "./console-model.ts";
 
-type Action = { type: "quit" } | { type: "attach"; sessionId: string };
-
-function Console({ client, onAction }: { client: DaemonClient; onAction: (a: Action) => void }) {
+function Console({ client, onAction }: { client: DaemonClient; onAction: (a: SurfaceAction) => void }) {
   const [screenIdx, setScreenIdx] = useState(0);
   const [rows, setRows] = useState<unknown[]>([]);
   const [cursor, setCursor] = useState(0);
@@ -44,8 +41,9 @@ function Console({ client, onAction }: { client: DaemonClient; onAction: (a: Act
     const n = Number(input);
     if (Number.isInteger(n) && n >= 1 && n <= CONSOLE_SCREENS.length) { setScreenIdx(n - 1); setCursor(0); return; }
     if (key.tab) { setScreenIdx((i) => (i + 1) % CONSOLE_SCREENS.length); setCursor(0); return; }
-    if (key.upArrow) { setCursor((c) => moveCursor(c, -1, rows.length)); return; }
-    if (key.downArrow) { setCursor((c) => moveCursor(c, +1, rows.length)); return; }
+    const nav = navDirection(input, key); // robust arrow decoding under Bun+Ink (same as the dashboard)
+    if (nav === "up") { setCursor((c) => moveCursor(c, -1, rows.length)); return; }
+    if (nav === "down") { setCursor((c) => moveCursor(c, +1, rows.length)); return; }
     if (key.return) {
       const sessionId = attachTarget(screen.key, rows, cursor);
       if (sessionId) { onAction({ type: "attach", sessionId }); exit(); }
@@ -66,26 +64,11 @@ function Console({ client, onAction }: { client: DaemonClient; onAction: (a: Act
   );
 }
 
-async function renderOnce(client: DaemonClient): Promise<Action> {
-  let action: Action = { type: "quit" };
-  const app = render(<Console client={client} onAction={(a) => { action = a; }} />);
-  await app.waitUntilExit();
-  return action;
-}
-
 /** Launch the console: auto-start the daemon, then render → (attach → re-render) until quit. */
 export async function runConsole(): Promise<void> {
   const client = await ensureDaemon();
   try {
-    for (;;) {
-      const action = await renderOnce(client);
-      if (action.type === "quit") return;
-      if (action.type === "attach") {
-        await Bun.sleep(20); // let Ink restore the terminal before attach takes raw stdin
-        await attachSession(client, action.sessionId);
-        await Bun.sleep(20); // let attach's reset settle before Ink re-renders
-      }
-    }
+    await runSurface(client, (onAction) => render(<Console client={client} onAction={onAction} />));
   } finally {
     client.close();
   }

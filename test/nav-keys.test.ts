@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { navDirection } from "../src/client/index.tsx";
+import { navDirection } from "../src/client/runtime.ts";
 
 describe("navDirection (dashboard list navigation)", () => {
   test("Ink's parsed arrow flags", () => {

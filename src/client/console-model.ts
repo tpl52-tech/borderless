@@ -7,14 +7,14 @@
  */
 
 import type { RequestType } from "../shared/wire.ts";
+import type { DeskRow } from "../shared/lead-desk.ts"; // the lead.desk handler returns this canonical shape
 
 export type ConsoleScreen = "sweeps" | "boards" | "assign" | "lead_desk" | "roster";
 
-// The wire shapes the daemon handlers return, one per screen.
+// The wire shapes the daemon handlers return, one per screen (DeskRow is reused from shared/lead-desk).
 export interface SweepRow { ticketKey: string; kind: string; state: string; prNumber: number | null; cycles: number; reason: string | null; sessionId: string | null }
 export interface BoardRow { ticketKey: string; title: string; downstream: number }
 export interface AssignRow { ticketKey: string; netid: string; name: string; load: number }
-export interface DeskRow { ticketKey: string; title: string; assignee: string; state: string }
 export interface RosterRow { name: string; netid: string; github: string; lead: boolean }
 
 export interface ScreenDef { key: ConsoleScreen; label: string; request: RequestType; empty: string }

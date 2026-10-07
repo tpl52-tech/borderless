@@ -12,9 +12,8 @@
 
 import React, { useEffect, useState } from "react";
 import { render, Box, Text, useInput, useApp } from "ink";
-import { connectDaemon, type DaemonClient } from "./daemon-client.ts";
-import { attachSession } from "./attach.ts";
-import { paths } from "../shared/paths.ts";
+import { type DaemonClient } from "./daemon-client.ts";
+import { ensureDaemon, navDirection, openUrl, runSurface, type SurfaceAction } from "./runtime.ts";
 import { statusStyle, taskRollupStatus } from "../shared/status.ts";
 import { classifyWorkItem, type WorkItemFocus } from "../shared/focus.ts";
 import { DEFAULT_REVIEW_POLICY } from "../shared/profile.ts";
@@ -23,7 +22,7 @@ import type { Task, Session, SessionStatus, WorkItem, CodexReviewState, CtoState
 type SessionView = Session & { status: SessionStatus };
 interface AutonomyState { enabled: boolean; dryRun: boolean; killed: boolean; window: string }
 interface Snapshot { tasks: Task[]; sessions: SessionView[]; workItems: WorkItem[]; usage?: Record<string, number>; autonomy?: AutonomyState; now?: number }
-type Action = { type: "quit" } | { type: "attach"; sessionId: string };
+type Action = SurfaceAction;
 
 type Row =
   | { kind: "task"; task: Task; rollup: SessionStatus | null }
@@ -47,25 +46,6 @@ function buildRows(snap: Snapshot): Row[] {
 }
 
 const EMPTY: Snapshot = { tasks: [], sessions: [], workItems: [] };
-
-// Raw arrow escape sequences — matched directly because Ink's parser under Bun doesn't always turn
-// them into key.upArrow/key.downArrow (they can arrive as the whole seq, ESC-stripped, or app-cursor mode).
-const UP_KEYS = new Set(["[A", "OA", "[A", "OA"]);
-const DOWN_KEYS = new Set(["[B", "OB", "[B", "OB"]);
-
-/**
- * List-navigation direction from an Ink key event. Accepts Ink's parsed arrow flags, vim j/k, and —
- * for robustness under Bun, where Ink sometimes fails to turn arrows into key.upArrow/downArrow — the
- * raw escape sequences themselves (whole, ESC-stripped, or application-cursor mode). Pure + testable.
- */
-export function navDirection(
-  input: string,
-  key: { upArrow?: boolean; downArrow?: boolean },
-): "up" | "down" | null {
-  if (key.upArrow || input === "k" || UP_KEYS.has(input)) return "up";
-  if (key.downArrow || input === "j" || DOWN_KEYS.has(input)) return "down";
-  return null;
-}
 
 const CODEX_GLYPH: Record<CodexReviewState, string> = {
   approved: "✓", reviewed: "◐", requested: "…", none: "—",
@@ -331,55 +311,11 @@ function Dashboard({ client, onAction }: { client: DaemonClient; onAction: (a: A
   );
 }
 
-async function runDashboard(client: DaemonClient): Promise<Action> {
-  let action: Action = { type: "quit" };
-  const app = render(<Dashboard client={client} onAction={(a) => { action = a; }} />);
-  await app.waitUntilExit();
-  return action;
-}
-
-export async function ensureDaemon(): Promise<DaemonClient> {
-  const socket = paths().socket;
-  try {
-    return await connectDaemon(socket);
-  } catch {
-    // Spawn the daemon and wait for it to listen (design §3.1: the client auto-starts the daemon).
-    const daemonEntry = new URL("../daemon/index.ts", import.meta.url).pathname;
-    Bun.spawn([process.execPath, "run", daemonEntry], { stdio: ["ignore", "ignore", "ignore"] }).unref();
-    const deadline = Date.now() + 5000;
-    for (;;) {
-      await Bun.sleep(150);
-      try { return await connectDaemon(socket); }
-      catch { if (Date.now() > deadline) throw new Error("daemon failed to start within 5s"); }
-    }
-  }
-}
-
-/** Open a URL in the OS browser (design §9.3: the client opens the Tailscale re-auth link). */
-function openUrl(url: string): void {
-  const cmd = process.platform === "darwin" ? "open" : "xdg-open";
-  try { Bun.spawn([cmd, url], { stdio: ["ignore", "ignore", "ignore"] }).unref(); } catch { /* best effort */ }
-}
-
 export async function main(): Promise<void> {
   const client = await ensureDaemon();
-  // session.openUrl must be handled even during raw attach (the attach can block on the very
-  // Tailscale re-auth this event unblocks, design §8.4/§9.3).
-  const offOpenUrl = client.on((ev) => {
-    if (ev.type === "session.openUrl") openUrl((ev.data as { url: string }).url);
-  });
   try {
-    for (;;) {
-      const action = await runDashboard(client);
-      if (action.type === "quit") break;
-      if (action.type === "attach") {
-        await Bun.sleep(20); // let Ink finish restoring the terminal before attach takes raw stdin
-        await attachSession(client, action.sessionId);
-        await Bun.sleep(20); // let attach's terminal reset settle before Ink re-renders
-      }
-    }
+    await runSurface(client, (onAction) => render(<Dashboard client={client} onAction={onAction} />));
   } finally {
-    offOpenUrl();
     client.close();
   }
 }

@@ -19,6 +19,7 @@
  *   ao rescue [authorize <ticketKey>]          list eligible overdue tickets / authorize a rescue
  *   ao boards                                  unblocked tickets, ranked by critical-path impact
  *   ao assign                                  suggested assignee per unblocked ticket (load-balanced)
+ *   ao desk                                    open Lead Ops tasks (the lead desk; human to-do list)
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";

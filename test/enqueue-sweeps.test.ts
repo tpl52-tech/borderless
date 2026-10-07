@@ -21,6 +21,13 @@ describe("enqueueInReviewSweeps (first live slice: linear_issues -> sweep_job)",
     expect(s.enqueueInReviewSweeps().map((j) => j.ticketKey)).toEqual([first[0]!.ticketKey]);
   });
 
+  test("skips lead-level In-Review issues (lead-level work stays off the automation, PRD §2)", () => {
+    const s = new Store(":memory:");
+    s.upsertLinearIssue({ id: "lead", identifier: "COR-24", stateName: "In Review", labels: ["lead-level"] });
+    s.upsertLinearIssue({ id: "normal", identifier: "COR-35", stateName: "In Review", labels: ["intermediate"] });
+    expect(s.enqueueInReviewSweeps().map((j) => j.ticketKey)).toEqual(["COR-35"]); // the lead-level one is skipped
+  });
+
   test("upsert updates an existing issue (state change), not a duplicate row", () => {
     const s = new Store(":memory:");
     s.upsertLinearIssue({ id: "x", identifier: "COR-9", stateName: "In Progress" });

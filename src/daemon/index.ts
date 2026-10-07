@@ -37,6 +37,8 @@ import { delegate, liveCreateIssue, type DelegateResult } from "./lead-delegate.
 import { liveSlackDm } from "./slack.ts";
 import { askBorderless, type FleetDocs } from "./ask-borderless.ts";
 import { httpOpenRouterChat } from "./openrouter/chat.ts";
+import { claudeCliChat } from "./claude-chat.ts";
+import type { Chat } from "./openrouter/runner.ts";
 import { memberByLinearId, ROSTER } from "../shared/roster.ts";
 
 export interface Daemon {
@@ -212,11 +214,18 @@ export function startDaemon(home = stateHome()): Daemon {
     leadDelegate = (req) => delegate({ roster: ROSTER, leadOpsProject: config.leadOpsProject, createIssue, sendDm }, req);
   }
 
-  // Ask Borderless (PRD §10): fleet-aware chat over OpenRouter + the fleet tools. Needs an OpenRouter key;
-  // without one it's a guarded no-op (configured:false). The Linear-write tools need a Linear key too.
+  // Ask Borderless (PRD §10/§12): fleet-aware chat. Default backend is the subscription `claude` CLI (no key,
+  // answer-only); "openrouter" is opt-in (needs a key, supports the action tools). The Linear-write tools
+  // (used only on the openrouter backend) also need a Linear key.
   const askRun: UdsServerDeps["askRun"] = async (question, allowActions) => {
-    if (!config.openRouterApiKey) return { answer: "", steps: 0, costMicros: 0, configured: false };
-    const chat = httpOpenRouterChat(config.openRouterApiKey, config.openRouterModel ?? DEFAULT_OPENROUTER_MODEL);
+    const backend = config.askBackend ?? "subscription"; // PRD §12: the subscription CLI is the default ($0)
+    let chat: Chat;
+    if (backend === "openrouter") {
+      if (!config.openRouterApiKey) return { answer: "", steps: 0, costMicros: 0, configured: false };
+      chat = httpOpenRouterChat(config.openRouterApiKey, config.openRouterModel ?? DEFAULT_OPENROUTER_MODEL);
+    } else {
+      chat = claudeCliChat({ model: config.askModel }); // subscription: no key, answer-only (sandboxed)
+    }
     const linear = config.linearApiKey ? httpLinearClient(config.linearApiKey) : null;
     const issueUuid = (ticketKey: string) => store.listLinearIssues().find((i) => i.identifier === ticketKey)?.id ?? null;
     // These throw on a guard miss so the fleet tool reports it as an error (not a false success); the
@@ -237,7 +246,11 @@ export function startDaemon(home = stateHome()): Daemon {
     };
     const confirm = async () => allowActions; // CLI: deny by default (advisory); --yes auto-confirms
     const { answer, result } = await askBorderless(question, { chat, store, reassign, comment, docs: askDocs(), confirm });
-    return { answer, steps: result.steps, costMicros: result.costMicros, configured: true };
+    // The subscription backend is answer-only — it can't run the action tools, so --yes can't act there.
+    const note = backend !== "openrouter" && allowActions
+      ? "\n\n[Ask on the subscription backend is advisory — it can't run actions. Set askBackend:\"openrouter\" with an openRouterApiKey to let --yes act.]"
+      : "";
+    return { answer: answer + note, steps: result.steps, costMicros: result.costMicros, configured: true };
   };
 
   const scanInReview = async (stateName = "In Review"): Promise<{ synced: number; created: number; started: number }> => {

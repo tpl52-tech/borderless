@@ -2,6 +2,7 @@ import { test, expect, describe } from "bun:test";
 import { checkStates, parseReviewVerdict, needsHydration, workerSeed } from "../src/daemon/sweep-deps.ts";
 import type { SweepJob } from "../src/shared/types.ts";
 import type { WorkerFeedback } from "../src/daemon/sweep-engine.ts";
+import type { Territory } from "../src/shared/collision.ts";
 
 const rollup = (nodes: unknown[]): unknown => ({ contexts: { nodes } });
 
@@ -106,5 +107,20 @@ describe("workerSeed (PRD §5/§4 — rescue embeds the ACs; in-review drives th
     expect(seed).toContain("2 blocking review finding(s)");
     expect(seed).toContain("ci-failing");
     expect(seed).toContain("prove no behavior regression");
+  });
+
+  test("a territory in context appends the preventive collision warning (both initial + fix cycles)", () => {
+    const territory: Territory = new Map([
+      ["conditionstars", { ticketKey: "COR-54", owner: "Renee Gowda", state: "In Progress", deliverable: "ConditionStars" }],
+    ]);
+    const rescue = workerSeed(job(), initial, { acceptance: "build it", territory });
+    expect(rescue).toContain("Implement Linear ticket COR-9."); // the normal seed body is kept
+    expect(rescue).toContain("do NOT create, extract, or rewrite them"); // ...plus the warning
+    expect(rescue).toContain("ConditionStars — owned by COR-54");
+
+    const fb: WorkerFeedback = { initial: false, blockers: ["ci-failing"], review: { redFindings: 1, preservationProven: true, judgmentCall: null, sessionId: "r1" } };
+    const fix = workerSeed(job({ kind: "in_review", prNumber: 7 }), fb, { territory });
+    expect(fix).toContain("Drive PR #7");
+    expect(fix).toContain("ConditionStars — owned by COR-54");
   });
 });

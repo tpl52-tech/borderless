@@ -20,6 +20,7 @@ import type { SweepJob, SessionStatus } from "../shared/types.ts";
 import type { CheckState, RequiredCheck } from "../shared/sweep-gate.ts";
 import { REQUIRED_CHECKS } from "../shared/sweep-gate.ts";
 import type { SweepEngineDeps, ReviewVerdict, WorkerResult, WorkerFeedback, PollResult } from "./sweep-engine.ts";
+import { territoryWarning, type Territory } from "../shared/collision.ts";
 import { fetchPr, listPrsForBranch } from "./github.ts";
 import { branchName, prBranchCandidates } from "./worktree.ts";
 import { sessionDir } from "../shared/paths.ts";
@@ -195,8 +196,8 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
   return {
     ciPollMs: cfg.ciPollMs ?? DEFAULT_CI_POLL_MS,
     maxCiWaits: cfg.maxCiWaits ?? DEFAULT_MAX_CI_WAITS,
-    async spawnWorker(job, feedback): Promise<WorkerResult> {
-      const ctx: WorkerSeedContext = { acceptance: cfg.acceptanceFor?.(job.ticketId) ?? null };
+    async spawnWorker(job, feedback, territory): Promise<WorkerResult> {
+      const ctx: WorkerSeedContext = { acceptance: cfg.acceptanceFor?.(job.ticketId) ?? null, territory };
       const sessionId = await spawnAndWait(workerSeed(job, feedback, ctx));
       const { headSha, prNumber } = await readHeadPr(job);
       // Free the ticket branch so a fix-cycle re-spawn can re-provision it — but only once a PR exists, i.e.
@@ -231,23 +232,29 @@ async function changedPaths(repo: string, number: number): Promise<string[]> {
   return (parsed.files ?? []).map((f) => f.path).filter((p): p is string => typeof p === "string");
 }
 
-/** Context for a rescue worker's seed: the ticket's acceptance criteria (its synced description),
- *  embedded inline because a spawned agent has no Linear to read the ticket. */
+/** Context for a worker's seed: the rescue ticket's acceptance criteria (embedded inline because a spawned
+ *  agent has no Linear to read it), and the territory other active tickets own (the "don't duplicate" warning). */
 export interface WorkerSeedContext {
   acceptance?: string | null;
+  territory?: Territory;
 }
 
 const MAX_ACCEPTANCE = 4000; // keep a pathologically long description from bloating the seed
 
-/** The fixer/implementer prompt. in_review fixes the PR; rescue implements the ticket from scratch. */
+/** The fixer/implementer prompt. in_review fixes the PR; rescue implements the ticket from scratch. Both get
+ *  the collision guard's preventive territory warning, so the worker avoids a teammate's deliverable up front. */
 export function workerSeed(job: SweepJob, feedback: WorkerFeedback, ctx: WorkerSeedContext = {}): string {
   const head = job.kind === "rescue"
     ? rescueSeedHead(job, ctx)
     : `Drive PR #${job.prNumber} for ${job.ticketKey} to a mergeable state.`;
-  if (feedback.initial || !feedback.review) return head;
-  const findings = feedback.review.redFindings > 0 ? `${feedback.review.redFindings} blocking review finding(s)` : "the review feedback";
-  const preservation = feedback.review.preservationProven ? "" : " Also prove no behavior regression vs the original.";
-  return `${head} Address ${findings} and these gate blockers: ${feedback.blockers.join(", ")}.${preservation}`;
+  let body = head;
+  if (!feedback.initial && feedback.review) {
+    const findings = feedback.review.redFindings > 0 ? `${feedback.review.redFindings} blocking review finding(s)` : "the review feedback";
+    const preservation = feedback.review.preservationProven ? "" : " Also prove no behavior regression vs the original.";
+    body = `${head} Address ${findings} and these gate blockers: ${feedback.blockers.join(", ")}.${preservation}`;
+  }
+  const warning = ctx.territory ? territoryWarning(ctx.territory) : null;
+  return warning ? `${body}\n\n${warning}` : body;
 }
 
 /**

@@ -38,7 +38,7 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
       url: "https://linear.app/cornell-ewb-softdev/issue/COR-1",
       stateName: "In Review", stateType: "started", assignee: "user-1",
       projectId: "proj-1", teamKey: "COR", priority: 2,
-      dueDate: null, labels: [], blockedBy: [],
+      dueDate: null, labels: [], blockedBy: [], gitBranchName: null,
       updatedAt: Date.parse("2026-10-06T18:00:00.000Z"),
     });
     expect(hasNextPage).toBe(true);
@@ -67,6 +67,12 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
     })]));
     expect(issues[0]!.dueDate).toBe(Date.parse("2026-10-01"));
     expect(issues[0]!.labels).toEqual(["lead-level", "intermediate"]);
+  });
+
+  test("maps gitBranchName from Linear's branchName (the team's PR branch)", () => {
+    const { issues } = parseIssuesResponse(page([node({ branchName: "tpl52/cor-24-sign-up-screen" })]));
+    expect(issues[0]!.gitBranchName).toBe("tpl52/cor-24-sign-up-screen");
+    expect(parseIssuesResponse(page([node()])).issues[0]!.gitBranchName).toBeNull(); // absent → null
   });
 
   test("maps blockedBy from type=blocks inverse relations only", () => {

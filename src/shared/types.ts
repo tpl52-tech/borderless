@@ -317,5 +317,6 @@ export interface LinearIssue {
   blockedBy: string[];       // issue ids this one is blocked by
   dueDate: number | null;    // epoch ms; feeds the rescue overdue check (PRD §5)
   labels: string[];          // label names; `lead-level` excludes a ticket from rescue
+  gitBranchName: string | null; // Linear's suggested branch (the team's PR branch convention, PRD §4)
   updatedAt: number | null;
 }

@@ -12,7 +12,7 @@ import type { Store } from "./store.ts";
 import type { LinearIssue, SweepJob } from "../shared/types.ts";
 import { rescueEligibility, daysOverdue } from "../shared/rescue.ts";
 import { listPrsForBranch, splitRepo } from "./github.ts";
-import { branchName } from "./worktree.ts";
+import { prBranchCandidates } from "./worktree.ts";
 import { runWithDeadline } from "./ssh.ts";
 
 export interface RescueCandidate {
@@ -67,17 +67,18 @@ export function authorizeRescue(store: Store, ticket: string): AuthorizeResult {
 }
 
 /**
- * Live progress check (PRD §5 "no branch, no commits, no non-draft PR"): a ticket counts as started if a
- * non-draft PR exists on its branch, or the ticket branch exists on the remote. Keyed on the canonical
- * ticket branch, so author-named branches are a best-effort miss — the lead sees the queue and decides.
- * Live-only.
+ * Live progress check (PRD §5 "no branch, no commits, no non-draft PR"): a ticket counts as started if any
+ * of its candidate branches (Linear's suggested branch, then the canonical one) has a non-draft PR or
+ * exists on the remote. Live-only.
  */
 export function liveProgressCheck(repo: string, branchOwner: string): (issue: LinearIssue) => Promise<boolean> {
   const { owner, name } = splitRepo(repo);
   return async (issue) => {
-    const branch = branchName({ ticket: issue.identifier, branchOwner, id8: "" });
-    if ((await listPrsForBranch(repo, branch)).some((pr) => !pr.isDraft)) return true;
-    const r = await runWithDeadline(["gh", "api", `repos/${owner}/${name}/branches/${branch}`, "--silent"]);
-    return r.code === 0; // the branch exists on the remote
+    for (const branch of prBranchCandidates(issue.identifier, branchOwner, issue.gitBranchName)) {
+      if ((await listPrsForBranch(repo, branch)).some((pr) => !pr.isDraft)) return true;
+      const r = await runWithDeadline(["gh", "api", `repos/${owner}/${name}/branches/${branch}`, "--silent"]);
+      if (r.code === 0) return true; // the branch exists on the remote
+    }
+    return false;
   };
 }

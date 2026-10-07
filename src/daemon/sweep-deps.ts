@@ -199,8 +199,9 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
       const ctx: WorkerSeedContext = { acceptance: cfg.acceptanceFor?.(job.ticketId) ?? null };
       const sessionId = await spawnAndWait(workerSeed(job, feedback, ctx));
       const { headSha, prNumber } = await readHeadPr(job);
-      // Free the ticket branch so a fix-cycle re-spawn can re-provision it (the commits are pushed).
-      cfg.manager.releaseWorktree(sessionId);
+      // Free the ticket branch so a fix-cycle re-spawn can re-provision it — but only once a PR exists, i.e.
+      // the work is pushed. With no PR the worktree may hold un-pushed commits; keep it for the human.
+      if (prNumber != null) cfg.manager.releaseWorktree(sessionId);
       return { sessionId, headSha, prNumber };
     },
     async pollCi(job): Promise<PollResult> {

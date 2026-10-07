@@ -18,7 +18,7 @@ import { spawnPty, type PtySession, type PtyExit } from "./pty.ts";
 import { Store } from "./store.ts";
 import type { StatusTracker } from "./monitors/status.ts";
 import type { RemoteAgents } from "./remote-box.ts";
-import { provisionWorktree, removeWorktree, gitToplevel, branchName } from "./worktree.ts";
+import { provisionWorktree, removeWorktree, repoTopOfWorktree, gitToplevel, branchName } from "./worktree.ts";
 import { sessionDir, stateHome } from "../shared/paths.ts";
 import { buildSpawnSpec, DEFERRED_TOOL_GUIDANCE, type SpawnSpec } from "../shared/spawn-spec.ts";
 import { isBareTicket, extractTickets, expandTicketSeed } from "../shared/ticket.ts";
@@ -333,11 +333,9 @@ export function createSessionManager(
     releaseWorktree(sessionId) {
       const s = store.getSession(sessionId);
       if (!s?.worktreePath || !s.worktreeBranch) return;
-      // Run worktree removal from the MAIN checkout (profile.localCwd), never the worktree itself.
-      const localCwd = config.profiles.find((p) => p.id === s.profileId)?.localCwd;
-      const repoTop = localCwd ? gitToplevel(localCwd) : null;
-      if (!repoTop) return;
-      removeWorktree({ repoTop, path: s.worktreePath, branch: s.worktreeBranch });
+      // repoTop recovered from the worktree path itself (same main checkout provision used) — never the
+      // worktree, and no config lookup that could silently miss when the profile has no localCwd.
+      removeWorktree({ repoTop: repoTopOfWorktree(s.worktreePath), path: s.worktreePath, branch: s.worktreeBranch });
       store.updateSession(sessionId, { worktreePath: null, worktreeBranch: null });
     },
     onExit(cb) { exitCbs.add(cb); return () => exitCbs.delete(cb); },

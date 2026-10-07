@@ -2,11 +2,12 @@
  * Worktrees & the worktree reaper (design §7.4, §17.6).
  *
  * Path: <repo top>/.worktrees/ao/<id8>. Branch: with ticket `<branchOwner>/<TICKET>`; without,
- * `ao/<slug(title,40)>-<id8>` (the id suffix is load-bearing against collisions). Base is ALWAYS
- * origin/<defaultBranch> when available (the shared checkout was once 195 commits behind), falling
- * back to the local branch then HEAD. Script: mkdir; `git fetch --no-tags origin <branch>` (tolerated);
- * `git worktree add -B <branch> <path> <base>` (-B so a second attempt at the same ticket resets).
- * "Already used by worktree at ..." is surfaced as a one-line error. Existing dir -> reuse.
+ * `ao/<slug(title,40)>-<id8>` (the id suffix is load-bearing against collisions). Base: the branch's own
+ * remote ref `origin/<branch>` when it exists (so re-provisioning a pushed PR branch CONTINUES it), else
+ * origin/<defaultBranch> (the shared checkout was once 195 commits behind), then the local branch, then
+ * HEAD. Script: mkdir; `git fetch --no-tags origin <defaultBranch>` then `... <branch>` (both tolerated);
+ * `git worktree add -B <branch> <path> <base>`. "Already used by worktree at ..." is surfaced as a
+ * one-line error. Existing dir -> reuse.
  *
  * Removal: `worktree remove --force`, `prune`, `branch -D` (the STORED branch, never re-derived).
  * TODO(step 9): stop any docker-compose stack whose working_dir label equals the worktree first, and
@@ -126,6 +127,15 @@ export interface RemoveOptions {
   repoTop: string;
   path: string;
   branch: string;
+}
+
+/**
+ * The repo top that owns a worktree, recovered from its path. Inverse of the `<repoTop>/.worktrees/ao/<id8>`
+ * layout {@link provisionWorktree} builds — so removal runs from the same main checkout provision used,
+ * with no reliance on config (which may be unset or edited between spawn and release).
+ */
+export function repoTopOfWorktree(worktreePath: string): string {
+  return dirname(dirname(dirname(worktreePath)));
 }
 
 /** Remove a worktree and delete its branch (design §7.4). */

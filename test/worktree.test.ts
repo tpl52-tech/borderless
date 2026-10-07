@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, existsSync, writeFileSync, realpathSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  provisionWorktree, removeWorktree, gitToplevel, slug, branchName, prBranchCandidates,
+  provisionWorktree, removeWorktree, repoTopOfWorktree, gitToplevel, slug, branchName, prBranchCandidates,
 } from "../src/daemon/worktree.ts";
 
 describe("prBranchCandidates (PR discovery branches, shake-out fix)", () => {
@@ -59,6 +59,7 @@ describe("provisionWorktree / removeWorktree (design §7.4)", () => {
     const res = provisionWorktree({ repoTop: repo, branch: "ao/feat-abc12345", defaultBranch: "main", id8: "abc12345" });
     expect(res.reused).toBe(false);
     expect(res.path).toBe(join(repo, ".worktrees", "ao", "abc12345"));
+    expect(repoTopOfWorktree(res.path)).toBe(repo); // release derives repoTop this way; must match provision
     expect(existsSync(res.path)).toBe(true);
     expect(existsSync(join(res.path, "README.md"))).toBe(true);
 

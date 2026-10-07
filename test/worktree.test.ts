@@ -4,8 +4,17 @@ import { mkdtempSync, rmSync, existsSync, writeFileSync, realpathSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  provisionWorktree, removeWorktree, gitToplevel, slug, branchName,
+  provisionWorktree, removeWorktree, gitToplevel, slug, branchName, prBranchCandidates,
 } from "../src/daemon/worktree.ts";
+
+describe("prBranchCandidates (PR discovery branches, shake-out fix)", () => {
+  test("Linear's branch first, then canonical; deduped when equal; null → canonical only", () => {
+    expect(prBranchCandidates("COR-24", "tpl52", "tpl52/cor-24-sign-up")).toEqual(["tpl52/cor-24-sign-up", "tpl52/COR-24"]);
+    expect(prBranchCandidates("COR-24", "tpl52", null)).toEqual(["tpl52/COR-24"]);
+    expect(prBranchCandidates("COR-24", "tpl52", "   ")).toEqual(["tpl52/COR-24"]); // blank treated as absent
+    expect(prBranchCandidates("COR-24", "tpl52", "tpl52/COR-24")).toEqual(["tpl52/COR-24"]); // equal → one
+  });
+});
 
 function git(cwd: string, ...args: string[]): void {
   const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });

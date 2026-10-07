@@ -299,6 +299,9 @@ export interface SweepEvent {
   detail: unknown | null;
 }
 
+/** The Linear label that keeps a ticket off the automation — excluded from BOTH sweeps (PRD §2, §5). */
+export const LEAD_LEVEL = "lead-level";
+
 /** A Linear issue synced into the orchestrator (feeds the in-review sweep). */
 export interface LinearIssue {
   id: string;

@@ -137,6 +137,8 @@ export interface OperatorConfigLite {
   alertSlackId?: string;
   defaultProfileId?: string;
   repo?: string;
+  /** Linear project whose issues are the lead desk (PRD §9) — excluded from both sweeps; default "Lead Ops". */
+  leadOpsProject?: string;
 }
 
 export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
@@ -171,6 +173,7 @@ export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
     alertSlackId: typeof raw.alertSlackId === "string" ? raw.alertSlackId : undefined,
     defaultProfileId: typeof raw.defaultProfileId === "string" ? raw.defaultProfileId : undefined,
     repo: typeof raw.repo === "string" ? raw.repo : undefined,
+    leadOpsProject: typeof raw.leadOpsProject === "string" && raw.leadOpsProject.trim() ? raw.leadOpsProject.trim() : undefined,
   };
 }
 

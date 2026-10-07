@@ -19,6 +19,7 @@
  *   ao rescue [authorize <ticketKey>]          list eligible overdue tickets / authorize a rescue
  *   ao boards                                  unblocked tickets, ranked by critical-path impact
  *   ao assign                                  suggested assignee per unblocked ticket (load-balanced)
+ *   ao desk                                    open Lead Ops tasks (the lead desk; human to-do list)
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
@@ -101,6 +102,16 @@ export async function main(argv: string[]): Promise<void> {
       const rows = await client.request<Array<{ ticketKey: string; netid: string; name: string; load: number }>>("assign.suggest");
       if (rows.length === 0) console.log("assign: nothing to suggest");
       else for (const r of rows) console.log(`  ${r.ticketKey}  →  ${r.name} (${r.netid}, load ${r.load})`);
+    });
+    return;
+  }
+
+  // `ao desk` — the lead desk: open Lead Ops tasks (ad-hoc delegation), a plain human task list (PRD §9).
+  if (sub === "desk") {
+    await withDaemon("desk", async (client) => {
+      const rows = await client.request<Array<{ ticketKey: string; title: string; assignee: string; state: string }>>("lead.desk");
+      if (rows.length === 0) console.log("desk: no open Lead Ops tasks");
+      else for (const r of rows) console.log(`  ${r.ticketKey}  [${r.state}]  →  ${r.assignee}  ${r.title}`);
     });
     return;
   }

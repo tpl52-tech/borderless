@@ -311,6 +311,7 @@ export interface LinearIssue {
   stateType: string | null;  // e.g. "started"
   assignee: string | null;   // Linear user id
   projectId: string | null;
+  projectName: string | null; // project name; the "Lead Ops" project is excluded from both sweeps (PRD §9)
   teamKey: string | null;
   url: string | null;
   priority: number | null;

@@ -67,7 +67,7 @@ describe("parseReviewVerdict (reviewer output → verdict)", () => {
   });
 });
 
-describe("workerSeed (PRD §5/§4 — rescue embeds ACs + branch; in-review drives the PR)", () => {
+describe("workerSeed (PRD §5/§4 — rescue embeds the ACs; in-review drives the PR)", () => {
   const job = (over: Partial<SweepJob> = {}): SweepJob => ({
     id: "j1", kind: "rescue", ticketId: "t1", ticketKey: "COR-9", assignee: null,
     prNumber: null, headSha: null, sessionId: null, state: "queued", cycles: 0,

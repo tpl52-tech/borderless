@@ -175,10 +175,11 @@ export async function hydrateInReviewJob(store: Store, job: SweepJob, cfg: { rep
 export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
   const deadline = cfg.spawnDeadlineMs ?? DEFAULT_SPAWN_DEADLINE_MS;
 
-  const spawnAndWait = async (seed: string): Promise<string> => {
+  const spawnAndWait = async (seed: string, opts: { ignoreSeedTicket?: boolean } = {}): Promise<string> => {
     const session = await cfg.manager.spawn({
       taskId: cfg.taskId, tool: "claude", location: "local", cwd: cfg.cwd,
       usesWorktree: true, permissions: "full-access", repo: cfg.repo, seed,
+      ignoreSeedTicket: opts.ignoreSeedTicket,
     });
     await awaitCompletion(cfg.tracker, session.id, deadline);
     return session.id;
@@ -206,7 +207,9 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
       return { checks: checkStates(pr.statusCheckRollup), changedPaths: await changedPaths(cfg.repo, job.prNumber) };
     },
     async review(job): Promise<ReviewVerdict> {
-      const sessionId = await spawnAndWait(reviewerSeed(job));
+      // ignoreSeedTicket: the reviewer only reads the PR via gh — keep it off the worker's ticket-branch
+      // worktree (two worktrees can't share a branch), so it gets a throwaway branch instead.
+      const sessionId = await spawnAndWait(reviewerSeed(job), { ignoreSeedTicket: true });
       let out = "";
       try { out = readFileSync(join(sessionDir(sessionId, cfg.home), "verdict.txt"), "utf8"); } catch { /* missing → fails closed */ }
       cfg.manager.kill(sessionId); // don't leak the reviewer PTY

@@ -28,7 +28,7 @@ import {
 import { sshUserFromDest } from "../shared/remote.ts";
 import { applyTicketPlaceholder } from "../shared/settings.ts";
 import { defaultOperatorConfig, type OperatorConfigLite } from "../shared/config.ts";
-import type { Session, SessionStatus, Tool, Location, Permissions, Effort } from "../shared/types.ts";
+import type { Session, SessionStatus, Tool, Location, Permissions, Effort, TicketProvider } from "../shared/types.ts";
 
 const HOOK_PATH = new URL("./hook-notify.ts", import.meta.url).pathname;
 
@@ -47,6 +47,10 @@ export interface SpawnParams {
   seed?: string;
   cols?: number;
   rows?: number;
+  /** Don't derive the worktree branch from a ticket mentioned in the seed — give this spawn a throwaway
+   *  branch. Used for a sweep's reviewer, which only reads the PR via gh and must NOT contend for the
+   *  worker's ticket-branch worktree (it would refuse to share the checkout). */
+  ignoreSeedTicket?: boolean;
   /** Override argv (tests / bring-up); otherwise derived from the per-CLI spawn spec. */
   command?: string[];
 }
@@ -64,6 +68,26 @@ export interface SessionManager {
   forget(sessionId: string): void;
   onExit(cb: (e: { sessionId: string; exit: PtyExit }) => void): () => void;
   shutdown(): void;
+}
+
+/**
+ * The ticket a spawn's worktree branch keys on (pure; the input to branchName):
+ *  - `ignoreSeedTicket` → none, so the spawn gets a throwaway `ao/*` branch (a reviewer reads the PR via
+ *    gh and must not contend for the worker's ticket-branch worktree);
+ *  - a bare-ticket seed (`"COR-9"`) → that key (uppercased);
+ *  - otherwise the first ticket mentioned in the title/seed, or null.
+ */
+export function seedTicket(opts: {
+  ignoreSeedTicket?: boolean;
+  seed?: string;
+  title?: string;
+  teamKeys: string[];
+  provider: TicketProvider;
+}): string | null {
+  if (opts.ignoreSeedTicket) return null;
+  const seed = opts.seed?.trim();
+  if (seed && isBareTicket(seed, opts.teamKeys)) return seed.toUpperCase();
+  return extractTickets(`${opts.title ?? ""} ${seed ?? ""}`, opts.teamKeys, opts.provider)[0] ?? null;
 }
 
 interface Common {
@@ -141,18 +165,16 @@ export function createSessionManager(
     const teamKeys = profile.linearTeamKeys ?? config.linearTeamKeys ?? [];
 
     let seed = params.seed?.trim() || undefined;
-    let ticket: string | null = null;
+    const ticket = seedTicket({ ignoreSeedTicket: params.ignoreSeedTicket, seed, title: params.title, teamKeys, provider: profile.ticketProvider });
     let seedIsTicket = false;
-    if (seed && isBareTicket(seed, teamKeys)) {
-      ticket = seed.toUpperCase();
+    if (ticket && seed && isBareTicket(seed, teamKeys)) {
+      // a bare-ticket seed ("COR-9") expands into the real implement prompt
       seedIsTicket = true;
       const custom = ticketPromptFor(tool, config);
       seed = custom ? applyTicketPlaceholder(custom, ticket) : expandTicketSeed(ticket, tool, {
         provider: profile.ticketProvider, reviewPolicy: profile.reviewPolicy,
         ctoLogin: profile.ctoLogin, codexBotLogin: profile.ctoBotLogin,
       });
-    } else {
-      ticket = extractTickets(`${params.title ?? ""} ${seed ?? ""}`, teamKeys, profile.ticketProvider)[0] ?? null;
     }
 
     return {

@@ -40,12 +40,17 @@ export function crumbLabel(screenIdx: number): string {
   return NAV_LABELS[screenIdx] ?? NAV_LABELS[0]!;
 }
 
-/** Pad or truncate a value to exactly `width` columns (truncation keeps a trailing ellipsis). Pure. */
+/**
+ * Pad or truncate a value to exactly `width` columns (truncation keeps a trailing ellipsis). Pure.
+ * Null-safe: a client/daemon version skew can hand a row a missing field, so a nullish value renders
+ * as blank rather than crashing the whole TUI on `.length` (the failure mode the old `pad` had).
+ */
 export function cell(value: string, width: number, align: "left" | "right" = "left"): string {
+  const s = value ?? "";
   if (width <= 0) return "";
-  if (value.length > width) return width <= 1 ? value.slice(0, width) : value.slice(0, width - 1) + "…";
-  const padding = " ".repeat(width - value.length);
-  return align === "right" ? padding + value : value + padding;
+  if (s.length > width) return width <= 1 ? s.slice(0, width) : s.slice(0, width - 1) + "…";
+  const padding = " ".repeat(width - s.length);
+  return align === "right" ? padding + s : s + padding;
 }
 
 // --- SWEEPS derivations (the hero numbers + the three panels all come from the one sweep list) -----------

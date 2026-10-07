@@ -40,6 +40,11 @@ describe("cell (fixed-width columns)", () => {
     expect(cell("abc", 0)).toBe("");
     expect(cell("abc", 1)).toBe("a");
   });
+  test("null-safe — a missing field (version skew) renders blank, never crashes on .length", () => {
+    expect(cell(undefined as unknown as string, 4)).toBe("    ");
+    expect(cell(null as unknown as string, 3, "right")).toBe("   ");
+    expect(cell(undefined as unknown as string, 0)).toBe("");
+  });
 });
 
 describe("heroStats + partitions (the SWEEPS numbers + side panels, all from one list)", () => {

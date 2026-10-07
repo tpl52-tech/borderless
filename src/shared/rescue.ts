@@ -8,6 +8,7 @@
  */
 
 import type { LinearIssue } from "./types.ts";
+import { isTerminalState } from "./boards.ts";
 
 export interface RescueContext {
   now: number;
@@ -46,7 +47,7 @@ export function rescueEligibility(
   if (!issue.assignee || !ctx.isRosterMember) reasons.push("assignee not a roster member");
   // Beyond §5's four: a manually done/canceled ticket isn't work to rescue (and hasProgress alone can
   // miss a ticket closed with no branch/commits/PR).
-  if (issue.stateType === "completed" || issue.stateType === "canceled") reasons.push("already done/canceled");
+  if (isTerminalState(issue.stateType)) reasons.push("already done/canceled");
   return { eligible: reasons.length === 0, reasons };
 }
 

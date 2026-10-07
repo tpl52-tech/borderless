@@ -18,7 +18,7 @@ import { spawnPty, type PtySession, type PtyExit } from "./pty.ts";
 import { Store } from "./store.ts";
 import type { StatusTracker } from "./monitors/status.ts";
 import type { RemoteAgents } from "./remote-box.ts";
-import { provisionWorktree, gitToplevel, branchName } from "./worktree.ts";
+import { provisionWorktree, removeWorktree, gitToplevel, branchName } from "./worktree.ts";
 import { sessionDir, stateHome } from "../shared/paths.ts";
 import { buildSpawnSpec, DEFERRED_TOOL_GUIDANCE, type SpawnSpec } from "../shared/spawn-spec.ts";
 import { isBareTicket, extractTickets, expandTicketSeed } from "../shared/ticket.ts";
@@ -66,6 +66,10 @@ export interface SessionManager {
   resize(sessionId: string, cols: number, rows: number): void;
   kill(sessionId: string): void;
   forget(sessionId: string): void;
+  /** Remove a session's worktree + delete its local branch, freeing the branch for a re-spawn (its commits
+   *  live on the pushed remote branch). No-op if the session has no worktree. Used by the sweep engine so a
+   *  completed worker releases the ticket branch before the next cycle. */
+  releaseWorktree(sessionId: string): void;
   onExit(cb: (e: { sessionId: string; exit: PtyExit }) => void): () => void;
   shutdown(): void;
 }
@@ -325,6 +329,16 @@ export function createSessionManager(
     forget(sessionId) {
       tracker.unregister(sessionId);
       remote?.stopSession(sessionId);
+    },
+    releaseWorktree(sessionId) {
+      const s = store.getSession(sessionId);
+      if (!s?.worktreePath || !s.worktreeBranch) return;
+      // Run worktree removal from the MAIN checkout (profile.localCwd), never the worktree itself.
+      const localCwd = config.profiles.find((p) => p.id === s.profileId)?.localCwd;
+      const repoTop = localCwd ? gitToplevel(localCwd) : null;
+      if (!repoTop) return;
+      removeWorktree({ repoTop, path: s.worktreePath, branch: s.worktreeBranch });
+      store.updateSession(sessionId, { worktreePath: null, worktreeBranch: null });
     },
     onExit(cb) { exitCbs.add(cb); return () => exitCbs.delete(cb); },
     shutdown() {

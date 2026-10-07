@@ -199,6 +199,8 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
       const ctx: WorkerSeedContext = { acceptance: cfg.acceptanceFor?.(job.ticketId) ?? null };
       const sessionId = await spawnAndWait(workerSeed(job, feedback, ctx));
       const { headSha, prNumber } = await readHeadPr(job);
+      // Free the ticket branch so a fix-cycle re-spawn can re-provision it (the commits are pushed).
+      cfg.manager.releaseWorktree(sessionId);
       return { sessionId, headSha, prNumber };
     },
     async pollCi(job): Promise<PollResult> {
@@ -213,6 +215,7 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
       let out = "";
       try { out = readFileSync(join(sessionDir(sessionId, cfg.home), "verdict.txt"), "utf8"); } catch { /* missing → fails closed */ }
       cfg.manager.kill(sessionId); // don't leak the reviewer PTY
+      cfg.manager.releaseWorktree(sessionId); // clean its throwaway worktree too
       return parseReviewVerdict(out, sessionId);
     },
     wait: (ms) => Bun.sleep(ms),

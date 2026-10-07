@@ -101,7 +101,8 @@ function Vhead({ title, sub }: { title: string; sub: string }) {
 interface Column<T> { header: string; width: number; align?: "left" | "right"; value: (r: T) => string; tone?: (r: T) => Tone }
 
 /** A columnar table with a dim header row, per-cell tones, and a pink left bar on the selected row. */
-function Table<T>({ columns, data, selected }: { columns: Column<T>[]; data: T[]; selected?: number }) {
+function Table<T>({ columns, data, selected, empty }: { columns: Column<T>[]; data: T[]; selected?: number; empty: string }) {
+  if (data.length === 0) return <Text color={PALETTE.dim}>{empty}</Text>;
   // wrap="truncate" keeps every row to one line — a cell cut short by a narrow terminal beats a row that
   // wraps and shears the column grid (cell() already fits content to the column; this guards the overflow).
   return (
@@ -136,6 +137,26 @@ const SWEEP_COLUMNS: Column<SweepRow>[] = [
   { header: "CYC", width: 3, align: "right", value: (r) => String(r.cycles), tone: () => "dim" },
 ];
 
+const BOARD_COLUMNS: Column<BoardRow>[] = [
+  { header: "TICKET", width: 8, value: (r) => r.ticketKey },
+  { header: "TITLE", width: 24, value: (r) => r.title, tone: () => "ink" },
+  { header: "UNBLKS", width: 6, align: "right", value: (r) => String(r.downstream), tone: () => "green" },
+];
+
+const ASSIGN_COLUMNS: Column<AssignRow>[] = [
+  { header: "TICKET", width: 8, value: (r) => r.ticketKey },
+  { header: "→ SUGGEST", width: 22, value: (r) => r.name, tone: () => "pink" },
+  { header: "NETID", width: 8, value: (r) => r.netid, tone: () => "dim" },
+  { header: "LOAD", width: 4, align: "right", value: (r) => String(r.load), tone: () => "ink2" },
+];
+
+const ROSTER_COLUMNS: Column<RosterRow>[] = [
+  { header: "NAME", width: 22, value: (r) => r.name, tone: () => "ink" },
+  { header: "NETID", width: 8, value: (r) => r.netid, tone: () => "dim" },
+  { header: "GITHUB", width: 18, value: (r) => r.github, tone: () => "ink2" },
+  { header: "ROLE", width: 6, value: (r) => (r.lead ? "lead" : "member"), tone: (r) => (r.lead ? "pink" : "dim") },
+];
+
 function SweepsView({ sweeps, cursor, empty }: { sweeps: SweepRow[]; cursor: number; empty: string }) {
   const stats = heroStats(sweeps);
   const ready = readyRows(sweeps);
@@ -162,9 +183,7 @@ function SweepsView({ sweeps, cursor, empty }: { sweeps: SweepRow[]; cursor: num
       <Box flexDirection="row">
         <Box flexDirection="column" flexGrow={2} marginRight={1}>
           <Panel title="SWEEP_QUEUE" meta={`${sweeps.length} JOBS`}>
-            {sweeps.length === 0
-              ? <Text color={PALETTE.dim}>{empty}</Text>
-              : <Table columns={SWEEP_COLUMNS} data={sweeps} selected={cursor} />}
+            <Table columns={SWEEP_COLUMNS} data={sweeps} selected={cursor} empty={empty} />
           </Panel>
         </Box>
         <Box flexDirection="column" flexGrow={1}>
@@ -199,12 +218,7 @@ function BoardsView({ rows, cursor, empty }: { rows: BoardRow[]; cursor: number;
       <Box flexDirection="row">
         <Box flexDirection="column" flexGrow={1} marginRight={1}>
           <Panel title="UNBLOCKED" meta={`${rows.length}`}>
-            {rows.length === 0 ? <Text color={PALETTE.dim}>{empty}</Text>
-              : <Table columns={[
-                { header: "TICKET", width: 8, value: (r: BoardRow) => r.ticketKey },
-                { header: "TITLE", width: 24, value: (r: BoardRow) => r.title, tone: () => "ink" },
-                { header: "UNBLKS", width: 6, align: "right", value: (r: BoardRow) => String(r.downstream), tone: () => "green" },
-              ]} data={rows} selected={cursor} />}
+            <Table columns={BOARD_COLUMNS} data={rows} selected={cursor} empty={empty} />
           </Panel>
         </Box>
         <Box flexDirection="column" flexGrow={1}>
@@ -229,13 +243,7 @@ function AssignView({ rows, cursor, empty }: { rows: AssignRow[]; cursor: number
     <Box flexDirection="column">
       <Vhead title="ASSIGN" sub="Suggested owner per unblocked ticket — from load, fit, and the do-next order. You approve; nothing auto-assigns." />
       <Panel title="SUGGESTIONS" meta={`${rows.length}`}>
-        {rows.length === 0 ? <Text color={PALETTE.dim}>{empty}</Text>
-          : <Table columns={[
-            { header: "TICKET", width: 8, value: (r: AssignRow) => r.ticketKey },
-            { header: "→ SUGGEST", width: 22, value: (r: AssignRow) => r.name, tone: () => "pink" },
-            { header: "NETID", width: 8, value: (r: AssignRow) => r.netid, tone: () => "dim" },
-            { header: "LOAD", width: 4, align: "right", value: (r: AssignRow) => String(r.load), tone: () => "ink2" },
-          ]} data={rows} selected={cursor} />}
+        <Table columns={ASSIGN_COLUMNS} data={rows} selected={cursor} empty={empty} />
       </Panel>
     </Box>
   );
@@ -265,13 +273,7 @@ function RosterView({ rows, cursor, empty }: { rows: RosterRow[]; cursor: number
     <Box flexDirection="column">
       <Vhead title="ROSTER" sub="The team from shared/roster.ts — the Linear↔GitHub↔Slack identity map the sweeps and lead desk resolve people through." />
       <Panel title="MEMBERS" meta={`${rows.length}`}>
-        {rows.length === 0 ? <Text color={PALETTE.dim}>{empty}</Text>
-          : <Table columns={[
-            { header: "NAME", width: 22, value: (r: RosterRow) => r.name, tone: () => "ink" },
-            { header: "NETID", width: 8, value: (r: RosterRow) => r.netid, tone: () => "dim" },
-            { header: "GITHUB", width: 18, value: (r: RosterRow) => r.github, tone: () => "ink2" },
-            { header: "ROLE", width: 6, value: (r: RosterRow) => (r.lead ? "lead" : "member"), tone: (r: RosterRow) => (r.lead ? "pink" : "dim") },
-          ]} data={rows} selected={cursor} />}
+        <Table columns={ROSTER_COLUMNS} data={rows} selected={cursor} empty={empty} />
       </Panel>
     </Box>
   );
@@ -317,8 +319,8 @@ function Console({ client, onAction }: { client: DaemonClient; onAction: (a: Sur
   const { exit } = useApp();
 
   const onAsk = screenIdx === ASK_IDX;
-  const onSweeps = screenIdx === 0;
   const listScreen = onAsk ? null : CONSOLE_SCREENS[screenIdx]!;
+  const onSweeps = listScreen?.key === "sweeps"; // by key, not index — consistent with the key-based dispatch
   const activeRows: unknown[] = onSweeps ? sweeps : rows; // the list the cursor/attach act on
 
   // SWEEPS queue, polled independently of the active screen → always-current top-bar badge + daemon health.
@@ -385,12 +387,12 @@ function Console({ client, onAction }: { client: DaemonClient; onAction: (a: Sur
     if (onAsk) return <AskView log={askLog} input={askInput} busy={askBusy} />;
     if (onSweeps) return <SweepsView sweeps={sweeps} cursor={cursor} empty={listScreen!.empty} />;
     if (error) return <Text color={PALETTE.red}>error: {error}</Text>;
-    const empty = listScreen!.empty;
-    switch (screenIdx) {
-      case 1: return <BoardsView rows={rows as BoardRow[]} cursor={cursor} empty={empty} />;
-      case 2: return <AssignView rows={rows as AssignRow[]} cursor={cursor} empty={empty} />;
-      case 3: return <LeadDeskView rows={rows as DeskRow[]} cursor={cursor} empty={empty} />;
-      default: return <RosterView rows={rows as RosterRow[]} cursor={cursor} empty={empty} />;
+    const { key, empty } = listScreen!; // dispatch on the screen key, not an index coupled to registry order
+    switch (key) {
+      case "boards": return <BoardsView rows={rows as BoardRow[]} cursor={cursor} empty={empty} />;
+      case "assign": return <AssignView rows={rows as AssignRow[]} cursor={cursor} empty={empty} />;
+      case "lead_desk": return <LeadDeskView rows={rows as DeskRow[]} cursor={cursor} empty={empty} />;
+      default: return <RosterView rows={rows as RosterRow[]} cursor={cursor} empty={empty} />; // "roster"
     }
   };
 

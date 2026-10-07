@@ -18,7 +18,7 @@ import {
 import { doNext } from "../shared/boards.ts";
 import { activeLoads, suggestAssignments } from "../shared/assign.ts";
 import { deskOverview, type DelegateRequest, type DelegateResult } from "../shared/lead-desk.ts";
-import { ROSTER } from "../shared/roster.ts";
+import { ROSTER, memberByLinearId } from "../shared/roster.ts";
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { WorkItemMonitor } from "./monitors/work-item.ts";
@@ -247,7 +247,7 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
       // --- console reads (PRD §11 Ink TUI): plain reads for the SWEEPS + ROSTER screens -----------------
       case "sweep.list":
         return store.listSweepJobs().map((j) => ({
-          ticketKey: j.ticketKey, kind: j.kind, state: j.state,
+          ticketKey: j.ticketKey, kind: j.kind, state: j.state, owner: sweepOwner(j.assignee),
           prNumber: j.prNumber, cycles: j.cycles, reason: j.reason, sessionId: j.sessionId,
         }));
       case "roster.get":
@@ -324,4 +324,10 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
 
 function sizeOf(p: Record<string, any>): { cols: number; rows: number } | undefined {
   return p.cols && p.rows ? { cols: p.cols, rows: p.rows } : undefined;
+}
+
+/** The OWNER cell for a sweep job: the assignee's roster first name, else the raw Linear id, else null. */
+function sweepOwner(assignee: string | null): string | null {
+  if (!assignee) return null;
+  return memberByLinearId(assignee)?.name.split(" ")[0] ?? assignee;
 }

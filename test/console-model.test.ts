@@ -1,36 +1,82 @@
 import { test, expect, describe } from "bun:test";
 import {
-  CONSOLE_SCREENS, formatRow, clampCursor, moveCursor, attachTarget, editInput,
+  CONSOLE_SCREENS, NAV_LABELS, crumbLabel, cell, clampCursor, moveCursor, attachTarget, editInput,
+  heroStats, readyRows, needsYouRows, stateTone, kindTone, kindLabel,
   type SweepRow,
 } from "../src/client/console-model.ts";
 
-describe("CONSOLE_SCREENS registry (PRD §11)", () => {
+const sweep = (over: Partial<SweepRow> = {}): SweepRow => ({
+  ticketKey: "COR-1", kind: "in_review", state: "reviewing", owner: null,
+  prNumber: null, cycles: 0, reason: null, sessionId: null, ...over,
+});
+
+describe("CONSOLE_SCREENS registry + nav (PRD §11)", () => {
   test("the five screens, in number-key order, each bound to a read request", () => {
     expect(CONSOLE_SCREENS.map((s) => s.key)).toEqual(["sweeps", "boards", "assign", "lead_desk", "roster"]);
     expect(CONSOLE_SCREENS.map((s) => s.request)).toEqual(["sweep.list", "boards.get", "assign.suggest", "lead.desk", "roster.get"]);
-    expect(CONSOLE_SCREENS.every((s) => s.label && s.empty)).toBe(true);
+    expect(CONSOLE_SCREENS.every((s) => s.label && s.nav && s.empty)).toBe(true);
+  });
+  test("NAV_LABELS append ASK after the five screens; crumb follows the index", () => {
+    expect(NAV_LABELS).toEqual(["SWEEPS", "BOARDS", "ASSIGN", "LEAD_DESK", "ROSTER", "ASK"]);
+    expect(crumbLabel(0)).toBe("SWEEPS");
+    expect(crumbLabel(5)).toBe("ASK");
+    expect(crumbLabel(99)).toBe("SWEEPS"); // out of range falls back to the first
   });
 });
 
-describe("formatRow", () => {
-  test("a SWEEPS row shows PR, cycles, the attach hint (only with a session), and a reason", () => {
-    const base: SweepRow = { ticketKey: "COR-9", kind: "in_review", state: "reviewing", prNumber: 4, cycles: 1, reason: null, sessionId: "s1" };
-    const line = formatRow("sweeps", base);
-    expect(line).toContain("COR-9");
-    expect(line).toContain("PR#4");
-    expect(line).toContain("cyc=1");
-    expect(line).toContain("⏎attach");
-    expect(formatRow("sweeps", { ...base, sessionId: null })).not.toContain("⏎attach");
-    expect(formatRow("sweeps", { ...base, prNumber: null, reason: "no PR found" })).toContain("— no PR found");
-    expect(formatRow("sweeps", { ...base, prNumber: null })).toContain("—");
+describe("cell (fixed-width columns)", () => {
+  test("pads left-aligned to width", () => {
+    expect(cell("COR-1", 8)).toBe("COR-1   ");
+    expect(cell("", 3)).toBe("   ");
   });
+  test("pads right-aligned to width", () => {
+    expect(cell("8", 3, "right")).toBe("  8");
+  });
+  test("truncates with a trailing ellipsis", () => {
+    expect(cell("notifications table", 8)).toBe("notific…");
+    expect(cell("abc", 3)).toBe("abc"); // exact fit, no ellipsis
+  });
+  test("degenerate widths", () => {
+    expect(cell("abc", 0)).toBe("");
+    expect(cell("abc", 1)).toBe("a");
+  });
+});
 
-  test("the other screens render their shapes", () => {
-    expect(formatRow("boards", { ticketKey: "COR-1", title: "Login", downstream: 3 })).toContain("unblocks");
-    expect(formatRow("assign", { ticketKey: "COR-1", netid: "ktt38", name: "Kenan Tat", load: 2 })).toContain("→ Kenan Tat");
-    expect(formatRow("lead_desk", { ticketKey: "COR-7", title: "Book van", assignee: "Tess Lee", state: "Todo" })).toContain("Book van");
-    expect(formatRow("roster", { name: "Tess Lee", netid: "tpl52", github: "tpl52-tech", lead: true })).toContain("— lead");
-    expect(formatRow("roster", { name: "Willow Chen", netid: "wc697", github: "willowchen2", lead: false })).not.toContain("lead");
+describe("heroStats + partitions (the SWEEPS numbers + side panels, all from one list)", () => {
+  const rows = [
+    sweep({ state: "ready" }),
+    sweep({ state: "ready" }),
+    sweep({ state: "needs_human" }),
+    sweep({ state: "reviewing" }),
+    sweep({ state: "queued" }),
+    sweep({ state: "merged" }),
+  ];
+  test("counts scope / active / ready / needs-you", () => {
+    expect(heroStats(rows)).toEqual({ inScope: 6, active: 2, ready: 2, needsYou: 1 });
+    expect(heroStats([])).toEqual({ inScope: 0, active: 0, ready: 0, needsYou: 0 });
+  });
+  test("readyRows / needsYouRows select the right subsets", () => {
+    expect(readyRows(rows).map((r) => r.state)).toEqual(["ready", "ready"]);
+    expect(needsYouRows(rows).map((r) => r.state)).toEqual(["needs_human"]);
+  });
+});
+
+describe("state / kind tones (match the HTML mock)", () => {
+  test("state tone", () => {
+    expect(stateTone("ready")).toBe("green");
+    expect(stateTone("merged")).toBe("green");
+    expect(stateTone("needs_human")).toBe("pink");
+    expect(stateTone("failed")).toBe("red");
+    expect(stateTone("queued")).toBe("dim");
+    expect(stateTone("ci")).toBe("dim");
+    expect(stateTone("reviewing")).toBe("ink");
+    expect(stateTone("implementing")).toBe("ink");
+  });
+  test("kind tone + label", () => {
+    expect(kindTone("rescue")).toBe("pink");
+    expect(kindTone("in_review")).toBe("ink2");
+    expect(kindLabel("rescue")).toBe("rescue");
+    expect(kindLabel("in_review")).toBe("review");
   });
 });
 
@@ -51,8 +97,8 @@ describe("cursor nav (no wrap — rows don't jump the cursor)", () => {
 
 describe("attachTarget — only a SWEEPS row with a live session is attachable", () => {
   const sweeps: SweepRow[] = [
-    { ticketKey: "COR-9", kind: "rescue", state: "implementing", prNumber: null, cycles: 0, reason: null, sessionId: "sess-1" },
-    { ticketKey: "COR-8", kind: "in_review", state: "needs_human", prNumber: 4, cycles: 2, reason: "no PR", sessionId: null },
+    sweep({ ticketKey: "COR-9", kind: "rescue", state: "implementing", sessionId: "sess-1" }),
+    sweep({ ticketKey: "COR-8", state: "needs_human", prNumber: 4, cycles: 2, reason: "no PR", sessionId: null }),
   ];
   test("returns the session for a sweep row that has one, else null", () => {
     expect(attachTarget("sweeps", sweeps, 0)).toBe("sess-1");

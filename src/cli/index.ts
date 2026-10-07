@@ -105,6 +105,16 @@ export async function main(argv: string[]): Promise<void> {
     return;
   }
 
+  // `ao desk` — the lead desk: open Lead Ops tasks (ad-hoc delegation), a plain human task list (PRD §9).
+  if (sub === "desk") {
+    await withDaemon("desk", async (client) => {
+      const rows = await client.request<Array<{ ticketKey: string; title: string; assignee: string; state: string }>>("lead.desk");
+      if (rows.length === 0) console.log("desk: no open Lead Ops tasks");
+      else for (const r of rows) console.log(`  ${r.ticketKey}  [${r.state}]  →  ${r.assignee}  ${r.title}`);
+    });
+    return;
+  }
+
   if (sub && (SUBCOMMANDS as readonly string[]).includes(sub)) {
     throw new Error(`ao ${sub}: not implemented — see BUILD.md (design §18)`);
   }

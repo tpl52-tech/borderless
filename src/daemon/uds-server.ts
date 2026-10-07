@@ -17,6 +17,7 @@ import {
 } from "../shared/wire.ts";
 import { doNext } from "../shared/boards.ts";
 import { activeLoads, suggestAssignments } from "../shared/assign.ts";
+import { deskOverview } from "../shared/lead-desk.ts";
 import { ROSTER } from "../shared/roster.ts";
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
@@ -43,6 +44,8 @@ export interface UdsServerDeps {
   rescueScan: () => Promise<Array<{ ticketId: string; ticketKey: string; title: string; daysOverdue: number }>>;
   /** Build order #4b: authorize a rescue for one ticket (id or identifier) → a rescue sweep_job + run it. */
   rescueAuthorize: (ticket: string) => { ticketKey: string; created: boolean; started: boolean };
+  /** PRD §9: the lead-desk project name whose issues are excluded from the sweeps and shown on the desk. */
+  leadOpsProject?: string;
 }
 
 export interface UdsServer {
@@ -228,6 +231,10 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
         return suggestAssignments(doNext(issues), ROSTER, activeLoads(issues, ROSTER))
           .map((s) => ({ ticketKey: s.ticketKey, netid: s.netid, name: s.name, load: s.load }));
       }
+
+      // --- lead desk (PRD §9): open Lead Ops tasks, a plain human task list (no gate, no agent) ----------
+      case "lead.desk":
+        return deskOverview(store.listLinearIssues(), ROSTER, deps.leadOpsProject);
 
       // --- usage / quota ---
       case "usage.get":

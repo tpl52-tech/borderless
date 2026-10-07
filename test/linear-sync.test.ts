@@ -37,7 +37,7 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
       id: "uuid-1", identifier: "COR-1", title: "Fix the thing",
       url: "https://linear.app/cornell-ewb-softdev/issue/COR-1",
       stateName: "In Review", stateType: "started", assignee: "user-1",
-      projectId: "proj-1", teamKey: "COR", priority: 2,
+      projectId: "proj-1", projectName: null, teamKey: "COR", priority: 2,
       dueDate: null, labels: [], blockedBy: [], gitBranchName: null,
       updatedAt: Date.parse("2026-10-06T18:00:00.000Z"),
     });
@@ -67,6 +67,13 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
     })]));
     expect(issues[0]!.dueDate).toBe(Date.parse("2026-10-01"));
     expect(issues[0]!.labels).toEqual(["lead-level", "intermediate"]);
+  });
+
+  test("maps projectName from the issue's project (feeds the Lead Ops exclusion, PRD §9)", () => {
+    const { issues } = parseIssuesResponse(page([node({ project: { id: "p1", name: "Lead Ops" } })]));
+    expect(issues[0]!.projectName).toBe("Lead Ops");
+    expect(parseIssuesResponse(page([node({ project: { id: "p1" } })])).issues[0]!.projectName).toBeNull(); // name absent → null
+    expect(parseIssuesResponse(page([node({ project: null })])).issues[0]!.projectName).toBeNull(); // no project → null
   });
 
   test("maps gitBranchName from Linear's branchName (the team's PR branch)", () => {
@@ -158,5 +165,15 @@ describe("sync -> enqueue in-review (build order #2 end to end)", () => {
 
     // running again creates nothing new (an active in-review job already exists per ticket)
     expect(s.enqueueInReviewSweeps("In Review")).toHaveLength(0);
+  });
+
+  test("Lead Ops issues are never enqueued, even In Review (PRD §9)", async () => {
+    const s = new Store(":memory:");
+    await syncLinearIssues(s, recordingClient([page([
+      node({ id: "u1", identifier: "COR-1", state: { name: "In Review", type: "started" } }),
+      node({ id: "u2", identifier: "COR-2", state: { name: "In Review", type: "started" }, project: { id: "lo", name: "Lead Ops" } }),
+    ])]), ["COR"]);
+    const created = s.enqueueInReviewSweeps("In Review");
+    expect(created.map((j) => j.ticketKey)).toEqual(["COR-1"]); // COR-2 (Lead Ops) excluded
   });
 });

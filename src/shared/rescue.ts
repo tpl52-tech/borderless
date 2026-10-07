@@ -9,6 +9,7 @@
 
 import { LEAD_LEVEL, type LinearIssue } from "./types.ts";
 import { isTerminalState } from "./boards.ts";
+import { isLeadOps } from "./lead-desk.ts";
 
 export interface RescueContext {
   now: number;
@@ -16,6 +17,8 @@ export interface RescueContext {
   hasProgress: boolean;
   /** The assignee resolves to a roster member (roster.memberByLinearId). */
   isRosterMember: boolean;
+  /** The lead-desk project name to exclude (PRD §9); defaults to "Lead Ops" when unset. */
+  leadOpsProject?: string;
 }
 
 export interface RescueEligibility {
@@ -28,20 +31,22 @@ const DAY_MS = 86_400_000;
 
 /**
  * Eligible iff ALL of PRD §5's four conditions hold — the due date has passed · NOT labeled `lead-level` ·
- * no meaningful progress · the assignee is a roster member — plus one added safety guard: the ticket isn't
- * already done/canceled. Returns the failing reasons so the console can explain a ticket's status.
+ * no meaningful progress · the assignee is a roster member — plus two guards: the ticket isn't already
+ * done/canceled, and it isn't a lead-desk ("Lead Ops") task (PRD §9, excluded from both sweeps). Returns
+ * the failing reasons so the console can explain a ticket's status.
  *
  * Overdue uses "the due day has fully elapsed": Linear's dueDate is a timeless UTC date, so a ticket due D
  * is overdue only once `now >= D + 1 day` — never while the due day is still in progress (PRD §5 "passed").
  */
 export function rescueEligibility(
-  issue: Pick<LinearIssue, "dueDate" | "labels" | "assignee" | "stateType">,
+  issue: Pick<LinearIssue, "dueDate" | "labels" | "assignee" | "stateType" | "projectName">,
   ctx: RescueContext,
 ): RescueEligibility {
   const reasons: string[] = [];
   if (issue.dueDate == null) reasons.push("no due date");
   else if (ctx.now < issue.dueDate + DAY_MS) reasons.push("not overdue");
   if (issue.labels.includes(LEAD_LEVEL)) reasons.push("lead-level");
+  if (isLeadOps(issue, ctx.leadOpsProject)) reasons.push("lead-ops"); // lead-desk tasks aren't rescued (PRD §9)
   if (ctx.hasProgress) reasons.push("has progress");
   if (!issue.assignee || !ctx.isRosterMember) reasons.push("assignee not a roster member");
   // Beyond §5's four: a manually done/canceled ticket isn't work to rescue (and hasProgress alone can

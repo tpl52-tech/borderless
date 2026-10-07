@@ -164,3 +164,31 @@ export function parseIssueCreate(json: unknown): CreatedIssue {
   if (!r?.success || !r.issue?.identifier) throw new Error("lead-desk: Linear issueCreate did not succeed");
   return { ticketKey: r.issue.identifier, url: r.issue.url ?? null };
 }
+
+// --- Ask Borderless fleet writes (PRD §10): reassign an issue, comment on an issue --------------------
+
+/** Reassign an issue. `id` is the issue UUID; `input.assigneeId` the new assignee's Linear user id. */
+export const ISSUE_UPDATE_MUTATION = `
+mutation BorderlessIssueUpdate($id: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) { success issue { identifier url } }
+}`;
+
+/** Parse {@link ISSUE_UPDATE_MUTATION}; fails loud on !success. */
+export function parseIssueUpdate(json: unknown): { ticketKey: string; url: string | null } {
+  const r = (json as { data?: { issueUpdate?: { success?: boolean; issue?: { identifier?: string; url?: string | null } } } } | null)?.data?.issueUpdate;
+  if (!r?.success || !r.issue?.identifier) throw new Error("ask: Linear issueUpdate did not succeed");
+  return { ticketKey: r.issue.identifier, url: r.issue.url ?? null };
+}
+
+/** Comment on an issue. `input.issueId` is the issue UUID; `input.body` the markdown comment. */
+export const COMMENT_CREATE_MUTATION = `
+mutation BorderlessCommentCreate($input: CommentCreateInput!) {
+  commentCreate(input: $input) { success comment { url } }
+}`;
+
+/** Parse {@link COMMENT_CREATE_MUTATION}; fails loud on !success. */
+export function parseCommentCreate(json: unknown): { url: string | null } {
+  const r = (json as { data?: { commentCreate?: { success?: boolean; comment?: { url?: string | null } } } } | null)?.data?.commentCreate;
+  if (!r?.success) throw new Error("ask: Linear commentCreate did not succeed");
+  return { url: r.comment?.url ?? null };
+}

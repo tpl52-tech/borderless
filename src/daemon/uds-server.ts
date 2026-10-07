@@ -48,6 +48,8 @@ export interface UdsServerDeps {
   leadOpsProject?: string;
   /** PRD §9: delegate a captured task → a Lead Ops issue assigned to the member + a best-effort Slack DM. */
   leadDelegate: (req: DelegateRequest) => Promise<DelegateResult>;
+  /** PRD §10: Ask Borderless — answer over live fleet state; allowActions confirms the (consequential) tools. */
+  askRun: (question: string, allowActions: boolean) => Promise<{ answer: string; steps: number; costMicros: number; configured: boolean }>;
 }
 
 export interface UdsServer {
@@ -239,6 +241,8 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
         return deskOverview(store.listLinearIssues(), ROSTER, deps.leadOpsProject);
       case "lead.delegate":
         return deps.leadDelegate({ who: String(p.who ?? ""), title: String(p.title ?? ""), notes: typeof p.notes === "string" ? p.notes : undefined });
+      case "ask.run":
+        return deps.askRun(String(p.question ?? ""), p.allowActions === true);
 
       // --- usage / quota ---
       case "usage.get":

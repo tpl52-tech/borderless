@@ -141,7 +141,14 @@ export interface OperatorConfigLite {
   leadOpsProject?: string;
   /** Slack bot token for lead-desk delegation DMs (secret; operator config only). Absent → no DM sent. */
   slackBotToken?: string;
+  /** OpenRouter API key for Ask Borderless (PRD §10; secret; operator config only). Absent → chat disabled. */
+  openRouterApiKey?: string;
+  /** OpenRouter model id for Ask Borderless; defaults to DEFAULT_OPENROUTER_MODEL. */
+  openRouterModel?: string;
 }
+
+/** Default Ask Borderless model (overridable via `openRouterModel`). */
+export const DEFAULT_OPENROUTER_MODEL = "anthropic/claude-sonnet-4";
 
 export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
   const file = paths(home).config;
@@ -177,6 +184,8 @@ export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
     repo: typeof raw.repo === "string" ? raw.repo : undefined,
     leadOpsProject: typeof raw.leadOpsProject === "string" && raw.leadOpsProject.trim() ? raw.leadOpsProject.trim() : undefined,
     slackBotToken: typeof raw.slackBotToken === "string" && raw.slackBotToken.trim() ? raw.slackBotToken.trim() : undefined,
+    openRouterApiKey: typeof raw.openRouterApiKey === "string" && raw.openRouterApiKey.trim() ? raw.openRouterApiKey.trim() : undefined,
+    openRouterModel: typeof raw.openRouterModel === "string" && raw.openRouterModel.trim() ? raw.openRouterModel.trim() : undefined,
   };
 }
 

@@ -63,8 +63,8 @@ export function branchName(opts: {
  */
 export function prBranchCandidates(ticketKey: string, branchOwner: string, gitBranchName: string | null): string[] {
   const canonical = branchName({ ticket: ticketKey, branchOwner, id8: "" });
-  const git = gitBranchName?.trim();
-  return git && git !== canonical ? [git, canonical] : [canonical];
+  const suggested = gitBranchName?.trim();
+  return suggested && suggested !== canonical ? [suggested, canonical] : [canonical];
 }
 
 export interface ProvisionOptions {

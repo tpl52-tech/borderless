@@ -21,6 +21,7 @@ import type {
   Alert, AlertKind, AlertSeverity,
   SweepJob, SweepEvent, SweepKind, SweepState, SweepEventKind, LinearIssue,
 } from "../shared/types.ts";
+import { LEAD_LEVEL } from "../shared/types.ts";
 
 export const PRAGMAS = ["PRAGMA journal_mode = WAL", "PRAGMA foreign_keys = ON"];
 
@@ -859,6 +860,7 @@ export class Store {
   enqueueInReviewSweeps(stateName = "In Review"): SweepJob[] {
     const created: SweepJob[] = [];
     for (const iss of this.listLinearIssues(stateName)) {
+      if (iss.labels.includes(LEAD_LEVEL)) continue; // lead-level work stays off the automation (PRD §2)
       const active = this.db.query(
         `SELECT 1 FROM sweep_job WHERE kind = 'in_review' AND ticket_id = ? AND state NOT IN ('merged', 'failed') LIMIT 1`,
       ).get(iss.id);

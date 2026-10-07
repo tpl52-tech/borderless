@@ -274,6 +274,10 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE linear_issues ADD COLUMN due_date INTEGER;
   ALTER TABLE linear_issues ADD COLUMN labels TEXT NOT NULL DEFAULT '[]';
   `,
+  // --- step 4: Linear's suggested branch name, for matching the team's PRs (shake-out finding) --------
+  `
+  ALTER TABLE linear_issues ADD COLUMN git_branch_name TEXT;
+  `,
 ];
 
 /**
@@ -287,6 +291,7 @@ export const HEAL_COLUMNS: Array<[table: string, column: string, ddl: string]> =
   ["sweep_job", "session_id", "TEXT REFERENCES sessions(id) ON DELETE SET NULL"], // step 2
   ["linear_issues", "due_date", "INTEGER"], // step 3
   ["linear_issues", "labels", "TEXT NOT NULL DEFAULT '[]'"], // step 3
+  ["linear_issues", "git_branch_name", "TEXT"], // step 4
 ];
 
 /**
@@ -351,6 +356,7 @@ function rowToLinearIssue(r: Row): LinearIssue {
     projectId: r.project_id ?? null, teamKey: r.team_key ?? null, url: r.url ?? null,
     priority: r.priority ?? null, blockedBy: r.blocked_by ? JSON.parse(r.blocked_by) : [],
     dueDate: r.due_date ?? null, labels: r.labels ? JSON.parse(r.labels) : [],
+    gitBranchName: r.git_branch_name ?? null,
     updatedAt: r.updated_at ?? null,
   };
 }
@@ -824,20 +830,20 @@ export class Store {
     stateName?: string | null; stateType?: string | null; assignee?: string | null;
     projectId?: string | null; teamKey?: string | null; url?: string | null;
     priority?: number | null; blockedBy?: string[]; dueDate?: number | null; labels?: string[];
-    updatedAt?: number | null;
+    gitBranchName?: string | null; updatedAt?: number | null;
   }): void {
     this.db.run(
-      `INSERT INTO linear_issues (id, identifier, project_id, team_key, title, url, state_name, state_type, assignee, priority, blocked_by, due_date, labels, updated_at, synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO linear_issues (id, identifier, project_id, team_key, title, url, state_name, state_type, assignee, priority, blocked_by, due_date, labels, git_branch_name, updated_at, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          identifier = excluded.identifier, project_id = excluded.project_id, team_key = excluded.team_key,
          title = excluded.title, url = excluded.url, state_name = excluded.state_name,
          state_type = excluded.state_type, assignee = excluded.assignee, priority = excluded.priority,
          blocked_by = excluded.blocked_by, due_date = excluded.due_date, labels = excluded.labels,
-         updated_at = excluded.updated_at, synced_at = excluded.synced_at`,
+         git_branch_name = excluded.git_branch_name, updated_at = excluded.updated_at, synced_at = excluded.synced_at`,
       [i.id, i.identifier, i.projectId ?? null, i.teamKey ?? null, i.title ?? "", i.url ?? null,
        i.stateName ?? null, i.stateType ?? null, i.assignee ?? null, i.priority ?? null,
-       JSON.stringify(i.blockedBy ?? []), i.dueDate ?? null, JSON.stringify(i.labels ?? []), i.updatedAt ?? null, Date.now()],
+       JSON.stringify(i.blockedBy ?? []), i.dueDate ?? null, JSON.stringify(i.labels ?? []), i.gitBranchName ?? null, i.updatedAt ?? null, Date.now()],
     );
   }
 

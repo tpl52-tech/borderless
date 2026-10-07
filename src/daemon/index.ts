@@ -29,7 +29,8 @@ import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
 import { httpLinearClient, syncLinearIssues } from "./linear.ts";
-import { runSweepJob } from "./sweep-engine.ts";
+import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
+import { buildTerritory } from "../shared/collision.ts";
 import { liveSweepDeps, needsHydration, hydrateInReviewJob } from "./sweep-deps.ts";
 import { createSweepSupervisor, type SweepSupervisor } from "./sweep-supervisor.ts";
 import { scanRescues, authorizeRescue, liveProgressCheck } from "./rescue-scan.ts";
@@ -171,10 +172,14 @@ export function startDaemon(home = stateHome()): Daemon {
     const repo = config.repo;
     const branchOwner = config.branchOwner;
     const sweepsTask = store.listTasks(true).find((t) => t.name === "Sweeps") ?? store.createTask({ name: "Sweeps" });
-    const sweepDeps = liveSweepDeps({
-      manager, tracker, repo, branchOwner, taskId: sweepsTask.id, cwd: sweepProfile.localCwd, home,
-      acceptanceFor: (ticketId) => store.getLinearIssue(ticketId)?.description ?? null,
-    });
+    const sweepDeps: SweepEngineDeps = {
+      ...liveSweepDeps({
+        manager, tracker, repo, branchOwner, taskId: sweepsTask.id, cwd: sweepProfile.localCwd, home,
+        acceptanceFor: (ticketId) => store.getLinearIssue(ticketId)?.description ?? null,
+      }),
+      // Collision guard (PRD §4): the deliverables other assigned, non-terminal tickets own, from the board.
+      territoryFor: (job) => buildTerritory(store.listLinearIssues(), job.ticketKey, ROSTER, config.leadOpsProject),
+    };
     const supervisor = createSweepSupervisor({
       store,
       run: async (job) => {

@@ -5,6 +5,7 @@ import {
   runSweepJob,
   type SweepEngineDeps, type PollResult, type ReviewVerdict, type WorkerResult, type WorkerFeedback,
 } from "../src/daemon/sweep-engine.ts";
+import type { Territory } from "../src/shared/collision.ts";
 
 const CLEAN_POLL: PollResult = { checks: { ci: "success", "secrets-scan": "success" }, changedPaths: ["src/ui/button.ts"] };
 const cleanReview = (): Omit<ReviewVerdict, "sessionId"> => ({ redFindings: 0, preservationProven: true, judgmentCall: null });
@@ -18,6 +19,7 @@ interface Over {
   review?: (call: number) => Omit<ReviewVerdict, "sessionId">;
   worker?: (feedback: WorkerFeedback, call: number) => Omit<WorkerResult, "sessionId">;
   maxCiWaits?: number;
+  territoryFor?: SweepEngineDeps["territoryFor"];
 }
 interface Rec { spawns: WorkerFeedback[]; polls: number; reviews: number; waits: number; sessions: string[] }
 
@@ -48,6 +50,7 @@ function makeDeps(store: Store, over: Over = {}): { deps: SweepEngineDeps; rec: 
       return { ...partial, sessionId: mkSession() };
     },
     async wait() { rec.waits++; },
+    territoryFor: over.territoryFor,
   };
   return { deps, rec };
 }
@@ -219,5 +222,35 @@ describe("runSweepJob (sweep engine, PRD §4-§5)", () => {
     expect(s.getSweepJob(job.id)!.reason).toContain("judgment call: which rounding rule?");
     expect(rec.spawns.length).toBe(0); // escalated after the review, no fix attempted
     expect(rec.reviews).toBe(1);
+  });
+
+  test("a collision with another assigned ticket's deliverable escalates, even with an otherwise-passing gate", async () => {
+    const s = new Store(":memory:");
+    // COR-19's PR extracts components/ConditionStars.tsx — the deliverable COR-54 (Renee) owns.
+    const job = s.createSweepJob({ kind: "in_review", ticketId: "t19", ticketKey: "COR-19", prNumber: 11, headSha: "h0" });
+    const territory: Territory = new Map([
+      ["conditionstars", { ticketKey: "COR-54", owner: "Renee Gowda", state: "In Progress", deliverable: "ConditionStars" }],
+    ]);
+    const { deps, rec } = makeDeps(s, {
+      poll: () => ({ checks: { ci: "success", "secrets-scan": "success" }, changedPaths: ["components/ConditionStars.tsx"] }),
+      review: () => ({ redFindings: 0, preservationProven: true, judgmentCall: null }), // gate would otherwise pass
+      territoryFor: () => territory,
+    });
+
+    expect(await runSweepJob(job, s, deps)).toBe("needs_human");
+    const reason = s.getSweepJob(job.id)!.reason ?? "";
+    expect(reason).toContain("COR-54");
+    expect(reason).toContain("ConditionStars");
+    expect(reason).toContain("coordinate before merging");
+    expect(rec.spawns.length).toBe(0); // never auto-ready, never kept iterating — stopped for the human
+  });
+
+  test("no territory (unconfigured) leaves the sweep's behavior unchanged — goes ready", async () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "in_review", ticketId: "t20", ticketKey: "COR-20", prNumber: 12, headSha: "h0" });
+    const { deps } = makeDeps(s, {
+      poll: () => ({ checks: { ci: "success", "secrets-scan": "success" }, changedPaths: ["components/ConditionStars.tsx"] }),
+    });
+    expect(await runSweepJob(job, s, deps)).toBe("ready"); // territoryFor absent → no cross-ticket check
   });
 });

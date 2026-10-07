@@ -16,6 +16,8 @@ import {
   ptyOutputFrame, type Frame, type FrameWriter, type ControlRequest, type ControlEvent,
 } from "../shared/wire.ts";
 import { doNext } from "../shared/boards.ts";
+import { activeLoads, suggestAssignments } from "../shared/assign.ts";
+import { ROSTER } from "../shared/roster.ts";
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { WorkItemMonitor } from "./monitors/work-item.ts";
@@ -216,11 +218,16 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
       case "rescue.authorize":
         return deps.rescueAuthorize(String(p.ticket ?? ""));
 
-      // --- boards (PRD §7): pure read over synced linear_issues, no live I/O ---
+      // --- boards + assignment (PRD §7-§8): pure reads over synced linear_issues + roster, no live I/O ---
       case "boards.get":
         return doNext(store.listLinearIssues()).map((e) => ({
           ticketKey: e.issue.identifier, title: e.issue.title, downstream: e.downstream,
         }));
+      case "assign.suggest": {
+        const issues = store.listLinearIssues();
+        return suggestAssignments(doNext(issues), ROSTER, activeLoads(issues, ROSTER))
+          .map((s) => ({ ticketKey: s.ticketKey, netid: s.netid, name: s.name, load: s.load }));
+      }
 
       // --- usage / quota ---
       case "usage.get":

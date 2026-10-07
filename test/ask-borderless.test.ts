@@ -58,10 +58,16 @@ describe("buildFleetContext (PRD §10)", () => {
 });
 
 describe("fleet tools (PRD §10)", () => {
-  test("every tool is consequential (all gated behind confirm)", () => {
-    expect(FLEET_TOOLS.every((t) => t.consequential)).toBe(true);
+  test("exposes exactly the four §10 fleet action tools", () => {
     expect(FLEET_TOOLS.map((t) => t.def.name).sort()).toEqual(
       ["enqueue_sweep", "post_linear_comment", "reassign_ticket", "resolve_needs_human"]);
+  });
+
+  test("enqueue_sweep errors on an unknown kind (no silent in_review fallback)", async () => {
+    const d = deps();
+    const r = await tool("enqueue_sweep").run({ kind: "inreview" }, d);
+    expect(r.isError).toBe(true);
+    expect(d.store.listSweepJobs().some((j) => j.ticketKey === "COR-1")).toBe(false); // COR-1 not enqueued
   });
 
   test("enqueue_sweep in_review queues eligible In Review tickets", async () => {

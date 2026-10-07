@@ -35,8 +35,9 @@ function countBy<T>(items: T[], key: (t: T) => string): string {
 /** A compact snapshot of live fleet state + the design docs, injected as the chat's context (PRD §10). */
 export function buildFleetContext(store: Store, docs: FleetDocs = {}, roster: Member[] = ROSTER): string {
   const jobs = store.listSweepJobs();
-  const active = jobs.filter((j) => j.state !== "merged" && j.state !== "failed");
   const needsHuman = jobs.filter((j) => j.state === "needs_human");
+  // "active" and "waiting on a human" are disjoint — a needs_human job is listed only once, below.
+  const active = jobs.filter((j) => j.state !== "merged" && j.state !== "failed" && j.state !== "needs_human");
   const issues = store.listLinearIssues();
 
   const jobLine = (j: SweepJob) =>
@@ -77,15 +78,17 @@ export interface FleetToolDeps {
 
 interface FleetTool {
   def: ToolDef;
-  /** Consequential tools (all of §10's) are gated behind the lead's confirm(). */
-  consequential: boolean;
   run: (args: Record<string, any>, deps: FleetToolDeps) => Promise<ToolResult>;
 }
 
 const ok = (output: string): ToolResult => ({ output });
 const err = (output: string): ToolResult => ({ output, isError: true });
 
-/** The §10 fleet action tools. Each wraps a Store/daemon method; the model picks one when asked to act. */
+/**
+ * The §10 fleet action tools. Each wraps a Store/daemon method; the model picks one when asked to act.
+ * ALL are consequential (they change fleet/Linear state), so `askBorderless` gates every one behind the
+ * lead's confirm() — there is no read-only tool here (fleet state is supplied via buildFleetContext).
+ */
 export const FLEET_TOOLS: FleetTool[] = [
   {
     def: {
@@ -93,7 +96,6 @@ export const FLEET_TOOLS: FleetTool[] = [
       description: "Queue a sweep. kind='in_review' queues an in-review drive for every eligible In Review ticket; kind='rescue' authorizes a rescue for one overdue ticket (ticket required).",
       parameters: { type: "object", properties: { kind: { type: "string", enum: ["in_review", "rescue"] }, ticket: { type: "string", description: "ticket key, required for rescue" } }, required: ["kind"] },
     },
-    consequential: true,
     run: async (args, { store }) => {
       if (args.kind === "rescue") {
         const ticket = String(args.ticket ?? "").trim();
@@ -101,8 +103,11 @@ export const FLEET_TOOLS: FleetTool[] = [
         const r = authorizeRescue(store, ticket);
         return ok(`rescue ${r.job.ticketKey}: ${r.created ? "authorized (queued)" : "already active"}`);
       }
-      const created = store.enqueueInReviewSweeps("In Review");
-      return ok(`enqueued ${created.length} in-review job(s): ${created.map((j) => j.ticketKey).join(", ") || "none"}`);
+      if (args.kind === "in_review") {
+        const created = store.enqueueInReviewSweeps();
+        return ok(`enqueued ${created.length} in-review job(s): ${created.map((j) => j.ticketKey).join(", ") || "none"}`);
+      }
+      return err(`unknown kind '${args.kind}' (use in_review|rescue)`);
     },
   },
   {
@@ -111,10 +116,9 @@ export const FLEET_TOOLS: FleetTool[] = [
       description: "Resolve a sweep job that is waiting on a human. action='requeue' re-runs it; action='dismiss' marks it failed.",
       parameters: { type: "object", properties: { ticket: { type: "string" }, action: { type: "string", enum: ["requeue", "dismiss"] } }, required: ["ticket", "action"] },
     },
-    consequential: true,
     run: async (args, { store }) => {
       const ticket = String(args.ticket ?? "").trim();
-      const job = store.listSweepJobs().find((j) => j.ticketKey === ticket && j.state === "needs_human");
+      const job = store.listSweepJobs({ state: "needs_human" }).find((j) => j.ticketKey === ticket);
       if (!job) return err(`no needs_human job for ${ticket || "(missing ticket)"}`);
       if (args.action === "requeue") {
         store.transitionSweepJob(job.id, { state: "queued", reason: null });
@@ -133,7 +137,6 @@ export const FLEET_TOOLS: FleetTool[] = [
       description: "Reassign a Linear ticket to a roster member (by netid, GitHub login, email, or full name).",
       parameters: { type: "object", properties: { ticket: { type: "string" }, assignee: { type: "string" } }, required: ["ticket", "assignee"] },
     },
-    consequential: true,
     run: async (args, { roster, reassign }) => {
       const member = resolveDelegate(roster, String(args.assignee ?? "")); // throws if unknown → caught upstream
       const linearId = member.linearIds[0];
@@ -147,7 +150,6 @@ export const FLEET_TOOLS: FleetTool[] = [
       description: "Post a comment on a Linear ticket.",
       parameters: { type: "object", properties: { ticket: { type: "string" }, body: { type: "string" } }, required: ["ticket", "body"] },
     },
-    consequential: true,
     run: async (args, { comment }) => {
       const body = String(args.body ?? "").trim();
       if (!body) return err("post_linear_comment needs a non-empty `body`");
@@ -171,7 +173,7 @@ export interface AskDeps {
   comment: FleetToolDeps["comment"];
   roster?: Member[];
   docs?: FleetDocs;
-  /** Gate for consequential tools (PRD §10 "lead-confirmed"). Default: deny (advisory/read-only). */
+  /** Gate for the (all consequential) fleet tools (PRD §10 "lead-confirmed"). Default: deny (advisory). */
   confirm?: (toolName: string, args: Record<string, any>) => Promise<boolean>;
   render?: (line: string) => void;
   maxSteps?: number;
@@ -190,7 +192,8 @@ export async function askBorderless(question: string, deps: AskDeps): Promise<{ 
   const runTool = async (call: ToolCall): Promise<ToolResult> => {
     const tool = byName.get(call.name);
     if (!tool) return err(`unknown tool: ${call.name}`);
-    if (tool.consequential && !(await confirm(call.name, call.args))) {
+    // every fleet tool is consequential (it changes state) → always lead-confirmed.
+    if (!(await confirm(call.name, call.args))) {
       return err(`Not performed — ${call.name} needs the lead's confirmation.`);
     }
     try { return await tool.run(call.args, toolDeps); }

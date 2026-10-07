@@ -159,6 +159,7 @@ export function startDaemon(home = stateHome()): Daemon {
     const sweepsTask = store.listTasks(true).find((t) => t.name === "Sweeps") ?? store.createTask({ name: "Sweeps" });
     const sweepDeps = liveSweepDeps({
       manager, tracker, repo, branchOwner, taskId: sweepsTask.id, cwd: sweepProfile.localCwd, home,
+      acceptanceFor: (ticketId) => store.getLinearIssue(ticketId)?.description ?? null,
     });
     const supervisor = createSweepSupervisor({
       store,

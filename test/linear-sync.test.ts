@@ -34,7 +34,7 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
     const { issues, hasNextPage, endCursor } = parseIssuesResponse(page([node()], true, "cur-1"));
     expect(issues).toHaveLength(1);
     expect(issues[0]).toEqual({
-      id: "uuid-1", identifier: "COR-1", title: "Fix the thing",
+      id: "uuid-1", identifier: "COR-1", title: "Fix the thing", description: null,
       url: "https://linear.app/cornell-ewb-softdev/issue/COR-1",
       stateName: "In Review", stateType: "started", assignee: "user-1",
       projectId: "proj-1", projectName: null, teamKey: "COR", priority: 2,
@@ -67,6 +67,11 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
     })]));
     expect(issues[0]!.dueDate).toBe(Date.parse("2026-10-01"));
     expect(issues[0]!.labels).toEqual(["lead-level", "intermediate"]);
+  });
+
+  test("maps description (the issue body/ACs, PRD §5 rescue seed)", () => {
+    expect(parseIssuesResponse(page([node({ description: "- [ ] does X\n- [ ] does Y" })])).issues[0]!.description).toBe("- [ ] does X\n- [ ] does Y");
+    expect(parseIssuesResponse(page([node()])).issues[0]!.description).toBeNull(); // absent → null
   });
 
   test("maps projectName from the issue's project (feeds the Lead Ops exclusion, PRD §9)", () => {

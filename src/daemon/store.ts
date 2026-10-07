@@ -283,6 +283,10 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE linear_issues ADD COLUMN project_name TEXT;
   `,
+  // --- step 6: the issue body/ACs, embedded in a rescue worker's seed (spawned agents have no Linear) ---
+  `
+  ALTER TABLE linear_issues ADD COLUMN description TEXT;
+  `,
 ];
 
 /**
@@ -298,6 +302,7 @@ export const HEAL_COLUMNS: Array<[table: string, column: string, ddl: string]> =
   ["linear_issues", "labels", "TEXT NOT NULL DEFAULT '[]'"], // step 3
   ["linear_issues", "git_branch_name", "TEXT"], // step 4
   ["linear_issues", "project_name", "TEXT"], // step 5
+  ["linear_issues", "description", "TEXT"], // step 6
 ];
 
 /**
@@ -357,7 +362,7 @@ export type SessionPatch = Partial<Pick<Session,
  */
 function rowToLinearIssue(r: Row): LinearIssue {
   return {
-    id: r.id, identifier: r.identifier, title: r.title ?? "",
+    id: r.id, identifier: r.identifier, title: r.title ?? "", description: r.description ?? null,
     stateName: r.state_name ?? null, stateType: r.state_type ?? null, assignee: r.assignee ?? null,
     projectId: r.project_id ?? null, teamKey: r.team_key ?? null, url: r.url ?? null,
     priority: r.priority ?? null, blockedBy: r.blocked_by ? JSON.parse(r.blocked_by) : [],
@@ -836,19 +841,19 @@ export class Store {
     stateName?: string | null; stateType?: string | null; assignee?: string | null;
     projectId?: string | null; teamKey?: string | null; url?: string | null;
     priority?: number | null; blockedBy?: string[]; dueDate?: number | null; labels?: string[];
-    gitBranchName?: string | null; projectName?: string | null; updatedAt?: number | null;
+    gitBranchName?: string | null; projectName?: string | null; description?: string | null; updatedAt?: number | null;
   }): void {
     this.db.run(
-      `INSERT INTO linear_issues (id, identifier, project_id, team_key, title, url, state_name, state_type, assignee, priority, blocked_by, due_date, labels, git_branch_name, project_name, updated_at, synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO linear_issues (id, identifier, project_id, team_key, title, description, url, state_name, state_type, assignee, priority, blocked_by, due_date, labels, git_branch_name, project_name, updated_at, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          identifier = excluded.identifier, project_id = excluded.project_id, team_key = excluded.team_key,
-         title = excluded.title, url = excluded.url, state_name = excluded.state_name,
+         title = excluded.title, description = excluded.description, url = excluded.url, state_name = excluded.state_name,
          state_type = excluded.state_type, assignee = excluded.assignee, priority = excluded.priority,
          blocked_by = excluded.blocked_by, due_date = excluded.due_date, labels = excluded.labels,
          git_branch_name = excluded.git_branch_name, project_name = excluded.project_name,
          updated_at = excluded.updated_at, synced_at = excluded.synced_at`,
-      [i.id, i.identifier, i.projectId ?? null, i.teamKey ?? null, i.title ?? "", i.url ?? null,
+      [i.id, i.identifier, i.projectId ?? null, i.teamKey ?? null, i.title ?? "", i.description ?? null, i.url ?? null,
        i.stateName ?? null, i.stateType ?? null, i.assignee ?? null, i.priority ?? null,
        JSON.stringify(i.blockedBy ?? []), i.dueDate ?? null, JSON.stringify(i.labels ?? []),
        i.gitBranchName ?? null, i.projectName ?? null, i.updatedAt ?? null, Date.now()],

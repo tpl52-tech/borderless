@@ -1,6 +1,6 @@
 # Borderless — Lead Console (PRD)
 
-Product Requirements · Borderless · Draft v0.5 · `tpl52-tech/agent-orchestrator` · 2026-10-06
+Product Requirements · Borderless · Draft v0.6 · `tpl52-tech/borderless` · 2026-10-07
 
 Two autonomous sweeps, live project boards, assisted assignment, a lead desk, and a
 context-loaded chat — the supervisory layer of the `ao` orchestrator.
@@ -21,7 +21,8 @@ tickets so one late person doesn't block the project; keep the human as the merg
 show what to attack next and who to assign; let the lead ask about anything (live context +
 actions) in one place; let the lead delegate ad-hoc lead/ops work.
 **Non-goals (v1):** auto-merge (a human always merges); replacing lead judgment on risky work;
-auto-implementing `lead-level` tickets; attendance tracking.
+auto-**implementing** `lead-level` tickets (the **rescue** sweep skips them — but the in-review
+sweep still **drives** a lead's existing PR like any other, §4/§5); attendance tracking.
 
 ## §3 System context
 Long-lived **daemon** (Bun, zero runtime deps) owns state + spawns agents; the **Ink dashboard
@@ -31,7 +32,9 @@ embedded **OpenRouter** runtime; store = **SQLite (bun:sqlite)**. Integrations: 
 
 ## §4 Feature — In-review sweep
 "Sweep in review" action in the `ao` main menu, over the currently-selected tickets. For each,
-spawn one agent that drives the ticket's PR through the pipeline.
+spawn one agent that drives the ticket's PR through the pipeline. **Every in-review ticket is
+driven regardless of label or owner — a `lead-level` PR included** (that label gates only the
+rescue sweep, §5). Only **Lead Ops** project tickets (§9) are excluded — those are human to-dos.
 
 **Pipeline:** `queued → fix → review → ci → {ready-to-merge | needs-human}`. `fix` and `review`
 run as **separate agents** (see gate).
@@ -53,6 +56,10 @@ stops for you only when:
 - **Necessary** — a genuine judgment call with no clearly-better option, or missing context only
   the lead has (after the 8-cycle cap, that's the usual reason).
 - **Dangerous** — a risky tier (auth, money, schema/RLS, `.github`) or anything irreversible.
+- **Collision** — the PR touches a file or component another open, **assigned** ticket already
+  owns (its deliverable), so shipping would duplicate a teammate's in-flight work. Derived from
+  the synced board; the sweep stops for you to coordinate rather than auto-readying over their
+  ticket, and the worker is warned off those off-limits deliverables up front in its seed.
 When it stops, it asks as **multiple choice**: 2–3 concrete courses of action with its own
 recommendation flagged, **inside its own session** — opening a `needs-human` job drops the lead
 into the chat with the agent that did the work, and they decide (or talk it through) there.
@@ -67,7 +74,9 @@ Where §4 drives an existing PR, this **implements overdue tickets nobody starte
 them through the same machinery. Triggered by a "Scan overdue" action (or a schedule).
 
 **Eligible when ALL hold:** due date passed; **not** labeled `lead-level`; **no meaningful
-progress** (no branch, no commits, no non-draft PR); assignee is a roster member.
+progress** (no branch, no commits, no non-draft PR); assignee is a roster member. The `lead-level`
+label gates the rescue sweep **only** — §4's in-review sweep drives a lead's existing PR like any
+other; this is the sole place the label excludes a ticket from automation.
 
 **Pipeline:** `queued → implement → review → ci → {ready-to-merge | needs-human}` — same shape as
 §4, but the first step is `implement` (build from acceptance criteria), not `fix`.
@@ -110,10 +119,11 @@ CREATE TABLE sweep_event (
 1. **Change-summary comment** — if the sweep changed the PR (vs the author's original, or built
    from scratch), post a Linear comment summarizing what/why, categorized (`bug`/`missing-test`/
    `style`/`architecture`), so the author learns.
-2. **Slack — weekly digest.** Changes roll into a **per-person weekly digest** (not a per-merge
-   ping), so it reads as coaching. Fallback: no resolvable email → digest omits them.
-3. **QA handoff.** Move to **Verifying** and surface it. **QA assignment is Neha's** — the console
+2. **QA handoff.** Move to **Verifying** and surface it. **QA assignment is Neha's** — the console
    does not auto-assign or rotate.
+
+*(The per-person weekly **Slack digest** — an earlier §6 item — was **cut** (2026-10-07, §12). The
+only Slack integration that ships is the lead-desk delegation DM, §9.)*
 
 ## §7 Feature — Live boards
 - **7a Unblocked + phase** — every currently-unblocked ticket with its project phase.
@@ -135,7 +145,10 @@ Not a wrapper — it runs on the orchestrator's runtime with live fleet state + 
    `sweep_event`, `linear_issues`, roster) + loads the PRD + ARCHITECTURE.md, injected every message.
 2. **Acts on the fleet** — tools: `reassignTicket`, `enqueueSweep`, `resolveNeedsHuman`,
    `postLinearComment` — each wrapping a daemon/Store method; consequential actions lead-confirmed.
-**Build:** `buildFleetContext` → OpenRouter chat loop → the tools → an Ink pane over the socket.
+3. **Backends** — default to the lead's **Claude subscription** via the local `claude` CLI (`$0`,
+   answer-only → **advisory**). The **OpenRouter** backend is opt-in (API key) and is the only
+   backend that can run the action tools in (2). Consequential actions are lead-confirmed regardless.
+**Build:** `buildFleetContext` → a chat loop over the chosen backend → the tools → an Ink pane over the socket.
 **UI:** a **plain code-chat** (message stream + input), NOT the terminal panels.
 
 ## §11 Human-in-the-loop
@@ -146,15 +159,25 @@ Not a wrapper — it runs on the orchestrator's runtime with live fleet state + 
 | Attendance | Kenan | manual |
 | Merge + risk judgment | Tess | always human |
 
-## §12 Decisions (settled 2026-10-06)
+## §12 Decisions (settled 2026-10-06; updated 2026-10-07)
 - **Concurrency → no cap.** Rebase + re-gate before merge (§4) + sequential merges handle
   correctness; the flat-rate plan runs concurrent sessions. The plan's rate limit is the only
   ambient ceiling and self-regulates.
 - **Rescue → your authorization, no grace** (§5). Eligible rescues wait in the Rescues queue.
 - **QA → Neha owns it** (§6). Console moves to Verifying + surfaces; no auto-assign.
-- **Slack → weekly digest** (§6).
+- **Slack → weekly digest CUT** (2026-10-07): not built; the lead-desk delegation DM (§9) is the
+  only Slack integration.
+- **`lead-level` gates rescue only** (2026-10-07): the in-review sweep drives a lead's PR like any
+  other; `lead-level` keeps a ticket out of the **rescue** sweep only — reversing an earlier
+  over-broad in-review exclusion (§2/§4/§5).
+- **Collision guard** (2026-10-07): a sweep never auto-ships a deliverable another assigned,
+  in-progress ticket owns — it escalates to `needs-human`, and the worker is warned off those
+  deliverables up front (§4).
+- **Ask Borderless → subscription by default** (2026-10-07): the Claude-subscription backend
+  (answer-only, `$0`) is the default; OpenRouter is opt-in and the only backend that runs the
+  fleet action tools (§10).
 - **Coaching ledger → not in v1.**
 - **Budget → nothing to cap; the 8-cycle cap is the only configured limit.** Flat-rate sub +
   concurrent sessions ⇒ every call (implement, fix, the independent review as a separate fresh
-  session) runs at $0. Even triage + the digest can be subscription sessions. The plan's rate
+  session) runs at $0. Even triage and Ask Borderless (§10) run as subscription sessions. The plan's rate
   limit is the only ambient ceiling and self-regulates — not a knob.

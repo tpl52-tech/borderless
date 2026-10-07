@@ -139,6 +139,8 @@ export interface OperatorConfigLite {
   repo?: string;
   /** Linear project whose issues are the lead desk (PRD §9) — excluded from both sweeps; default "Lead Ops". */
   leadOpsProject?: string;
+  /** Slack bot token for lead-desk delegation DMs (secret; operator config only). Absent → no DM sent. */
+  slackBotToken?: string;
 }
 
 export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
@@ -174,6 +176,7 @@ export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
     defaultProfileId: typeof raw.defaultProfileId === "string" ? raw.defaultProfileId : undefined,
     repo: typeof raw.repo === "string" ? raw.repo : undefined,
     leadOpsProject: typeof raw.leadOpsProject === "string" && raw.leadOpsProject.trim() ? raw.leadOpsProject.trim() : undefined,
+    slackBotToken: typeof raw.slackBotToken === "string" && raw.slackBotToken.trim() ? raw.slackBotToken.trim() : undefined,
   };
 }
 

@@ -1,5 +1,8 @@
 import { test, expect, describe } from "bun:test";
-import { isLeadOps, deskOverview, DEFAULT_LEAD_OPS_PROJECT, type DeskRow } from "../src/shared/lead-desk.ts";
+import {
+  isLeadOps, deskOverview, DEFAULT_LEAD_OPS_PROJECT, type DeskRow,
+  resolveDelegate, buildLeadOpsIssueInput, delegationDmText,
+} from "../src/shared/lead-desk.ts";
 import type { LinearIssue } from "../src/shared/types.ts";
 import type { Member } from "../src/shared/roster.ts";
 
@@ -46,5 +49,55 @@ describe("deskOverview (PRD §9)", () => {
   test("falls back to the raw Linear id when the assignee isn't on the roster", () => {
     const rows = deskOverview([issue({ projectName: "Lead Ops", assignee: "u-stranger" })], ROSTER);
     expect(rows[0]!.assignee).toBe("u-stranger");
+  });
+});
+
+describe("resolveDelegate (PRD §9)", () => {
+  test("resolves by netid, GitHub login, email, or full name (case-insensitive)", () => {
+    expect(resolveDelegate(ROSTER, "ktt38").name).toBe("Kenan Tat");
+    expect(resolveDelegate(ROSTER, "Kenan-t").name).toBe("Kenan Tat");      // github
+    expect(resolveDelegate(ROSTER, "TPL52@CORNELL.EDU").name).toBe("Tess Lee"); // email, case-insensitive
+    expect(resolveDelegate(ROSTER, "tess lee").name).toBe("Tess Lee");       // full name
+  });
+
+  test("throws on an unknown delegate (never silently drops the task)", () => {
+    expect(() => resolveDelegate(ROSTER, "nobody")).toThrow(/no roster member matches/i);
+  });
+});
+
+describe("buildLeadOpsIssueInput (PRD §9)", () => {
+  const tess = ROSTER[0]!;
+
+  test("maps title, assignee Linear id, Lead Ops project; folds notes into the description", () => {
+    const input = buildLeadOpsIssueInput({ title: "  Book the van  ", notes: "for Saturday" }, tess);
+    expect(input.title).toBe("Book the van"); // trimmed
+    expect(input.assigneeLinearId).toBe("u-tess");
+    expect(input.projectName).toBe("Lead Ops");
+    expect(input.description).toContain("for Saturday");
+    expect(input.description).toContain("Tess Lee (tpl52)"); // provenance line
+  });
+
+  test("honors a configured project name and tolerates no notes", () => {
+    const input = buildLeadOpsIssueInput({ title: "Task" }, tess, "Desk");
+    expect(input.projectName).toBe("Desk");
+    expect(input.description).not.toContain("undefined");
+  });
+
+  test("throws on an empty title", () => {
+    expect(() => buildLeadOpsIssueInput({ title: "   " }, tess)).toThrow(/needs a title/i);
+  });
+});
+
+describe("delegationDmText (PRD §9)", () => {
+  test("greets by first name and names the task + ticket + url", () => {
+    const text = delegationDmText(ROSTER[1]!, { ticketKey: "COR-99", title: "Order parts", url: "https://linear.app/x/COR-99" });
+    expect(text).toContain("Hi Kenan");
+    expect(text).toContain("Order parts");
+    expect(text).toContain("COR-99");
+    expect(text).toContain("https://linear.app/x/COR-99");
+  });
+
+  test("omits the link line when there's no url", () => {
+    expect(delegationDmText(ROSTER[0]!, { ticketKey: "COR-1", title: "T", url: null })).not.toContain("http");
   });
 });

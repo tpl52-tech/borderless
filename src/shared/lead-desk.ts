@@ -49,3 +49,51 @@ export function deskOverview(
       state: i.stateName ?? "—",
     }));
 }
+
+// --- delegation (PRD §9): capture a task → a Lead Ops issue assigned to a member, + a Slack DM ---------
+
+/**
+ * Resolve a delegate from the roster by netid, GitHub login, email, or full name (case-insensitive).
+ * Throws when `who` matches nobody — delegation must never silently drop a task on no one.
+ */
+export function resolveDelegate(roster: Member[], who: string): Member {
+  const q = who.trim().toLowerCase();
+  const m = roster.find((r) =>
+    r.netid.toLowerCase() === q ||
+    r.github.toLowerCase() === q ||
+    r.name.toLowerCase() === q ||
+    r.emails.some((e) => e.toLowerCase() === q));
+  if (!m) throw new Error(`lead-desk: no roster member matches "${who}" (try a netid, GitHub login, email, or full name)`);
+  return m;
+}
+
+/** The domain payload for a delegated task — mapped to Linear's IssueCreateInput by the live wrapper. */
+export interface LeadOpsIssueInput {
+  title: string;
+  description: string;
+  assigneeLinearId: string | null;
+  projectName: string;
+}
+
+/** Build the Lead Ops issue payload for a delegated task (PRD §9). Throws on an empty title. */
+export function buildLeadOpsIssueInput(
+  task: { title: string; notes?: string },
+  assignee: Member,
+  leadOpsProject: string = DEFAULT_LEAD_OPS_PROJECT,
+): LeadOpsIssueInput {
+  const title = task.title.trim();
+  if (!title) throw new Error("lead-desk: a delegated task needs a title");
+  const notes = task.notes?.trim();
+  const description = [
+    notes,
+    `_Captured via the Borderless lead desk, assigned to ${assignee.name} (${assignee.netid})._`,
+  ].filter((p): p is string => Boolean(p)).join("\n\n");
+  return { title, description, assigneeLinearId: assignee.linearIds[0] ?? null, projectName: leadOpsProject };
+}
+
+/** The Slack DM announcing a delegated task to its assignee (PRD §9). */
+export function delegationDmText(assignee: Member, issue: { ticketKey: string; title: string; url: string | null }): string {
+  const firstName = assignee.name.split(" ")[0];
+  const link = issue.url ? `\n${issue.url}` : "";
+  return `Hi ${firstName} — you've been assigned a lead-desk task: ${issue.title} (${issue.ticketKey}).${link}`;
+}

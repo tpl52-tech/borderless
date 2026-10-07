@@ -113,3 +113,55 @@ export function parseIssuesResponse(json: unknown): IssuesPage {
     endCursor: conn?.pageInfo?.endCursor ?? null,
   };
 }
+
+// --- lead-desk delegation (PRD §9): resolve the Lead Ops target ids, then create the issue -----------
+
+/** The team id (by key) + the Lead Ops project id (by name) — both needed to create a delegated issue. */
+export const LEAD_OPS_TARGETS_QUERY = `
+query BorderlessLeadOpsTargets($teamKey: String!, $project: String!) {
+  teams(filter: { key: { eq: $teamKey } }, first: 1) { nodes { id } }
+  projects(filter: { name: { eq: $project } }, first: 1) { nodes { id } }
+}`;
+
+export interface LeadOpsTargets { teamId: string; projectId: string; }
+
+/** Parse {@link LEAD_OPS_TARGETS_QUERY}; throws a clear error if the team or the project is missing. */
+export function parseLeadOpsTargets(json: unknown, teamKey: string, project: string): LeadOpsTargets {
+  const data = (json as { data?: { teams?: { nodes?: Array<{ id?: string }> }; projects?: { nodes?: Array<{ id?: string }> } } } | null)?.data;
+  const teamId = data?.teams?.nodes?.[0]?.id;
+  const projectId = data?.projects?.nodes?.[0]?.id;
+  if (!teamId) throw new Error(`lead-desk: no Linear team with key "${teamKey}"`);
+  if (!projectId) throw new Error(`lead-desk: no Linear project named "${project}" (create it, or set leadOpsProject)`);
+  return { teamId, projectId };
+}
+
+/** Create one Linear issue (used for lead-desk delegation, PRD §9). */
+export const ISSUE_CREATE_MUTATION = `
+mutation BorderlessIssueCreate($input: IssueCreateInput!) {
+  issueCreate(input: $input) {
+    success
+    issue { identifier url }
+  }
+}`;
+
+/** The Linear-API-shaped input to {@link ISSUE_CREATE_MUTATION}. */
+export interface IssueCreateInput {
+  teamId: string;
+  projectId: string;
+  title: string;
+  description: string;
+  assigneeId: string | null;
+}
+
+export function issueCreateVariables(input: IssueCreateInput): { input: IssueCreateInput } {
+  return { input };
+}
+
+export interface CreatedIssue { ticketKey: string; url: string | null; }
+
+/** Parse {@link ISSUE_CREATE_MUTATION}; throws if the mutation didn't succeed (fails loud, never silent). */
+export function parseIssueCreate(json: unknown): CreatedIssue {
+  const r = (json as { data?: { issueCreate?: { success?: boolean; issue?: { identifier?: string; url?: string | null } } } } | null)?.data?.issueCreate;
+  if (!r?.success || !r.issue?.identifier) throw new Error("lead-desk: Linear issueCreate did not succeed");
+  return { ticketKey: r.issue.identifier, url: r.issue.url ?? null };
+}

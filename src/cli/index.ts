@@ -19,7 +19,7 @@
  *   ao rescue [authorize <ticketKey>]          list eligible overdue tickets / authorize a rescue
  *   ao boards                                  unblocked tickets, ranked by critical-path impact
  *   ao assign                                  suggested assignee per unblocked ticket (load-balanced)
- *   ao desk                                    open Lead Ops tasks (the lead desk; human to-do list)
+ *   ao desk [delegate <who> "<title>" [notes]] list Lead Ops tasks / delegate one (PRD §9 lead desk)
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
@@ -106,9 +106,19 @@ export async function main(argv: string[]): Promise<void> {
     return;
   }
 
-  // `ao desk` — the lead desk: open Lead Ops tasks (ad-hoc delegation), a plain human task list (PRD §9).
+  // `ao desk` — the lead desk (PRD §9): list open Lead Ops tasks, or `ao desk delegate <who> "<title>"
+  // ["notes"]` to capture a task → a Lead Ops issue assigned to the member + a best-effort Slack DM.
   if (sub === "desk") {
+    const [action, who, title, notes] = rest;
     await withDaemon("desk", async (client) => {
+      if (action === "delegate") {
+        if (!who || !title) throw new Error('usage: ao desk delegate <who> "<title>" ["notes"]');
+        const r = await client.request<{ ticketKey: string | null; url: string | null; created: boolean; dmSent: boolean; assignee?: string; reason?: string }>(
+          "lead.delegate", { who, title, notes });
+        if (!r.created) console.log(`desk: not delegated — ${r.reason ?? "unknown reason"}`);
+        else console.log(`desk: ${r.ticketKey} → ${r.assignee}${r.dmSent ? " (Slack DM sent)" : " (no Slack DM)"}${r.url ? `  ${r.url}` : ""}`);
+        return;
+      }
       const rows = await client.request<Array<{ ticketKey: string; title: string; assignee: string; state: string }>>("lead.desk");
       if (rows.length === 0) console.log("desk: no open Lead Ops tasks");
       else for (const r of rows) console.log(`  ${r.ticketKey}  [${r.state}]  →  ${r.assignee}  ${r.title}`);

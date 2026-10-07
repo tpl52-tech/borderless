@@ -6,7 +6,7 @@
  * or component (e.g. a shared `ConditionStars.tsx`) that is in fact the deliverable of a SEPARATE, assigned,
  * in-progress ticket Y. The agent can't see the board, so it duplicates a teammate's work and the sweep
  * would happily mark it ready-to-merge. This module cross-checks the PR's changed paths against the
- * "territory" other active tickets own; a hit becomes a gate escalation (needs_human), never an auto-ready.
+ * "territory" other assigned tickets own; a hit becomes a gate escalation (needs_human), never an auto-ready.
  *
  * No I/O. The engine feeds the changed paths (same ones `dangerousTiers` uses) + a territory the daemon
  * builds from the synced board; this decides the collisions and the human-facing reason.
@@ -31,7 +31,11 @@ const COMPONENT = /\b([A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+)\b/g; // multi-hump Pasc
  * Deliverable tokens named in a piece of text (a ticket's title/description, or a changed path): component
  * names + code filenames, original-cased, deduped case-insensitively, with the generic infra stems dropped.
  * Multi-hump PascalCase only (ConditionStars ✓, Home ✗) keeps precision high — a false collision only costs
- * a human glance, but matching bare words like "Home"/"Login" would flag everything and erode trust. Pure.
+ * a human glance, but matching bare words like "Home"/"Login" would flag everything and erode trust.
+ *
+ * Recall is deliberately narrow (precision over recall): the filename rule takes only the final stem
+ * (`sweep-gate.ts` → `gate`), and acronym-prefixed components (`APIClient`) aren't matched. A deliverable a
+ * ticket only describes in prose is caught by human coordination, not this guard. Pure.
  */
 export function deliverableTokens(text: string): string[] {
   const byLower = new Map<string, string>(); // lowercased key → first original-cased spelling seen
@@ -45,10 +49,10 @@ export function deliverableTokens(text: string): string[] {
   return [...byLower.values()];
 }
 
-/** The ticket that owns a deliverable, for the collision message. */
+/** The ticket that owns a deliverable — also the shape of a collision (the owner a changed path lands on). */
 export interface TicketOwner { ticketKey: string; owner: string; state: string; deliverable: string }
 
-/** Lowercased deliverable token → the OTHER active, assigned ticket that owns it. */
+/** Lowercased deliverable token → the OTHER assigned, non-terminal ticket that owns it. */
 export type Territory = Map<string, TicketOwner>;
 
 /**
@@ -74,13 +78,10 @@ export function buildTerritory(issues: LinearIssue[], targetKey: string, roster:
   return territory;
 }
 
-/** A changed path that lands on another ticket's territory. */
-export interface Collision { deliverable: string; ticketKey: string; owner: string; state: string }
-
-/** The collisions between a PR's changed paths and the territory (deduped per owning ticket + deliverable). Pure. */
-export function detectCollisions(changedPaths: string[], territory: Territory): Collision[] {
+/** The owning tickets a PR's changed paths land on (deduped per owning ticket + deliverable). Pure. */
+export function detectCollisions(changedPaths: string[], territory: Territory): TicketOwner[] {
   const seen = new Set<string>();
-  const collisions: Collision[] = [];
+  const collisions: TicketOwner[] = [];
   for (const path of changedPaths) {
     for (const token of deliverableTokens(path)) {
       const owner = territory.get(token.toLowerCase());
@@ -88,7 +89,7 @@ export function detectCollisions(changedPaths: string[], territory: Territory): 
       const key = `${owner.ticketKey}:${owner.deliverable}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      collisions.push({ deliverable: owner.deliverable, ticketKey: owner.ticketKey, owner: owner.owner, state: owner.state });
+      collisions.push(owner);
     }
   }
   return collisions;
@@ -97,7 +98,7 @@ export function detectCollisions(changedPaths: string[], territory: Territory): 
 const MAX_LISTED = 3; // keep the escalation reason legible when a PR straddles several tickets
 
 /** The human-facing escalation reason for a set of collisions, or null when there are none. Pure. */
-export function collisionEscalation(collisions: Collision[]): string | null {
+export function collisionEscalation(collisions: TicketOwner[]): string | null {
   if (collisions.length === 0) return null;
   const listed = collisions.slice(0, MAX_LISTED).map((c) => `${c.deliverable} (owned by ${c.ticketKey} ${c.owner}, ${c.state})`);
   const extra = collisions.length - listed.length;

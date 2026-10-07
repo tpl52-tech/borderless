@@ -177,7 +177,7 @@ export function startDaemon(home = stateHome()): Daemon {
         manager, tracker, repo, branchOwner, taskId: sweepsTask.id, cwd: sweepProfile.localCwd, home,
         acceptanceFor: (ticketId) => store.getLinearIssue(ticketId)?.description ?? null,
       }),
-      // Collision guard (PRD §4): the deliverables other assigned, in-progress tickets own, from the board.
+      // Collision guard (PRD §4): the deliverables other assigned, non-terminal tickets own, from the board.
       territoryFor: (job) => buildTerritory(store.listLinearIssues(), job.ticketKey, ROSTER, config.leadOpsProject),
     };
     const supervisor = createSweepSupervisor({

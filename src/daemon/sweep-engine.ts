@@ -23,7 +23,7 @@ import {
   evaluateGate, nextSweepAction, dangerousTiers,
   MAX_CYCLES, type CheckState, type RequiredCheck, type GateBlocker, type DangerTier,
 } from "../shared/sweep-gate.ts";
-import { detectCollisions, collisionEscalation, type Collision, type Territory } from "../shared/collision.ts";
+import { detectCollisions, collisionEscalation, type TicketOwner, type Territory } from "../shared/collision.ts";
 
 /** CI signal for the job's current head: required-check states + the PR's changed paths. */
 export interface PollResult {
@@ -68,7 +68,7 @@ export interface SweepEngineDeps {
   /** Max CI polls to wait per head before giving up on CI as a ci-timeout (bounds the wait, not the loop). */
   maxCiWaits: number;
   /**
-   * The deliverables OTHER active, assigned tickets own, for the collision guard (PRD §4). Read once per
+   * The deliverables OTHER assigned, non-terminal tickets own, for the collision guard (PRD §4). Read once per
    * job from the synced board; absent → no cross-ticket check (back-compat / no board). See shared/collision.
    */
   territoryFor?: (job: SweepJob) => Territory;
@@ -79,7 +79,7 @@ export type SweepOutcome = "ready" | "needs_human" | "failed";
 const WORKER_STATE: Record<SweepKind, SweepState> = { in_review: "fixing", rescue: "implementing" };
 
 /** Compose the escalation reason the gate uses to stop for a human (null = keep self-resolving). */
-function deriveEscalation(tiers: DangerTier[], judgmentCall: string | null, collisions: Collision[]): string | null {
+function deriveEscalation(tiers: DangerTier[], judgmentCall: string | null, collisions: TicketOwner[]): string | null {
   const parts: string[] = [];
   if (tiers.length > 0) parts.push(`dangerous tier: ${tiers.join(", ")}`);
   const coordination = collisionEscalation(collisions);
@@ -95,7 +95,7 @@ export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngin
   let ciWaits = 0; // consecutive CI polls for the current head (reset on every new head)
   let review: ReviewVerdict | null = null;
   let hasHead = seed.prNumber != null || seed.headSha != null;
-  // The deliverables other active tickets own — read once per job; the per-poll changed paths are matched
+  // The deliverables other assigned, non-terminal tickets own — read once per job; the per-poll changed paths are matched
   // against it so a sweep can't silently ship a teammate's assigned deliverable (PRD §4).
   const territory: Territory = deps.territoryFor?.(seed) ?? new Map();
 

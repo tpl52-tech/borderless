@@ -31,7 +31,9 @@ import { runSweepJob } from "./sweep-engine.ts";
 import { liveSweepDeps, needsHydration, hydrateInReviewJob } from "./sweep-deps.ts";
 import { createSweepSupervisor, type SweepSupervisor } from "./sweep-supervisor.ts";
 import { scanRescues, authorizeRescue, liveProgressCheck } from "./rescue-scan.ts";
-import { memberByLinearId } from "../shared/roster.ts";
+import { delegate, liveCreateIssue, type DelegateResult } from "./lead-delegate.ts";
+import { liveSlackDm } from "./slack.ts";
+import { memberByLinearId, ROSTER } from "../shared/roster.ts";
 
 export interface Daemon {
   store: Store;
@@ -185,6 +187,18 @@ export function startDaemon(home = stateHome()): Daemon {
     };
   }
 
+  // Lead-desk delegation (PRD §9): materialize a Lead Ops issue + DM the assignee. Needs a Linear key
+  // (and a team) to write; without one it's a guarded no-op. The Slack DM is best-effort (no token → no DM).
+  const sendDm = liveSlackDm(config.slackBotToken);
+  const leadTeamKey = (config.linearTeamKeys ?? [])[0]; // single-team org: the Lead Ops issue is created here
+  let leadDelegate: UdsServerDeps["leadDelegate"] = async (): Promise<DelegateResult> =>
+    ({ ticketKey: null, url: null, created: false, dmSent: false,
+       reason: config.linearApiKey ? "no Linear team configured" : "Linear API key not configured" });
+  if (config.linearApiKey && leadTeamKey) {
+    const createIssue = liveCreateIssue(httpLinearClient(config.linearApiKey), leadTeamKey);
+    leadDelegate = (req) => delegate({ roster: ROSTER, leadOpsProject: config.leadOpsProject, createIssue, sendDm }, req);
+  }
+
   const scanInReview = async (stateName = "In Review"): Promise<{ synced: number; created: number; started: number }> => {
     let synced = 0;
     const teamKeys = config.linearTeamKeys ?? [];
@@ -196,7 +210,7 @@ export function startDaemon(home = stateHome()): Daemon {
     return { synced, created, started };
   };
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject });
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate });
 
   // Broadcast runtime status transitions to all clients (design §8.2 manager fan-out).
   tracker.onChange(({ sessionId, status }) =>

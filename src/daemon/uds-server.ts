@@ -17,7 +17,7 @@ import {
 } from "../shared/wire.ts";
 import { doNext } from "../shared/boards.ts";
 import { activeLoads, suggestAssignments } from "../shared/assign.ts";
-import { deskOverview } from "../shared/lead-desk.ts";
+import { deskOverview, type DelegateRequest, type DelegateResult } from "../shared/lead-desk.ts";
 import { ROSTER } from "../shared/roster.ts";
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
@@ -46,6 +46,8 @@ export interface UdsServerDeps {
   rescueAuthorize: (ticket: string) => { ticketKey: string; created: boolean; started: boolean };
   /** PRD §9: the lead-desk project name whose issues are excluded from the sweeps and shown on the desk. */
   leadOpsProject?: string;
+  /** PRD §9: delegate a captured task → a Lead Ops issue assigned to the member + a best-effort Slack DM. */
+  leadDelegate: (req: DelegateRequest) => Promise<DelegateResult>;
 }
 
 export interface UdsServer {
@@ -235,6 +237,8 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
       // --- lead desk (PRD §9): open Lead Ops tasks, a plain human task list (no gate, no agent) ----------
       case "lead.desk":
         return deskOverview(store.listLinearIssues(), ROSTER, deps.leadOpsProject);
+      case "lead.delegate":
+        return deps.leadDelegate({ who: String(p.who ?? ""), title: String(p.title ?? ""), notes: typeof p.notes === "string" ? p.notes : undefined });
 
       // --- usage / quota ---
       case "usage.get":

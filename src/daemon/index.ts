@@ -174,6 +174,7 @@ export function startDaemon(home = stateHome()): Daemon {
       const candidates = await scanRescues(store, {
         now: Date.now(), checkProgress: progress,
         isRosterMember: (id) => id != null && memberByLinearId(id) != null,
+        leadOpsProject: config.leadOpsProject,
       });
       return candidates.map((c) => ({ ticketId: c.issue.id, ticketKey: c.issue.identifier, title: c.issue.title, daysOverdue: c.daysOverdue }));
     };
@@ -190,12 +191,12 @@ export function startDaemon(home = stateHome()): Daemon {
     if (config.linearApiKey && teamKeys.length > 0) {
       ({ synced } = await syncLinearIssues(store, httpLinearClient(config.linearApiKey), teamKeys));
     }
-    const created = store.enqueueInReviewSweeps(stateName).length;
+    const created = store.enqueueInReviewSweeps(stateName, config.leadOpsProject).length;
     const started = sweepSupervisor?.pickup().length ?? 0; // kick the engine on the newly-queued jobs
     return { synced, created, started };
   };
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize });
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject });
 
   // Broadcast runtime status transitions to all clients (design §8.2 manager fan-out).
   tracker.onChange(({ sessionId, status }) =>

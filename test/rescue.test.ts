@@ -5,9 +5,9 @@ import type { LinearIssue } from "../src/shared/types.ts";
 const DAY = 86_400_000;
 const NOW = Date.parse("2026-10-06T00:00:00.000Z");
 
-type Issue = Pick<LinearIssue, "dueDate" | "labels" | "assignee" | "stateType">;
+type Issue = Pick<LinearIssue, "dueDate" | "labels" | "assignee" | "stateType" | "projectName">;
 const issue = (over: Partial<Issue> = {}): Issue => ({
-  dueDate: NOW - 3 * DAY, labels: [], assignee: "user-1", stateType: "unstarted", ...over,
+  dueDate: NOW - 3 * DAY, labels: [], assignee: "user-1", stateType: "unstarted", projectName: null, ...over,
 });
 const ctx = (over: Partial<RescueContext> = {}): RescueContext => ({
   now: NOW, hasProgress: false, isRosterMember: true, ...over,
@@ -35,6 +35,13 @@ describe("rescueEligibility (PRD §5)", () => {
 
   test("lead-level tickets are never rescued", () => {
     expect(rescueEligibility(issue({ labels: ["intermediate", "lead-level"] }), ctx()).reasons).toContain("lead-level");
+  });
+
+  test("lead-desk (Lead Ops) tickets are never rescued (PRD §9)", () => {
+    expect(rescueEligibility(issue({ projectName: "Lead Ops" }), ctx()).reasons).toContain("lead-ops");
+    expect(rescueEligibility(issue({ projectName: "ReUse App" }), ctx()).reasons).not.toContain("lead-ops");
+    // honors a configured override name
+    expect(rescueEligibility(issue({ projectName: "Desk" }), ctx({ leadOpsProject: "Desk" })).reasons).toContain("lead-ops");
   });
 
   test("meaningful progress blocks (somebody started it)", () => {

@@ -11,21 +11,15 @@
 import type { LinearClient } from "./linear.ts";
 import {
   LEAD_OPS_TARGETS_QUERY, parseLeadOpsTargets,
-  ISSUE_CREATE_MUTATION, issueCreateVariables, parseIssueCreate, type CreatedIssue,
+  ISSUE_CREATE_MUTATION, parseIssueCreate, type CreatedIssue,
 } from "../shared/linear.ts";
-import { resolveDelegate, buildLeadOpsIssueInput, delegationDmText, type LeadOpsIssueInput } from "../shared/lead-desk.ts";
+import {
+  resolveDelegate, buildLeadOpsIssueInput, delegationDmText,
+  type LeadOpsIssueInput, type DelegateRequest, type DelegateResult,
+} from "../shared/lead-desk.ts";
 import type { Member } from "../shared/roster.ts";
 
-export interface DelegateRequest { who: string; title: string; notes?: string }
-
-export interface DelegateResult {
-  ticketKey: string | null;
-  url: string | null;
-  created: boolean;
-  dmSent: boolean;
-  assignee?: string; // resolved member name (for the console's confirmation line)
-  reason?: string;   // why nothing was created (e.g. no Linear key), when created is false
-}
+export type { DelegateRequest, DelegateResult }; // re-exported for daemon-layer consumers
 
 export interface DelegateDeps {
   roster: Member[];
@@ -46,15 +40,17 @@ export async function delegate(deps: DelegateDeps, req: DelegateRequest): Promis
   return { ticketKey: issue.ticketKey, url: issue.url, created: true, dmSent, assignee: member.name };
 }
 
-/** Live: create a Lead Ops issue via Linear — resolve the team + project ids, then issueCreate. */
+/**
+ * Live: create a Lead Ops issue via Linear — resolve the team + project ids, then issueCreate. The team
+ * is the first configured team key (single-team orgs); the project is matched by name across the workspace.
+ */
 export function liveCreateIssue(client: LinearClient, teamKey: string): (input: LeadOpsIssueInput) => Promise<CreatedIssue> {
   return async (input) => {
     const { teamId, projectId } = parseLeadOpsTargets(
       await client.query(LEAD_OPS_TARGETS_QUERY, { teamKey, project: input.projectName }),
       teamKey, input.projectName,
     );
-    return parseIssueCreate(await client.query(ISSUE_CREATE_MUTATION, issueCreateVariables({
-      teamId, projectId, title: input.title, description: input.description, assigneeId: input.assigneeLinearId,
-    })));
+    const createInput = { teamId, projectId, title: input.title, description: input.description, assigneeId: input.assigneeLinearId };
+    return parseIssueCreate(await client.query(ISSUE_CREATE_MUTATION, { input: createInput }));
   };
 }

@@ -23,6 +23,7 @@
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
+import type { DelegateResult } from "../shared/lead-desk.ts";
 
 const SUBCOMMANDS = [
   "setup", "daemon", "autonomy", "monitor", "history", "worktree", "pr", "issue", "awake",
@@ -113,8 +114,7 @@ export async function main(argv: string[]): Promise<void> {
     await withDaemon("desk", async (client) => {
       if (action === "delegate") {
         if (!who || !title) throw new Error('usage: ao desk delegate <who> "<title>" ["notes"]');
-        const r = await client.request<{ ticketKey: string | null; url: string | null; created: boolean; dmSent: boolean; assignee?: string; reason?: string }>(
-          "lead.delegate", { who, title, notes });
+        const r = await client.request<DelegateResult>("lead.delegate", { who, title, notes });
         if (!r.created) console.log(`desk: not delegated — ${r.reason ?? "unknown reason"}`);
         else console.log(`desk: ${r.ticketKey} → ${r.assignee}${r.dmSent ? " (Slack DM sent)" : " (no Slack DM)"}${r.url ? `  ${r.url}` : ""}`);
         return;

@@ -114,17 +114,11 @@ const MAX_WARNED = 25; // keep the seed bounded even on a busy board
  * catch). One line per owned deliverable, capped. Null when the territory is empty. Pure.
  */
 export function territoryWarning(territory: Territory): string | null {
-  const seen = new Set<string>();
-  const lines: string[] = [];
-  for (const o of territory.values()) {
-    const key = `${o.ticketKey}:${o.deliverable}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    lines.push(`  - ${o.deliverable} — owned by ${o.ticketKey} (${o.owner}, ${o.state})`);
-  }
-  if (lines.length === 0) return null;
-  const shown = lines.slice(0, MAX_WARNED);
-  const extra = lines.length - shown.length;
+  if (territory.size === 0) return null;
+  // No dedup needed: the territory map has one entry per lowercased token, each with a unique deliverable.
+  const all = [...territory.values()].map((o) => `  - ${o.deliverable} — owned by ${o.ticketKey} (${o.owner}, ${o.state})`);
+  const shown = all.slice(0, MAX_WARNED);
+  const extra = all.length - shown.length;
   if (extra > 0) shown.push(`  - …and ${extra} more`);
   return [
     "Another teammate's assigned ticket owns these files/components — do NOT create, extract, or rewrite them:",

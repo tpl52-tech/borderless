@@ -22,6 +22,7 @@
  *   ao desk [delegate <who> "<title>" [notes]] list Lead Ops tasks / delegate one (PRD §9 lead desk)
  *   ao ask "<question>" [--yes]                Ask Borderless over live fleet state (PRD §10; --yes acts)
  *   ao console                                 the lead console TUI (SWEEPS/BOARDS/ASSIGN/LEAD DESK/ROSTER)
+ *   ao web                                     open the browser lead console (the mockup design, live data)
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
@@ -141,6 +142,17 @@ export async function main(argv: string[]): Promise<void> {
       const cost = r.costMicros ? ` · $${(r.costMicros / 1e6).toFixed(4)}` : "";
       console.error(`(${r.steps} step${r.steps === 1 ? "" : "s"}${cost})`); // stderr: keeps the answer clean on stdout
     });
+    return;
+  }
+
+  // `ao web` — open the browser lead console (PRD §11): the mockup design wired to live data, localhost only.
+  if (sub === "web") {
+    const { ensureDaemon, openUrl } = await import("../client/runtime.ts");
+    const { loadOperatorConfig, DEFAULT_WEB_PORT } = await import("../shared/config.ts");
+    (await ensureDaemon()).close(); // starts the daemon (and its web server) if it isn't already up
+    const url = `http://127.0.0.1:${loadOperatorConfig().webPort ?? DEFAULT_WEB_PORT}`;
+    console.log(`Borderless web console: ${url}`);
+    openUrl(url);
     return;
   }
 

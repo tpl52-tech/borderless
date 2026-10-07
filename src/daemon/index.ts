@@ -13,7 +13,7 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { paths, stateHome } from "../shared/paths.ts";
-import { loadOperatorConfig, BUILTIN_DEFAULTS, DEFAULT_OPENROUTER_MODEL } from "../shared/config.ts";
+import { loadOperatorConfig, BUILTIN_DEFAULTS, DEFAULT_OPENROUTER_MODEL, DEFAULT_WEB_PORT } from "../shared/config.ts";
 import { ISSUE_UPDATE_MUTATION, parseIssueUpdate, COMMENT_CREATE_MUTATION, parseCommentCreate } from "../shared/linear.ts";
 import { windowLabel, parseExtensionDeadline, AUTONOMY_EXTENSION_CAP_MS, type WindowConfig } from "../shared/autonomy-window.ts";
 import { Store } from "./store.ts";
@@ -28,6 +28,7 @@ import { reapWorktrees } from "./worktree.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
+import { startWebServer } from "./web.ts";
 import { httpLinearClient, syncLinearIssues } from "./linear.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
 import { buildTerritory } from "../shared/collision.ts";
@@ -271,6 +272,10 @@ export function startDaemon(home = stateHome()): Daemon {
 
   server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun });
 
+  // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only.
+  const web = startWebServer({ store, leadOpsProject: config.leadOpsProject, askRun, port: config.webPort ?? DEFAULT_WEB_PORT });
+  console.log(`borderless web console on ${web.url}`);
+
   // Broadcast runtime status transitions to all clients (design §8.2 manager fan-out).
   tracker.onChange(({ sessionId, status }) =>
     server.broadcast({ type: "session.status", data: { sessionId, status } }));
@@ -292,6 +297,7 @@ export function startDaemon(home = stateHome()): Daemon {
     socketPath: p.socket,
     stop() {
       server.stop();
+      web.stop();
       autonomy.stop();
       alerts?.stop();
       usage.stop();

@@ -1,51 +1,96 @@
 /**
  * Borderless console view-model (PRD §11) — PURE + tested, so the Ink console (console.tsx) is thin render.
  *
- * Owns: the screen registry (which daemon request feeds each screen + the empty-state line), the per-screen
- * row formatting, cursor clamping/movement (no wrap — rows never move under the cursor, §19), and which
- * selected row is attachable (only a SWEEPS row with a live session id). No Ink, no I/O.
+ * Owns: the screen registry (which daemon request feeds each screen + the empty-state line), the nav/crumb
+ * labels, cursor clamping/movement (no wrap — rows never move under the cursor, §19), which selected row is
+ * attachable (only a SWEEPS row with a live session), the ASK single-line editor, and the structured
+ * derivations the rich screens render from — hero stats, sweep partitions, state/kind tones, and the
+ * fixed-width table cell. No Ink, no I/O; console.tsx maps these to boxes + colors.
  */
 
 import type { RequestType } from "../shared/wire.ts";
+import type { SweepState, SweepKind } from "../shared/types.ts";
+import type { Tone } from "./theme.ts";
 import type { DeskRow } from "../shared/lead-desk.ts"; // the lead.desk handler returns this canonical shape
 
 export type ConsoleScreen = "sweeps" | "boards" | "assign" | "lead_desk" | "roster";
 
 // The wire shapes the daemon handlers return, one per screen (DeskRow is reused from shared/lead-desk).
-export interface SweepRow { ticketKey: string; kind: string; state: string; prNumber: number | null; cycles: number; reason: string | null; sessionId: string | null }
+export interface SweepRow { ticketKey: string; kind: SweepKind; state: SweepState; owner: string | null; prNumber: number | null; cycles: number; reason: string | null; sessionId: string | null }
 export interface BoardRow { ticketKey: string; title: string; downstream: number }
 export interface AssignRow { ticketKey: string; netid: string; name: string; load: number }
 export interface RosterRow { name: string; netid: string; github: string; lead: boolean }
 
-export interface ScreenDef { key: ConsoleScreen; label: string; request: RequestType; empty: string }
+export interface ScreenDef { key: ConsoleScreen; label: string; nav: string; request: RequestType; empty: string }
 
-/** Screen order = the number-key order (1 SWEEPS … 5 ROSTER) and the Tab cycle. */
+/** Screen order = the number-key order (1 SWEEPS … 5 ROSTER) and the first five of the Tab cycle. */
 export const CONSOLE_SCREENS: ScreenDef[] = [
-  { key: "sweeps", label: "SWEEPS", request: "sweep.list", empty: "no sweep jobs" },
-  { key: "boards", label: "BOARDS", request: "boards.get", empty: "nothing actionable right now" },
-  { key: "assign", label: "ASSIGN", request: "assign.suggest", empty: "nothing to suggest" },
-  { key: "lead_desk", label: "LEAD DESK", request: "lead.desk", empty: "no open Lead Ops tasks" },
-  { key: "roster", label: "ROSTER", request: "roster.get", empty: "empty roster" },
+  { key: "sweeps", label: "SWEEP CONSOLE", nav: "SWEEPS", request: "sweep.list", empty: "no sweep jobs yet — nothing in review, nothing rescued" },
+  { key: "boards", label: "BOARDS", nav: "BOARDS", request: "boards.get", empty: "nothing actionable right now" },
+  { key: "assign", label: "ASSIGN", nav: "ASSIGN", request: "assign.suggest", empty: "nothing to suggest" },
+  { key: "lead_desk", label: "LEAD DESK", nav: "LEAD_DESK", request: "lead.desk", empty: "no open Lead Ops tasks" },
+  { key: "roster", label: "ROSTER", nav: "ROSTER", request: "roster.get", empty: "empty roster" },
 ];
 
-function pad(s: string, n: number): string { return s.length >= n ? s : s + " ".repeat(n - s.length); }
+/** The sidebar / tab labels, with ASK appended after the five list screens. */
+export const NAV_LABELS: string[] = [...CONSOLE_SCREENS.map((s) => s.nav), "ASK"];
 
-const FORMATTERS: Record<ConsoleScreen, (row: unknown) => string> = {
-  sweeps: (row) => {
-    const r = row as SweepRow;
-    return `${pad(r.ticketKey, 8)} ${pad(r.kind, 10)} ${pad(r.state, 12)} ${r.prNumber != null ? `PR#${r.prNumber}` : "—"}  cyc=${r.cycles}` +
-      `${r.sessionId ? "  ⏎attach" : ""}${r.reason ? `  — ${r.reason}` : ""}`;
-  },
-  boards: (row) => { const r = row as BoardRow; return `${pad(r.ticketKey, 8)} unblocks ${pad(String(r.downstream), 3)} ${r.title}`; },
-  assign: (row) => { const r = row as AssignRow; return `${pad(r.ticketKey, 8)} → ${pad(r.name, 20)} (${r.netid}, load ${r.load})`; },
-  lead_desk: (row) => { const r = row as DeskRow; return `${pad(r.ticketKey, 8)} [${pad(r.state, 12)}] → ${pad(r.assignee, 20)} ${r.title}`; },
-  roster: (row) => { const r = row as RosterRow; return `${pad(r.name, 22)} ${pad(r.netid, 8)} @${r.github}${r.lead ? "  — lead" : ""}`; },
-};
-
-/** The one-line rendering of a row on a screen. */
-export function formatRow(screen: ConsoleScreen, row: unknown): string {
-  return FORMATTERS[screen](row);
+/** The breadcrumb for a screen index (ASK is the last tab). */
+export function crumbLabel(screenIdx: number): string {
+  return NAV_LABELS[screenIdx] ?? NAV_LABELS[0]!;
 }
+
+/** Pad or truncate a value to exactly `width` columns (truncation keeps a trailing ellipsis). Pure. */
+export function cell(value: string, width: number, align: "left" | "right" = "left"): string {
+  if (width <= 0) return "";
+  if (value.length > width) return width <= 1 ? value.slice(0, width) : value.slice(0, width - 1) + "…";
+  const padding = " ".repeat(width - value.length);
+  return align === "right" ? padding + value : value + padding;
+}
+
+// --- SWEEPS derivations (the hero numbers + the three panels all come from the one sweep list) -----------
+
+/** The hero summary line's counts (PRD §11): scope + how the queue breaks down. Pure. */
+export interface HeroStats { inScope: number; active: number; ready: number; needsYou: number }
+
+const ACTIVE_STATES = new Set<SweepState>(["implementing", "fixing", "reviewing", "ci", "queued"]);
+
+export function heroStats(sweeps: SweepRow[]): HeroStats {
+  let active = 0, ready = 0, needsYou = 0;
+  for (const s of sweeps) {
+    if (s.state === "ready") ready++;
+    else if (s.state === "needs_human") needsYou++;
+    else if (ACTIVE_STATES.has(s.state)) active++;
+  }
+  return { inScope: sweeps.length, active, ready, needsYou };
+}
+
+/** The rows that drop into the READY_TO_MERGE / NEEDS_YOU side panels (subsets of the queue). Pure. */
+export function readyRows(sweeps: SweepRow[]): SweepRow[] { return sweeps.filter((s) => s.state === "ready"); }
+export function needsYouRows(sweeps: SweepRow[]): SweepRow[] { return sweeps.filter((s) => s.state === "needs_human"); }
+
+/** Foreground tone for a sweep state (matches the HTML mock's s-green/s-ink/s-dim/s-pink classes). */
+export function stateTone(state: SweepState): Tone {
+  switch (state) {
+    case "ready": case "merged": return "green";
+    case "needs_human": return "pink";
+    case "failed": return "red";
+    case "queued": case "ci": return "dim";
+    default: return "ink"; // implementing / fixing / reviewing
+  }
+}
+
+/** Foreground tone for a sweep kind (rescue reads pink, in-review reads muted — the mock's k-rescue/k-review). */
+export function kindTone(kind: SweepKind): Tone {
+  return kind === "rescue" ? "pink" : "ink2";
+}
+
+/** How a kind is spelled in the queue table. */
+export function kindLabel(kind: SweepKind): string {
+  return kind === "rescue" ? "rescue" : "review";
+}
+
+// --- nav / cursor / attach / ask-editor ------------------------------------------------------------------
 
 /** Clamp a cursor into [0, len) (len 0 → 0). */
 export function clampCursor(cursor: number, len: number): number {
@@ -75,3 +120,6 @@ export function editInput(current: string, ch: string, key: { backspace?: boolea
   if (ch.length === 1 && ch >= " " && ch !== "\x7f") return current + ch;
   return current;
 }
+
+// `DeskRow` is re-exported so console.tsx renders the lead-desk shape without reaching into shared/.
+export type { DeskRow };

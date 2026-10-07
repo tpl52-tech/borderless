@@ -64,3 +64,14 @@ export function attachTarget(screen: ConsoleScreen, rows: unknown[], index: numb
   const r = rows[index] as SweepRow | undefined;
   return r?.sessionId ?? null;
 }
+
+/**
+ * Apply one keystroke to the single-line ASK input (PRD §10 chat pane): backspace/delete drops the last
+ * char, a lone printable char appends, everything else (control keys, multi-char pastes, DEL) is ignored.
+ * Pure — the Ink pane holds the string, this decides the next one.
+ */
+export function editInput(current: string, ch: string, key: { backspace?: boolean; delete?: boolean }): string {
+  if (key.backspace || key.delete) return current.slice(0, -1);
+  if (ch.length === 1 && ch >= " " && ch !== "\x7f") return current + ch;
+  return current;
+}

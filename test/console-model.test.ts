@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import {
-  CONSOLE_SCREENS, formatRow, clampCursor, moveCursor, attachTarget,
+  CONSOLE_SCREENS, formatRow, clampCursor, moveCursor, attachTarget, editInput,
   type SweepRow,
 } from "../src/client/console-model.ts";
 
@@ -62,5 +62,24 @@ describe("attachTarget — only a SWEEPS row with a live session is attachable",
   test("never attachable on a non-SWEEPS screen", () => {
     expect(attachTarget("boards", [{ ticketKey: "COR-1" }], 0)).toBeNull();
     expect(attachTarget("roster", [{ name: "x" }], 0)).toBeNull();
+  });
+});
+
+describe("editInput (ASK pane single-line editor, PRD §10)", () => {
+  test("appends a lone printable char", () => {
+    expect(editInput("who", "o", {})).toBe("whoo");
+    expect(editInput("", "W", {})).toBe("W");
+    expect(editInput("a", " ", {})).toBe("a ");
+  });
+  test("backspace / delete drop the last char (empty stays empty)", () => {
+    expect(editInput("abc", "", { backspace: true })).toBe("ab");
+    expect(editInput("abc", "", { delete: true })).toBe("ab");
+    expect(editInput("", "", { backspace: true })).toBe("");
+  });
+  test("ignores control keys, DEL, multi-char input, and empty input", () => {
+    expect(editInput("x", "", {})).toBe("x");          // empty (arrow/enter carry no printable)
+    expect(editInput("x", "\t", {})).toBe("x");        // tab (control)
+    expect(editInput("x", "\x1b[A", {})).toBe("x");    // an arrow escape sequence, not a paste
+    expect(editInput("x", "\x7f", {})).toBe("x");      // DEL
   });
 });

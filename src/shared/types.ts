@@ -307,6 +307,7 @@ export interface LinearIssue {
   id: string;
   identifier: string;        // e.g. COR-42
   title: string;
+  description: string | null; // the ticket body/ACs; embedded in a rescue worker's seed (PRD §5)
   stateName: string | null;  // e.g. "In Review"
   stateType: string | null;  // e.g. "started"
   assignee: string | null;   // Linear user id

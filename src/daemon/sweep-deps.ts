@@ -140,6 +140,9 @@ export interface LiveSweepDepsConfig {
   ciPollMs?: number;
   maxCiWaits?: number;
   spawnDeadlineMs?: number;
+  /** The ticket's acceptance criteria (its synced description) — embedded in a rescue worker's seed because
+   *  a spawned agent has no Linear to read them. Returns null when unknown. */
+  acceptanceFor?: (ticketId: string) => string | null;
 }
 
 /** Discover the existing PR for an in-review job: its candidate branches first, then a ticket-key search. */
@@ -191,7 +194,11 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
     ciPollMs: cfg.ciPollMs ?? DEFAULT_CI_POLL_MS,
     maxCiWaits: cfg.maxCiWaits ?? DEFAULT_MAX_CI_WAITS,
     async spawnWorker(job, feedback): Promise<WorkerResult> {
-      const sessionId = await spawnAndWait(workerSeed(job, feedback));
+      const ctx: WorkerSeedContext = {
+        acceptance: cfg.acceptanceFor?.(job.ticketId) ?? null,
+        branch: ticketBranch(cfg.branchOwner, job.ticketKey), // where a rescue PR must open (readHeadPr matches it)
+      };
+      const sessionId = await spawnAndWait(workerSeed(job, feedback, ctx));
       const { headSha, prNumber } = await readHeadPr(job);
       return { sessionId, headSha, prNumber };
     },
@@ -219,15 +226,40 @@ async function changedPaths(repo: string, number: number): Promise<string[]> {
   return (parsed.files ?? []).map((f) => f.path).filter((p): p is string => typeof p === "string");
 }
 
+/** Context for a rescue worker's seed (a spawned agent has no Linear): the ticket's acceptance criteria
+ *  (its synced description) and the canonical branch the PR must open from so {@link readHeadPr} finds it. */
+export interface WorkerSeedContext {
+  acceptance?: string | null;
+  branch?: string | null;
+}
+
+const MAX_ACCEPTANCE = 4000; // keep a pathologically long description from bloating the seed
+
 /** The fixer/implementer prompt. in_review fixes the PR; rescue implements the ticket from scratch. */
-function workerSeed(job: SweepJob, feedback: WorkerFeedback): string {
+export function workerSeed(job: SweepJob, feedback: WorkerFeedback, ctx: WorkerSeedContext = {}): string {
   const head = job.kind === "rescue"
-    ? `Implement Linear ticket ${job.ticketKey} from its acceptance criteria, then open a PR.`
+    ? rescueSeedHead(job, ctx)
     : `Drive PR #${job.prNumber} for ${job.ticketKey} to a mergeable state.`;
   if (feedback.initial || !feedback.review) return head;
   const findings = feedback.review.redFindings > 0 ? `${feedback.review.redFindings} blocking review finding(s)` : "the review feedback";
   const preservation = feedback.review.preservationProven ? "" : " Also prove no behavior regression vs the original.";
   return `${head} Address ${findings} and these gate blockers: ${feedback.blockers.join(", ")}.${preservation}`;
+}
+
+/**
+ * The rescue implement instruction. A spawned worker can't read Linear, so the acceptance criteria (the
+ * ticket's synced description) are embedded inline; the branch is named so the PR opens where readHeadPr
+ * looks. Falls back to the prior "from its acceptance criteria" phrasing when the description is unknown.
+ */
+function rescueSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
+  const ac = ctx.acceptance?.trim();
+  const criteria = ac
+    ? `Acceptance criteria:\n${ac.length > MAX_ACCEPTANCE ? ac.slice(0, MAX_ACCEPTANCE) + "\n…(truncated)" : ac}`
+    : "Implement it from its acceptance criteria.";
+  const open = ctx.branch
+    ? `Work on branch \`${ctx.branch}\` and open a PR from it to the default branch.`
+    : "Then open a PR.";
+  return [`Implement Linear ticket ${job.ticketKey}.`, criteria, open].join("\n\n");
 }
 
 /** The independent-reviewer prompt: a fresh session with no stake, writing a parseable verdict file. */

@@ -11,6 +11,7 @@ export interface LinearIssueUpsert {
   id: string; // Linear issue UUID (primary key)
   identifier: string; // e.g. COR-42
   title: string;
+  description: string | null; // issue body/ACs; embedded in a rescue worker's seed (PRD §5)
   url: string | null;
   stateName: string | null;
   stateType: string | null;
@@ -39,7 +40,7 @@ query BorderlessIssues($filter: IssueFilter, $after: String) {
   issues(filter: $filter, first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      id identifier title url priority updatedAt dueDate branchName
+      id identifier title description url priority updatedAt dueDate branchName
       state { name type }
       assignee { id }
       project { id name }
@@ -61,6 +62,7 @@ interface RawIssueNode {
   id: string;
   identifier: string;
   title?: string | null;
+  description?: string | null;
   url?: string | null;
   priority?: number | null;
   updatedAt?: string | null;
@@ -88,6 +90,7 @@ export function parseIssuesResponse(json: unknown): IssuesPage {
       id: n.id,
       identifier: n.identifier,
       title: n.title ?? "",
+      description: n.description ?? null,
       url: n.url ?? null,
       stateName: n.state?.name ?? null,
       stateType: n.state?.type ?? null,

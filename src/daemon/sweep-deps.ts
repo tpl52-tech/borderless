@@ -20,7 +20,7 @@ import type { CheckState, RequiredCheck } from "../shared/sweep-gate.ts";
 import { REQUIRED_CHECKS } from "../shared/sweep-gate.ts";
 import type { SweepEngineDeps, ReviewVerdict, WorkerResult, WorkerFeedback, PollResult } from "./sweep-engine.ts";
 import { fetchPr, listPrsForBranch } from "./github.ts";
-import { branchName } from "./worktree.ts";
+import { branchName, prBranchCandidates } from "./worktree.ts";
 import { sessionDir } from "../shared/paths.ts";
 import { runWithDeadline } from "./ssh.ts";
 
@@ -142,10 +142,12 @@ export interface LiveSweepDepsConfig {
   spawnDeadlineMs?: number;
 }
 
-/** Discover the existing PR for an in-review job: the ticket branch first, then a ticket-key search. */
-async function discoverPr(repo: string, branchOwner: string, ticketKey: string): Promise<number | null> {
-  const byBranch = (await listPrsForBranch(repo, ticketBranch(branchOwner, ticketKey)))[0]?.number;
-  if (byBranch != null) return byBranch;
+/** Discover the existing PR for an in-review job: its candidate branches first, then a ticket-key search. */
+async function discoverPr(repo: string, branchOwner: string, ticketKey: string, gitBranchName: string | null): Promise<number | null> {
+  for (const branch of prBranchCandidates(ticketKey, branchOwner, gitBranchName)) {
+    const n = (await listPrsForBranch(repo, branch))[0]?.number;
+    if (n != null) return n;
+  }
   const r = await runWithDeadline(["gh", "pr", "list", "--repo", repo, "--search", ticketKey, "--state", "open", "--limit", "1", "--json", "number"]);
   if (r.code !== 0) return null;
   const parsed = JSON.parse(r.stdout) as Array<{ number?: number }>;
@@ -158,7 +160,8 @@ async function discoverPr(repo: string, branchOwner: string, ticketKey: string):
  * for a human. Live-only.
  */
 export async function hydrateInReviewJob(store: Store, job: SweepJob, cfg: { repo: string; branchOwner: string }): Promise<SweepJob> {
-  const number = await discoverPr(cfg.repo, cfg.branchOwner, job.ticketKey);
+  const gitBranchName = store.getLinearIssue(job.ticketId)?.gitBranchName ?? null;
+  const number = await discoverPr(cfg.repo, cfg.branchOwner, job.ticketKey, gitBranchName);
   if (number == null) return job;
   const headSha = headOf(await fetchPr(cfg.repo, number));
   return store.transitionSweepJob(job.id, { prNumber: number, headSha });

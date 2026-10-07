@@ -56,6 +56,17 @@ export function branchName(opts: {
   return `ao/${slug(opts.title ?? opts.ticket ?? "session")}-${opts.id8}`;
 }
 
+/**
+ * Branches to try when matching a ticket's PR (shake-out finding): Linear's suggested branch first — the
+ * team's actual convention, e.g. `tpl52/cor-24-sign-up-…`, which Linear's GitHub integration auto-links —
+ * then the canonical `<owner>/<TICKET>`. Deduped so an equal pair collapses to one.
+ */
+export function prBranchCandidates(ticketKey: string, branchOwner: string, gitBranchName: string | null): string[] {
+  const canonical = branchName({ ticket: ticketKey, branchOwner, id8: "" });
+  const git = gitBranchName?.trim();
+  return git && git !== canonical ? [git, canonical] : [canonical];
+}
+
 export interface ProvisionOptions {
   repoTop: string;
   branch: string;

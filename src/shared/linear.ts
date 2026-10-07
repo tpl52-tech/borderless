@@ -21,6 +21,7 @@ export interface LinearIssueUpsert {
   dueDate: number | null; // epoch ms; feeds the rescue overdue check (PRD §5)
   labels: string[]; // label names; `lead-level` excludes a ticket from rescue
   blockedBy: string[]; // ids of issues that block this one; feeds the boards critical path (PRD §7)
+  gitBranchName: string | null; // Linear's suggested branch — matches the team's PR branches (PRD §4)
   updatedAt: number | null; // epoch ms
 }
 
@@ -37,7 +38,7 @@ query BorderlessIssues($filter: IssueFilter, $after: String) {
   issues(filter: $filter, first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
-      id identifier title url priority updatedAt dueDate
+      id identifier title url priority updatedAt dueDate branchName
       state { name type }
       assignee { id }
       project { id }
@@ -63,6 +64,7 @@ interface RawIssueNode {
   priority?: number | null;
   updatedAt?: string | null;
   dueDate?: string | null;
+  branchName?: string | null;
   state?: { name?: string | null; type?: string | null } | null;
   assignee?: { id?: string | null } | null;
   project?: { id?: string | null } | null;
@@ -99,6 +101,7 @@ export function parseIssuesResponse(json: unknown): IssuesPage {
         .filter((r) => r.type === "blocks")
         .map((r) => r.issue?.id)
         .filter((id): id is string => typeof id === "string"),
+      gitBranchName: n.branchName ?? null,
       updatedAt: Number.isNaN(t) ? null : t,
     };
   });

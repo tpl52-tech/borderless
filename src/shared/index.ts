@@ -23,3 +23,4 @@ export * from "./roster.ts";
 export * from "./sweep-gate.ts";
 export * from "./rescue.ts";
 export * from "./boards.ts";
+export * from "./assign.ts";

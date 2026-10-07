@@ -18,6 +18,7 @@
  *   ao sweep ["In Review"]                     sync Linear issues + enqueue in-review sweep jobs
  *   ao rescue [authorize <ticketKey>]          list eligible overdue tickets / authorize a rescue
  *   ao boards                                  unblocked tickets, ranked by critical-path impact
+ *   ao assign                                  suggested assignee per unblocked ticket (load-balanced)
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
@@ -89,6 +90,17 @@ export async function main(argv: string[]): Promise<void> {
       const rows = await client.request<Array<{ ticketKey: string; title: string; downstream: number }>>("boards.get");
       if (rows.length === 0) console.log("boards: nothing actionable right now");
       else for (const r of rows) console.log(`  ${r.ticketKey}  unblocks ${r.downstream}  ${r.title}`);
+    });
+    return;
+  }
+
+  // `ao assign` — one suggested assignee per unblocked ticket, load-balanced. Suggest only; the lead
+  // decides (never auto-assigns, build order #6/PRD §8).
+  if (sub === "assign") {
+    await withDaemon("assign", async (client) => {
+      const rows = await client.request<Array<{ ticketKey: string; netid: string; name: string; load: number }>>("assign.suggest");
+      if (rows.length === 0) console.log("assign: nothing to suggest");
+      else for (const r of rows) console.log(`  ${r.ticketKey}  →  ${r.name} (${r.netid}, load ${r.load})`);
     });
     return;
   }

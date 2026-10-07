@@ -2,9 +2,9 @@ import { test, expect, describe } from "bun:test";
 import { unblockedIssues, doNext, downstreamCounts, isUnblocked } from "../src/shared/boards.ts";
 import type { LinearIssue } from "../src/shared/types.ts";
 
-type Issue = Pick<LinearIssue, "id" | "identifier" | "title" | "stateType" | "blockedBy">;
+type Issue = Pick<LinearIssue, "id" | "identifier" | "title" | "stateType" | "blockedBy" | "assignee">;
 const iss = (id: string, over: Partial<Issue> = {}): Issue => ({
-  id, identifier: id.toUpperCase(), title: `t-${id}`, stateType: "unstarted", blockedBy: [], ...over,
+  id, identifier: id.toUpperCase(), title: `t-${id}`, stateType: "unstarted", blockedBy: [], assignee: null, ...over,
 });
 const byId = (issues: Issue[]) => new Map(issues.map((i) => [i.id, i]));
 

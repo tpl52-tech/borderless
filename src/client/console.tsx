@@ -64,8 +64,8 @@ function Console({ client, onAction }: { client: DaemonClient; onAction: (a: Sur
     if (key.ctrl && input === "c") { onAction({ type: "quit" }); exit(); return; }
     if (key.tab) { setScreenIdx((i) => (i + 1) % TAB_LABELS.length); setCursor(0); return; }
     if (onAsk) {
-      if (askBusy) return;
-      if (key.escape) { setScreenIdx(0); setCursor(0); return; }
+      if (key.escape) { setScreenIdx(0); setCursor(0); return; } // leave even while a question is in flight
+      if (askBusy) return; // ...but ignore typing/submit until it returns
       if (key.return) { submitAsk(); return; }
       setAskInput((v) => editInput(v, input, key));
       return;

@@ -52,6 +52,19 @@ describe("downstreamCounts (critical path)", () => {
     expect(downstreamCounts(issues).get("a")).toBe(3);
   });
 
+  test("a terminal node in the chain contributes no phantom impact", () => {
+    // a(open) <- b(completed, blockedBy a) <- c(open, blockedBy b): b is done, so c is already unblocked
+    // through b, and finishing a newly unblocks nothing. a's true downstream impact is 0.
+    const issues = [
+      iss("a"),
+      iss("b", { stateType: "completed", blockedBy: ["a"] }),
+      iss("c", { blockedBy: ["b"] }),
+    ];
+    const counts = downstreamCounts(issues);
+    expect(counts.get("a")).toBe(0); // done b is neither downstream work nor a live edge to c
+    expect(counts.get("b")).toBe(0); // a done ticket has no downstream
+  });
+
   test("a dependency cycle doesn't hang or self-count", () => {
     const issues = [iss("a", { blockedBy: ["b"] }), iss("b", { blockedBy: ["a"] })];
     const counts = downstreamCounts(issues);

@@ -2,7 +2,8 @@
  * Live boards — the pure "what's actionable and what to attack next" logic (lead-console PRD §7).
  *
  * No I/O: operates on the already-synced Linear issues (store.listLinearIssues). Two views:
- *  - §7a unblocked: every actionable ticket (not done/canceled, no open blocker);
+ *  - §7a unblocked: every actionable ticket (not done/canceled, no open blocker). The "+ project phase"
+ *    label from §7a is deferred until a projectMilestone sync field exists; this is the actionable set.
  *  - §7b "do next": unblocked tickets ranked by how much downstream work each one unblocks (critical path),
  *    so the board answers "what to attack this session," not just "what's attackable."
  */
@@ -46,9 +47,15 @@ export function unblockedIssues<T extends BoardIssue>(issues: readonly T[]): T[]
  * seen-set traversal.
  */
 export function downstreamCounts(issues: readonly BoardIssue[]): Map<string, number> {
-  const unblocks = new Map<string, string[]>(); // blocker id -> ids it directly unblocks
+  const byId = indexById(issues);
+  // A blocker still "gates" only if it's a known, non-terminal ticket — the same notion isUnblocked uses,
+  // so the graph can't disagree with it: a done ticket is neither downstream work nor a live blocker.
+  const gates = (id: string): boolean => { const b = byId.get(id); return !!b && !isTerminal(b.stateType); };
+  const unblocks = new Map<string, string[]>(); // still-gating blocker id -> non-terminal ids it unblocks
   for (const issue of issues) {
+    if (isTerminal(issue.stateType)) continue;
     for (const b of issue.blockedBy) {
+      if (!gates(b)) continue;
       const list = unblocks.get(b);
       if (list) list.push(issue.id);
       else unblocks.set(b, [issue.id]);

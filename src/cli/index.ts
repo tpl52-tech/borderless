@@ -20,9 +20,25 @@
  *   ao boards                                  unblocked tickets, ranked by critical-path impact
  */
 
+import type { DaemonClient } from "../client/daemon-client.ts";
+
 const SUBCOMMANDS = [
   "setup", "daemon", "autonomy", "monitor", "history", "worktree", "pr", "issue", "awake",
 ] as const;
+
+/** Connect to the daemon, run `fn`, and always close — the shared shape of the daemon-backed subcommands. */
+async function withDaemon<T>(cmd: string, fn: (client: DaemonClient) => Promise<T>): Promise<T> {
+  const { connectDaemon } = await import("../client/daemon-client.ts");
+  const { paths } = await import("../shared/paths.ts");
+  const client = await connectDaemon(paths().socket).catch(() => {
+    throw new Error(`ao ${cmd}: daemon not running — start it with \`ao\` (the TUI) or \`bun run src/daemon/index.ts\``);
+  });
+  try {
+    return await fn(client);
+  } finally {
+    client.close();
+  }
+}
 
 export async function main(argv: string[]): Promise<void> {
   const [sub, ...rest] = argv;
@@ -36,35 +52,23 @@ export async function main(argv: string[]): Promise<void> {
     return;
   }
 
-  // `ao sweep ["In Review"]` — refresh linear_issues (if a Linear key is configured) + enqueue
-  // in-review sweep jobs. A thin client over the daemon's sweep.scanInReview (build order #2).
+  // `ao sweep ["In Review"]` — refresh linear_issues (if a Linear key is configured) + enqueue + run
+  // in-review sweep jobs (build order #2/#3c).
   if (sub === "sweep") {
-    const { connectDaemon } = await import("../client/daemon-client.ts");
-    const { paths } = await import("../shared/paths.ts");
-    const client = await connectDaemon(paths().socket).catch(() => {
-      throw new Error("ao sweep: daemon not running — start it with `ao` (the TUI) or `bun run src/daemon/index.ts`");
-    });
-    try {
+    await withDaemon("sweep", async (client) => {
       const stateName = rest[0];
       const r = await client.request<{ synced: number; created: number; started: number }>(
         "sweep.scanInReview", stateName ? { stateName } : {},
       );
       console.log(`sweep: synced ${r.synced} issue(s), enqueued ${r.created} job(s), started ${r.started} run(s)`);
-    } finally {
-      client.close();
-    }
+    });
     return;
   }
 
-  // `ao rescue [authorize <ticket>]` — the Rescues queue (overdue, no-progress tickets) + per-ticket
-  // authorization. Nothing auto-starts; authorize is the lead's explicit go-ahead (build order #4b).
+  // `ao rescue [authorize <ticket>]` — the Rescues queue + per-ticket authorization. Nothing auto-starts;
+  // authorize is the lead's explicit go-ahead (build order #4b).
   if (sub === "rescue") {
-    const { connectDaemon } = await import("../client/daemon-client.ts");
-    const { paths } = await import("../shared/paths.ts");
-    const client = await connectDaemon(paths().socket).catch(() => {
-      throw new Error("ao rescue: daemon not running — start it with `ao` (the TUI) or `bun run src/daemon/index.ts`");
-    });
-    try {
+    await withDaemon("rescue", async (client) => {
       if (rest[0] === "authorize") {
         const ticket = rest[1];
         if (!ticket) throw new Error("usage: ao rescue authorize <ticketKey>");
@@ -75,26 +79,17 @@ export async function main(argv: string[]): Promise<void> {
         if (queue.length === 0) console.log("rescue: no eligible overdue tickets");
         else for (const c of queue) console.log(`  ${c.ticketKey}  ${c.daysOverdue}d overdue  ${c.title}`);
       }
-    } finally {
-      client.close();
-    }
+    });
     return;
   }
 
   // `ao boards` — the "do next" board: unblocked tickets ranked by how much each unblocks (build order #6).
   if (sub === "boards") {
-    const { connectDaemon } = await import("../client/daemon-client.ts");
-    const { paths } = await import("../shared/paths.ts");
-    const client = await connectDaemon(paths().socket).catch(() => {
-      throw new Error("ao boards: daemon not running — start it with `ao` (the TUI) or `bun run src/daemon/index.ts`");
-    });
-    try {
+    await withDaemon("boards", async (client) => {
       const rows = await client.request<Array<{ ticketKey: string; title: string; downstream: number }>>("boards.get");
-      if (rows.length === 0) console.log("boards: nothing unblocked (sync Linear first with `ao sweep`)");
+      if (rows.length === 0) console.log("boards: nothing actionable right now");
       else for (const r of rows) console.log(`  ${r.ticketKey}  unblocks ${r.downstream}  ${r.title}`);
-    } finally {
-      client.close();
-    }
+    });
     return;
   }
 

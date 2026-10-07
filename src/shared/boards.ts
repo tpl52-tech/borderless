@@ -10,10 +10,11 @@
 
 import type { LinearIssue } from "./types.ts";
 
-type BoardIssue = Pick<LinearIssue, "id" | "identifier" | "title" | "stateType" | "blockedBy">;
+type BoardIssue = Pick<LinearIssue, "id" | "identifier" | "title" | "stateType" | "blockedBy" | "assignee">;
 
-/** A done/canceled ticket is finished — never actionable and never a live blocker. */
-function isTerminal(stateType: string | null): boolean {
+/** A done/canceled ticket is finished — never actionable and never a live blocker. The one definition of
+ *  "terminal" for a Linear issue, reused by the rescue + assignment logic too. */
+export function isTerminalState(stateType: string | null): boolean {
   return stateType === "completed" || stateType === "canceled";
 }
 
@@ -23,10 +24,10 @@ function isTerminal(stateType: string | null): boolean {
  * resolved so one out-of-scope dependency can't hide the whole board.
  */
 export function isUnblocked(issue: BoardIssue, byId: ReadonlyMap<string, BoardIssue>): boolean {
-  if (isTerminal(issue.stateType)) return false;
+  if (isTerminalState(issue.stateType)) return false;
   return issue.blockedBy.every((b) => {
     const blocker = byId.get(b);
-    return !blocker || isTerminal(blocker.stateType);
+    return !blocker || isTerminalState(blocker.stateType);
   });
 }
 
@@ -50,10 +51,10 @@ export function downstreamCounts(issues: readonly BoardIssue[]): Map<string, num
   const byId = indexById(issues);
   // A blocker still "gates" only if it's a known, non-terminal ticket — the same notion isUnblocked uses,
   // so the graph can't disagree with it: a done ticket is neither downstream work nor a live blocker.
-  const gates = (id: string): boolean => { const b = byId.get(id); return !!b && !isTerminal(b.stateType); };
+  const gates = (id: string): boolean => { const b = byId.get(id); return !!b && !isTerminalState(b.stateType); };
   const unblocks = new Map<string, string[]>(); // still-gating blocker id -> non-terminal ids it unblocks
   for (const issue of issues) {
-    if (isTerminal(issue.stateType)) continue;
+    if (isTerminalState(issue.stateType)) continue;
     for (const b of issue.blockedBy) {
       if (!gates(b)) continue;
       const list = unblocks.get(b);

@@ -5,8 +5,8 @@ import type { DoNextEntry } from "../src/shared/boards.ts";
 import type { LinearIssue } from "../src/shared/types.ts";
 
 const mem = (netid: string, linearIds: string[], name = netid): Member => ({ name, netid, emails: [], linearIds, github: netid });
-const entry = (id: string, downstream: number): DoNextEntry => ({
-  issue: { id, identifier: id.toUpperCase(), title: `t-${id}`, stateType: "unstarted", blockedBy: [] } as LinearIssue,
+const entry = (id: string, downstream: number, assignee: string | null = null): DoNextEntry => ({
+  issue: { id, identifier: id.toUpperCase(), title: `t-${id}`, stateType: "unstarted", blockedBy: [], assignee } as LinearIssue,
   downstream,
 });
 const iss = (assignee: string | null, stateType = "unstarted"): Pick<LinearIssue, "assignee" | "stateType"> => ({ assignee, stateType });
@@ -41,9 +41,15 @@ describe("suggestAssignments (PRD §8)", () => {
     expect(s[0]!.netid).toBe("b"); // least loaded
   });
 
-  test("respects base loads — a far-busier member gets nothing until it catches up", () => {
+  test("respects base loads — a far-busier member gets nothing until it catches up (and the reported load increments)", () => {
     const s = suggestAssignments([entry("t1", 0), entry("t2", 0)], members, new Map([["a", 0], ["b", 10], ["c", 10]]));
     expect(s.every((x) => x.netid === "a")).toBe(true);
+    expect(s.map((x) => x.load)).toEqual([0, 1]); // capacity reservation shows in the reported load
+  });
+
+  test("only suggests for UNASSIGNED tickets — an already-owned ticket is left alone (PRD §11 'new tickets')", () => {
+    const s = suggestAssignments([entry("owned", 0, "someone"), entry("free", 0, null)], members, new Map([["a", 0], ["b", 0], ["c", 0]]));
+    expect(s.map((x) => x.ticketKey)).toEqual(["FREE"]);
   });
 
   test("ties break by name", () => {

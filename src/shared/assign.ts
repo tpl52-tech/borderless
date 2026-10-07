@@ -9,11 +9,7 @@
 
 import type { LinearIssue } from "./types.ts";
 import type { Member } from "./roster.ts";
-import type { DoNextEntry } from "./boards.ts";
-
-function isTerminal(stateType: string | null): boolean {
-  return stateType === "completed" || stateType === "canceled";
-}
+import { type DoNextEntry, isTerminalState } from "./boards.ts";
 
 /** Active (non-terminal) issue count per member netid, resolved via each member's Linear ids. */
 export function activeLoads(
@@ -25,7 +21,7 @@ export function activeLoads(
 
   const loads = new Map<string, number>(members.map((m) => [m.netid, 0]));
   for (const issue of issues) {
-    if (issue.assignee == null || isTerminal(issue.stateType)) continue;
+    if (issue.assignee == null || isTerminalState(issue.stateType)) continue;
     const netid = netidByLinearId.get(issue.assignee);
     if (netid != null) loads.set(netid, (loads.get(netid) ?? 0) + 1);
   }
@@ -41,9 +37,10 @@ export interface AssignmentSuggestion {
 }
 
 /**
- * Suggest an assignee per unblocked ticket (PRD §8). Highest downstream-impact tickets are placed first,
- * each going to the currently-least-loaded member (ties broken by name); the pick's load is then reserved
- * so subsequent tickets spread across the team instead of piling onto one person. Pure — the lead decides.
+ * Suggest an assignee for each UNASSIGNED unblocked ticket (PRD §8 over §11's "assign new tickets" — an
+ * already-owned ticket keeps its driver, whose work is already in the load). Highest downstream-impact
+ * tickets are placed first, each going to the currently-least-loaded member (ties broken by name); the
+ * pick's load is then reserved so subsequent tickets spread across the team. Pure — the lead decides.
  */
 export function suggestAssignments(
   doNext: readonly DoNextEntry[],
@@ -53,9 +50,9 @@ export function suggestAssignments(
   if (members.length === 0) return [];
   const load = new Map<string, number>(members.map((m) => [m.netid, baseLoads.get(m.netid) ?? 0]));
 
-  const ordered = [...doNext].sort(
-    (a, b) => b.downstream - a.downstream || a.issue.identifier.localeCompare(b.issue.identifier),
-  );
+  const ordered = [...doNext]
+    .filter((e) => e.issue.assignee == null) // only tickets that still need an owner
+    .sort((a, b) => b.downstream - a.downstream || a.issue.identifier.localeCompare(b.issue.identifier));
 
   const suggestions: AssignmentSuggestion[] = [];
   for (const entry of ordered) {

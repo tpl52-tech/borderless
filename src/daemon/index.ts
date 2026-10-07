@@ -37,6 +37,7 @@ import { delegate, liveCreateIssue, type DelegateResult } from "./lead-delegate.
 import { liveSlackDm } from "./slack.ts";
 import { askBorderless, type FleetDocs } from "./ask-borderless.ts";
 import { httpOpenRouterChat } from "./openrouter/chat.ts";
+import { claudeCliChat } from "./claude-chat.ts";
 import { memberByLinearId, ROSTER } from "../shared/roster.ts";
 
 export interface Daemon {
@@ -215,8 +216,14 @@ export function startDaemon(home = stateHome()): Daemon {
   // Ask Borderless (PRD §10): fleet-aware chat over OpenRouter + the fleet tools. Needs an OpenRouter key;
   // without one it's a guarded no-op (configured:false). The Linear-write tools need a Linear key too.
   const askRun: UdsServerDeps["askRun"] = async (question, allowActions) => {
-    if (!config.openRouterApiKey) return { answer: "", steps: 0, costMicros: 0, configured: false };
-    const chat = httpOpenRouterChat(config.openRouterApiKey, config.openRouterModel ?? DEFAULT_OPENROUTER_MODEL);
+    const backend = config.askBackend ?? "subscription"; // PRD §12: the subscription CLI is the default ($0)
+    let chat;
+    if (backend === "openrouter") {
+      if (!config.openRouterApiKey) return { answer: "", steps: 0, costMicros: 0, configured: false };
+      chat = httpOpenRouterChat(config.openRouterApiKey, config.openRouterModel ?? DEFAULT_OPENROUTER_MODEL);
+    } else {
+      chat = claudeCliChat({ model: config.askModel, cwd: home }); // subscription: no key, answer-only
+    }
     const linear = config.linearApiKey ? httpLinearClient(config.linearApiKey) : null;
     const issueUuid = (ticketKey: string) => store.listLinearIssues().find((i) => i.identifier === ticketKey)?.id ?? null;
     // These throw on a guard miss so the fleet tool reports it as an error (not a false success); the

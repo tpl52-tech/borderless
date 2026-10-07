@@ -141,9 +141,14 @@ export interface OperatorConfigLite {
   leadOpsProject?: string;
   /** Slack bot token for lead-desk delegation DMs (secret; operator config only). Absent → no DM sent. */
   slackBotToken?: string;
-  /** OpenRouter API key for Ask Borderless (PRD §10; secret; operator config only). Absent → chat disabled. */
+  /** Ask Borderless chat backend (PRD §10/§12): "subscription" runs the local `claude` CLI ($0, answer-only),
+   *  "openrouter" uses the OpenRouter API (needs openRouterApiKey, supports the action tools). Default: subscription. */
+  askBackend?: "subscription" | "openrouter";
+  /** Model for the subscription backend, passed to `claude --model` (optional; else the CLI's default). */
+  askModel?: string;
+  /** OpenRouter API key for the openrouter backend (secret; operator config only). Absent → that backend is off. */
   openRouterApiKey?: string;
-  /** OpenRouter model id for Ask Borderless; defaults to DEFAULT_OPENROUTER_MODEL. */
+  /** OpenRouter model id for the openrouter backend; defaults to DEFAULT_OPENROUTER_MODEL. */
   openRouterModel?: string;
 }
 
@@ -184,6 +189,8 @@ export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
     repo: typeof raw.repo === "string" ? raw.repo : undefined,
     leadOpsProject: typeof raw.leadOpsProject === "string" && raw.leadOpsProject.trim() ? raw.leadOpsProject.trim() : undefined,
     slackBotToken: typeof raw.slackBotToken === "string" && raw.slackBotToken.trim() ? raw.slackBotToken.trim() : undefined,
+    askBackend: raw.askBackend === "openrouter" ? "openrouter" : raw.askBackend === "subscription" ? "subscription" : undefined,
+    askModel: typeof raw.askModel === "string" && raw.askModel.trim() ? raw.askModel.trim() : undefined,
     openRouterApiKey: typeof raw.openRouterApiKey === "string" && raw.openRouterApiKey.trim() ? raw.openRouterApiKey.trim() : undefined,
     openRouterModel: typeof raw.openRouterModel === "string" && raw.openRouterModel.trim() ? raw.openRouterModel.trim() : undefined,
   };

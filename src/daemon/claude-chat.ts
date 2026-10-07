@@ -1,15 +1,19 @@
 /**
  * Subscription chat backend for Ask Borderless (PRD §10, §12) — runs the model on the local `claude` CLI
- * (the lead's Claude subscription, $0 per call) instead of pay-per-token OpenRouter.
+ * (the lead's Claude subscription, $0 marginal) instead of pay-per-token OpenRouter.
  *
- * `claude -p --output-format json` is a one-shot: it answers but does not expose our fleet ToolDefs, so
- * this backend is ANSWER-ONLY (advisory). The action tools (reassign/enqueue/…) remain the OpenRouter
- * backend's. The response parser is pure + tested; the spawn is the thin live part.
+ * `claude -p --output-format json` is a one-shot. We run it ANSWER-ONLY and sandboxed: `--allowedTools ""`
+ * (no tools — it can't call our fleet ToolDefs, nor read/exec anything) and a throwaway temp cwd (never the
+ * daemon's state dir, which holds operator secrets). So the loop gets no toolCalls and ends in one turn; the
+ * action tools remain the OpenRouter backend's. The response parser is pure + tested; the spawn is live.
  */
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Chat, ChatResponse, Message } from "./openrouter/runner.ts";
 
-/** Flatten the loop's messages into one prompt for the single-shot CLI (system first, then the turns). */
+/** Flatten the loop's messages into one prompt for the single-shot CLI (user turns bare, other roles labeled). */
 export function flattenMessages(messages: Message[]): string {
   return messages
     .map((m) => (m.role === "user" ? m.content : `${m.role}: ${m.content}`))
@@ -17,38 +21,45 @@ export function flattenMessages(messages: Message[]): string {
     .trim();
 }
 
-/** `claude -p --output-format json` body → ChatResponse. Tolerant: non-JSON output is taken as the answer. */
+/**
+ * `claude -p --output-format json` body → ChatResponse. Tolerant: non-JSON output is taken verbatim as the
+ * answer. Cost is intentionally NOT surfaced — a subscription call is $0 marginal; the CLI's `total_cost_usd`
+ * is a notional metered-equivalent, so reporting it as spend would be misleading. (A valid-JSON bare scalar
+ * has no `result` and reads as `{text: undefined}`; harmless — the CLI always emits an object envelope.)
+ */
 export function parseClaudeCliResult(raw: string): ChatResponse {
   const trimmed = raw.trim();
   if (!trimmed) return { text: undefined };
   try {
-    const j = JSON.parse(trimmed) as { result?: unknown; is_error?: unknown; total_cost_usd?: unknown };
+    const j = JSON.parse(trimmed) as { result?: unknown; is_error?: unknown };
     const result = typeof j.result === "string" ? j.result : undefined;
-    const usageCost = typeof j.total_cost_usd === "number" ? j.total_cost_usd : undefined;
-    if (j.is_error) return { text: result ?? "ask: the model returned an error", usageCost };
-    return { text: result, usageCost };
+    if (j.is_error) return { text: result ?? "ask: the model returned an error" };
+    return { text: result };
   } catch {
-    return { text: trimmed }; // plain-text output (not the json envelope) → the whole thing is the answer
+    return { text: trimmed };
   }
 }
 
 /**
- * A `Chat` backed by the local `claude` CLI subscription. The `tools` arg is ignored — the CLI can't call
- * our ToolDefs — so it always returns text and the agent loop ends in one turn (advisory). Throws if the
- * CLI isn't runnable (the loop renders that + stops).
+ * A `Chat` backed by the local `claude` CLI subscription. Answer-only + sandboxed (see file header). Throws
+ * if the CLI isn't runnable (the loop renders that + stops). The `tools` arg is ignored by design.
  */
-export function claudeCliChat(opts: { model?: string; cwd?: string } = {}): Chat {
+export function claudeCliChat(opts: { model?: string } = {}): Chat {
   return async (messages) => {
-    const args = ["-p", "--output-format", "json", ...(opts.model ? ["--model", opts.model] : [])];
-    const proc = Bun.spawn(["claude", ...args], {
-      stdin: new TextEncoder().encode(flattenMessages(messages)),
-      stdout: "pipe", stderr: "pipe", cwd: opts.cwd,
-    });
-    const raw = await new Response(proc.stdout).text();
-    const code = await proc.exited;
-    if (code !== 0 && !raw.trim()) {
-      throw new Error(`claude CLI exited ${code}: ${(await new Response(proc.stderr).text()).trim().slice(0, 200)}`);
+    const scratch = mkdtempSync(join(tmpdir(), "bl-ask-")); // neutral cwd — never the secrets dir
+    try {
+      const args = ["-p", "--output-format", "json", "--allowedTools", "", ...(opts.model ? ["--model", opts.model] : [])];
+      const proc = Bun.spawn(["claude", ...args], {
+        stdin: new TextEncoder().encode(flattenMessages(messages)),
+        stdout: "pipe", stderr: "pipe", cwd: scratch,
+      });
+      // Drain stdout + stderr concurrently (a full stderr pipe would otherwise deadlock the child).
+      const [out, errText] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+      const code = await proc.exited;
+      if (code !== 0 && !out.trim()) throw new Error(`claude CLI exited ${code}: ${errText.trim().slice(0, 200)}`);
+      return parseClaudeCliResult(out);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
     }
-    return parseClaudeCliResult(raw);
   };
 }

@@ -13,14 +13,14 @@ describe("flattenMessages (loop transcript → one CLI prompt)", () => {
 });
 
 describe("parseClaudeCliResult (claude -p --output-format json → ChatResponse)", () => {
-  test("maps result → text and total_cost_usd → usageCost", () => {
+  test("maps result → text; does NOT surface total_cost_usd ($0 marginal on a subscription)", () => {
     expect(parseClaudeCliResult(JSON.stringify({ type: "result", result: "all quiet", is_error: false, total_cost_usd: 0.21 })))
-      .toEqual({ text: "all quiet", usageCost: 0.21 });
+      .toEqual({ text: "all quiet" });
   });
 
-  test("is_error surfaces the result text (or a fallback) and still carries cost", () => {
+  test("is_error surfaces the result text (or a fallback)", () => {
     expect(parseClaudeCliResult(JSON.stringify({ result: "rate limited", is_error: true, total_cost_usd: 0 })))
-      .toEqual({ text: "rate limited", usageCost: 0 });
+      .toEqual({ text: "rate limited" });
     expect(parseClaudeCliResult(JSON.stringify({ is_error: true })).text).toMatch(/error/i);
   });
 

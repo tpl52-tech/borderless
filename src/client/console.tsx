@@ -319,8 +319,8 @@ function Console({ client, onAction }: { client: DaemonClient; onAction: (a: Sur
   const { exit } = useApp();
 
   const onAsk = screenIdx === ASK_IDX;
-  const onSweeps = screenIdx === 0;
   const listScreen = onAsk ? null : CONSOLE_SCREENS[screenIdx]!;
+  const onSweeps = listScreen?.key === "sweeps"; // by key, not index — consistent with the key-based dispatch
   const activeRows: unknown[] = onSweeps ? sweeps : rows; // the list the cursor/attach act on
 
   // SWEEPS queue, polled independently of the active screen → always-current top-bar badge + daemon health.

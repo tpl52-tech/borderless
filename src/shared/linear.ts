@@ -16,6 +16,7 @@ export interface LinearIssueUpsert {
   stateType: string | null;
   assignee: string | null; // Linear user id — the roster.memberByLinearId key
   projectId: string | null;
+  projectName: string | null; // project name; the "Lead Ops" project is excluded from both sweeps (PRD §9)
   teamKey: string | null;
   priority: number | null;
   dueDate: number | null; // epoch ms; feeds the rescue overdue check (PRD §5)
@@ -41,7 +42,7 @@ query BorderlessIssues($filter: IssueFilter, $after: String) {
       id identifier title url priority updatedAt dueDate branchName
       state { name type }
       assignee { id }
-      project { id }
+      project { id name }
       team { key }
       labels(first: 50) { nodes { name } }  # cap high: missing a lead-level label would mis-admit a rescue
       inverseRelations(first: 50) { nodes { type issue { id } } }  # relations pointing AT this issue; type=blocks → a blocker
@@ -67,7 +68,7 @@ interface RawIssueNode {
   branchName?: string | null;
   state?: { name?: string | null; type?: string | null } | null;
   assignee?: { id?: string | null } | null;
-  project?: { id?: string | null } | null;
+  project?: { id?: string | null; name?: string | null } | null;
   team?: { key?: string | null } | null;
   labels?: { nodes?: Array<{ name?: string | null }> } | null;
   inverseRelations?: { nodes?: Array<{ type?: string | null; issue?: { id?: string | null } | null }> } | null;
@@ -92,6 +93,7 @@ export function parseIssuesResponse(json: unknown): IssuesPage {
       stateType: n.state?.type ?? null,
       assignee: n.assignee?.id ?? null,
       projectId: n.project?.id ?? null,
+      projectName: n.project?.name ?? null,
       teamKey: n.team?.key ?? null,
       priority: typeof n.priority === "number" ? n.priority : null,
       dueDate: Number.isNaN(due) ? null : due,

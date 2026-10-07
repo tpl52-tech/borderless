@@ -26,6 +26,8 @@ export interface RescueScanDeps {
   checkProgress(issue: LinearIssue): Promise<boolean>;
   /** Does the issue's assignee resolve to a roster member? */
   isRosterMember(linearId: string | null): boolean;
+  /** Lead-desk project to exclude (PRD §9); defaults to "Lead Ops" when unset. */
+  leadOpsProject?: string;
 }
 
 /**
@@ -35,7 +37,7 @@ export interface RescueScanDeps {
 export async function scanRescues(store: Store, deps: RescueScanDeps): Promise<RescueCandidate[]> {
   const candidates: RescueCandidate[] = [];
   for (const issue of store.listLinearIssues()) {
-    const prelim = rescueEligibility(issue, { now: deps.now, hasProgress: false, isRosterMember: deps.isRosterMember(issue.assignee) });
+    const prelim = rescueEligibility(issue, { now: deps.now, hasProgress: false, isRosterMember: deps.isRosterMember(issue.assignee), leadOpsProject: deps.leadOpsProject });
     if (!prelim.eligible) continue; // ineligible for a non-progress reason — skip the gh call
     if (await deps.checkProgress(issue)) continue; // someone already started it
     candidates.push({ issue, daysOverdue: daysOverdue(issue.dueDate!, deps.now) });

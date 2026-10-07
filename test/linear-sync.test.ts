@@ -38,7 +38,7 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
       url: "https://linear.app/cornell-ewb-softdev/issue/COR-1",
       stateName: "In Review", stateType: "started", assignee: "user-1",
       projectId: "proj-1", teamKey: "COR", priority: 2,
-      dueDate: null, labels: [],
+      dueDate: null, labels: [], blockedBy: [],
       updatedAt: Date.parse("2026-10-06T18:00:00.000Z"),
     });
     expect(hasNextPage).toBe(true);
@@ -67,6 +67,17 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
     })]));
     expect(issues[0]!.dueDate).toBe(Date.parse("2026-10-01"));
     expect(issues[0]!.labels).toEqual(["lead-level", "intermediate"]);
+  });
+
+  test("maps blockedBy from type=blocks inverse relations only", () => {
+    const { issues } = parseIssuesResponse(page([node({
+      inverseRelations: { nodes: [
+        { type: "blocks", issue: { id: "blocker-1" } },
+        { type: "related", issue: { id: "not-a-blocker" } },
+        { type: "blocks", issue: { id: "blocker-2" } },
+      ] },
+    })]));
+    expect(issues[0]!.blockedBy).toEqual(["blocker-1", "blocker-2"]);
   });
 
   test("tolerates a garbled dueDate and null label names", () => {

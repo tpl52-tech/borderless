@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, existsSync, writeFileSync, realpathSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  provisionWorktree, removeWorktree, gitToplevel, slug, branchName, prBranchCandidates,
+  provisionWorktree, removeWorktree, repoTopOfWorktree, gitToplevel, slug, branchName, prBranchCandidates,
 } from "../src/daemon/worktree.ts";
 
 describe("prBranchCandidates (PR discovery branches, shake-out fix)", () => {
@@ -59,6 +59,7 @@ describe("provisionWorktree / removeWorktree (design §7.4)", () => {
     const res = provisionWorktree({ repoTop: repo, branch: "ao/feat-abc12345", defaultBranch: "main", id8: "abc12345" });
     expect(res.reused).toBe(false);
     expect(res.path).toBe(join(repo, ".worktrees", "ao", "abc12345"));
+    expect(repoTopOfWorktree(res.path)).toBe(repo); // release derives repoTop this way; must match provision
     expect(existsSync(res.path)).toBe(true);
     expect(existsSync(join(res.path, "README.md"))).toBe(true);
 
@@ -75,5 +76,45 @@ describe("provisionWorktree / removeWorktree (design §7.4)", () => {
     expect(() =>
       provisionWorktree({ repoTop: repo, branch: "shared", defaultBranch: "main", id8: "bbbbbbbb" }),
     ).toThrow(/already checked out/i);
+  });
+});
+
+describe("provisionWorktree continues an existing remote branch (fix-cycle base)", () => {
+  let origin: string;
+  let work: string;
+
+  beforeEach(() => {
+    origin = mkdtempSync(join(tmpdir(), "ao-origin-"));
+    work = mkdtempSync(join(tmpdir(), "ao-work-"));
+    spawnSync("git", ["init", "--bare", "-b", "main", origin]);
+    git(work, "init", "-b", "main");
+    git(work, "config", "user.email", "t@example.com");
+    git(work, "config", "user.name", "Test");
+    git(work, "remote", "add", "origin", origin);
+    writeFileSync(join(work, "README.md"), "hi\n");
+    git(work, "add", "-A"); git(work, "commit", "-m", "init"); git(work, "push", "-u", "origin", "main");
+    // a PR branch pushed by a prior worker, carrying a commit that isn't on main
+    git(work, "checkout", "-b", "tpl52/COR-1");
+    writeFileSync(join(work, "feature.txt"), "from the prior worker\n");
+    git(work, "add", "-A"); git(work, "commit", "-m", "work"); git(work, "push", "-u", "origin", "tpl52/COR-1");
+    git(work, "checkout", "main");
+    git(work, "branch", "-D", "tpl52/COR-1"); // drop the local branch: re-provision must come from origin
+  });
+
+  afterEach(() => {
+    rmSync(origin, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true });
+  });
+
+  test("re-provisioning a pushed branch bases on origin/<branch> and keeps its commits", () => {
+    const res = provisionWorktree({ repoTop: work, branch: "tpl52/COR-1", defaultBranch: "main", id8: "cccccccc" });
+    expect(res.reused).toBe(false);
+    expect(existsSync(join(res.path, "feature.txt"))).toBe(true); // continued the PR branch, not reset to main
+  });
+
+  test("a branch NOT on the remote still starts from the default branch", () => {
+    const res = provisionWorktree({ repoTop: work, branch: "tpl52/COR-2", defaultBranch: "main", id8: "dddddddd" });
+    expect(existsSync(join(res.path, "feature.txt"))).toBe(false); // fresh off main
+    expect(existsSync(join(res.path, "README.md"))).toBe(true);
   });
 });

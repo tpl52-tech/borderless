@@ -2,11 +2,12 @@
  * Worktrees & the worktree reaper (design §7.4, §17.6).
  *
  * Path: <repo top>/.worktrees/ao/<id8>. Branch: with ticket `<branchOwner>/<TICKET>`; without,
- * `ao/<slug(title,40)>-<id8>` (the id suffix is load-bearing against collisions). Base is ALWAYS
- * origin/<defaultBranch> when available (the shared checkout was once 195 commits behind), falling
- * back to the local branch then HEAD. Script: mkdir; `git fetch --no-tags origin <branch>` (tolerated);
- * `git worktree add -B <branch> <path> <base>` (-B so a second attempt at the same ticket resets).
- * "Already used by worktree at ..." is surfaced as a one-line error. Existing dir -> reuse.
+ * `ao/<slug(title,40)>-<id8>` (the id suffix is load-bearing against collisions). Base: the branch's own
+ * remote ref `origin/<branch>` when it exists (so re-provisioning a pushed PR branch CONTINUES it), else
+ * origin/<defaultBranch> (the shared checkout was once 195 commits behind), then the local branch, then
+ * HEAD. Script: mkdir; `git fetch --no-tags origin <defaultBranch>` then `... <branch>` (both tolerated);
+ * `git worktree add -B <branch> <path> <base>`. "Already used by worktree at ..." is surfaced as a
+ * one-line error. Existing dir -> reuse.
  *
  * Removal: `worktree remove --force`, `prune`, `branch -D` (the STORED branch, never re-derived).
  * TODO(step 9): stop any docker-compose stack whose working_dir label equals the worktree first, and
@@ -87,8 +88,9 @@ export function provisionWorktree(opts: ProvisionOptions): ProvisionResult {
 
   mkdirSync(dirname(path), { recursive: true });
   git(opts.repoTop, ["fetch", "--no-tags", "origin", opts.defaultBranch]); // tolerated on failure
+  git(opts.repoTop, ["fetch", "--no-tags", "origin", opts.branch]); // so a re-provision continues an existing PR branch (tolerated for a new branch)
 
-  const base = resolveBase(opts.repoTop, opts.defaultBranch);
+  const base = resolveBase(opts.repoTop, opts.branch, opts.defaultBranch);
   const add = git(opts.repoTop, ["worktree", "add", "-B", opts.branch, path, base]);
   if (add.code !== 0) {
     const conflict = /already used by worktree at (.+)/i.exec(add.stderr);
@@ -103,7 +105,15 @@ export function provisionWorktree(opts: ProvisionOptions): ProvisionResult {
   return { path, branch: opts.branch, reused: false };
 }
 
-function resolveBase(repoTop: string, defaultBranch: string): string {
+/**
+ * The base a worktree is created from. The branch's OWN remote ref wins when it exists — so re-provisioning
+ * an existing PR branch (a sweep fix cycle, or resuming a ticket) CONTINUES it instead of resetting it to
+ * the default branch and silently discarding pushed work. Otherwise: origin/<default>, then local, then HEAD.
+ */
+function resolveBase(repoTop: string, branch: string, defaultBranch: string): string {
+  if (git(repoTop, ["rev-parse", "--verify", "--quiet", `origin/${branch}`]).code === 0) {
+    return `origin/${branch}`;
+  }
   if (git(repoTop, ["rev-parse", "--verify", "--quiet", `origin/${defaultBranch}`]).code === 0) {
     return `origin/${defaultBranch}`;
   }
@@ -117,6 +127,15 @@ export interface RemoveOptions {
   repoTop: string;
   path: string;
   branch: string;
+}
+
+/**
+ * The repo top that owns a worktree, recovered from its path. Inverse of the `<repoTop>/.worktrees/ao/<id8>`
+ * layout {@link provisionWorktree} builds — so removal runs from the same main checkout provision used,
+ * with no reliance on config (which may be unset or edited between spawn and release).
+ */
+export function repoTopOfWorktree(worktreePath: string): string {
+  return dirname(dirname(dirname(worktreePath)));
 }
 
 /** Remove a worktree and delete its branch (design §7.4). */

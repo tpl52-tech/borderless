@@ -6,11 +6,7 @@
  * so `roster.memberByLinearId` can resolve it to a person (see `src/shared/roster.ts`).
  */
 
-/**
- * One `linear_issues` upsert row, mapped from a Linear GraphQL issue node. Intentionally omits
- * `blockedBy`: the issues query doesn't fetch blocking relations, so the sync doesn't own that field —
- * the boards / critical-path work (build order #6) populates it.
- */
+/** One `linear_issues` upsert row, mapped from a Linear GraphQL issue node. */
 export interface LinearIssueUpsert {
   id: string; // Linear issue UUID (primary key)
   identifier: string; // e.g. COR-42
@@ -24,6 +20,7 @@ export interface LinearIssueUpsert {
   priority: number | null;
   dueDate: number | null; // epoch ms; feeds the rescue overdue check (PRD §5)
   labels: string[]; // label names; `lead-level` excludes a ticket from rescue
+  blockedBy: string[]; // ids of issues that block this one; feeds the boards critical path (PRD §7)
   updatedAt: number | null; // epoch ms
 }
 
@@ -46,6 +43,7 @@ query BorderlessIssues($filter: IssueFilter, $after: String) {
       project { id }
       team { key }
       labels(first: 50) { nodes { name } }  # cap high: missing a lead-level label would mis-admit a rescue
+      inverseRelations(first: 50) { nodes { type issue { id } } }  # relations pointing AT this issue; type=blocks → a blocker
     }
   }
 }`;
@@ -70,6 +68,7 @@ interface RawIssueNode {
   project?: { id?: string | null } | null;
   team?: { key?: string | null } | null;
   labels?: { nodes?: Array<{ name?: string | null }> } | null;
+  inverseRelations?: { nodes?: Array<{ type?: string | null; issue?: { id?: string | null } | null }> } | null;
 }
 interface RawIssuesResponse {
   data?: { issues?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }; nodes?: RawIssueNode[] } };
@@ -95,6 +94,11 @@ export function parseIssuesResponse(json: unknown): IssuesPage {
       priority: typeof n.priority === "number" ? n.priority : null,
       dueDate: Number.isNaN(due) ? null : due,
       labels: (n.labels?.nodes ?? []).map((l) => l.name).filter((name): name is string => typeof name === "string"),
+      // inverseRelations point AT this issue; a type="blocks" relation's `issue` is a ticket that blocks it.
+      blockedBy: (n.inverseRelations?.nodes ?? [])
+        .filter((r) => r.type === "blocks")
+        .map((r) => r.issue?.id)
+        .filter((id): id is string => typeof id === "string"),
       updatedAt: Number.isNaN(t) ? null : t,
     };
   });

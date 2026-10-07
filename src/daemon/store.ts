@@ -21,7 +21,6 @@ import type {
   Alert, AlertKind, AlertSeverity,
   SweepJob, SweepEvent, SweepKind, SweepState, SweepEventKind, LinearIssue,
 } from "../shared/types.ts";
-import { LEAD_LEVEL } from "../shared/types.ts";
 import { isLeadOps } from "../shared/lead-desk.ts";
 
 export const PRAGMAS = ["PRAGMA journal_mode = WAL", "PRAGMA foreign_keys = ON"];
@@ -879,7 +878,8 @@ export class Store {
   enqueueInReviewSweeps(stateName = "In Review", leadOpsProject?: string): SweepJob[] {
     const created: SweepJob[] = [];
     for (const iss of this.listLinearIssues(stateName)) {
-      if (iss.labels.includes(LEAD_LEVEL)) continue; // lead-level work stays off the automation (PRD §2)
+      // `lead-level` gates the RESCUE sweep only (don't auto-build a lead's ticket from scratch); an
+      // in-review PR is driven to the gate regardless of who owns it — a lead's PR included.
       if (isLeadOps(iss, leadOpsProject)) continue; // lead-desk tasks are human to-dos, not agent work (PRD §9)
       const active = this.db.query(
         `SELECT 1 FROM sweep_job WHERE kind = 'in_review' AND ticket_id = ? AND state NOT IN ('merged', 'failed') LIMIT 1`,

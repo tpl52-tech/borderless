@@ -75,27 +75,27 @@ describe("workerSeed (PRD §5/§4 — rescue embeds ACs + branch; in-review driv
   });
   const initial: WorkerFeedback = { initial: true, blockers: [], review: null };
 
-  test("rescue embeds the acceptance criteria and names the branch to open the PR from", () => {
-    const seed = workerSeed(job(), initial, { acceptance: "- [ ] greet returns Hello, X!", branch: "tpl52/COR-9" });
+  test("rescue embeds the acceptance criteria inline and asks for a PR", () => {
+    const seed = workerSeed(job(), initial, { acceptance: "- [ ] greet returns Hello, X!" });
     expect(seed).toContain("Implement Linear ticket COR-9.");
     expect(seed).toContain("Acceptance criteria:\n- [ ] greet returns Hello, X!");
-    expect(seed).toContain("Work on branch `tpl52/COR-9` and open a PR from it");
+    expect(seed).toContain("Then open a PR.");
   });
 
   test("rescue truncates an over-long description", () => {
-    const seed = workerSeed(job(), initial, { acceptance: "x".repeat(5000), branch: "tpl52/COR-9" });
+    const seed = workerSeed(job(), initial, { acceptance: "x".repeat(5000) });
     expect(seed).toContain("…(truncated)");
     expect(seed.length).toBeLessThan(4300);
   });
 
   test("rescue falls back to the prior phrasing when no description is known", () => {
-    const seed = workerSeed(job(), initial, { acceptance: null, branch: "tpl52/COR-9" });
+    const seed = workerSeed(job(), initial, { acceptance: null });
     expect(seed).toContain("Implement it from its acceptance criteria.");
-    expect(seed).toContain("Work on branch `tpl52/COR-9`");
+    expect(seed).toContain("Then open a PR.");
   });
 
-  test("in-review drives the existing PR and ignores the rescue branch/ACs", () => {
-    const seed = workerSeed(job({ kind: "in_review", prNumber: 7 }), initial, { acceptance: "ignored", branch: "tpl52/COR-9" });
+  test("in-review drives the existing PR and ignores the rescue ACs", () => {
+    const seed = workerSeed(job({ kind: "in_review", prNumber: 7 }), initial, { acceptance: "ignored" });
     expect(seed).toBe("Drive PR #7 for COR-9 to a mergeable state.");
   });
 

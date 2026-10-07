@@ -1,7 +1,9 @@
 import { test, expect, describe } from "bun:test";
-import { navDirection } from "../src/client/index.tsx";
+import { navDirection } from "../src/client/runtime.ts";
 
-describe("navDirection (dashboard list navigation)", () => {
+// ESC written as an explicit \x1b so the four real arrow forms are visible in source (a literal ESC byte
+// renders invisibly and reads as a duplicate of its stripped form).
+describe("navDirection (list navigation)", () => {
   test("Ink's parsed arrow flags", () => {
     expect(navDirection("", { upArrow: true })).toBe("up");
     expect(navDirection("", { downArrow: true })).toBe("down");
@@ -12,19 +14,19 @@ describe("navDirection (dashboard list navigation)", () => {
     expect(navDirection("j", {})).toBe("down");
   });
 
-  test("raw CSI escape sequences (whole)", () => {
-    expect(navDirection("[A", {})).toBe("up");
-    expect(navDirection("[B", {})).toBe("down");
+  test("raw CSI escape sequences (whole, with ESC)", () => {
+    expect(navDirection("\x1b[A", {})).toBe("up");
+    expect(navDirection("\x1b[B", {})).toBe("down");
   });
 
-  test("ESC-stripped sequences (arrive as a separate chunk under Bun)", () => {
+  test("ESC-stripped CSI (arrives as a separate chunk under Bun)", () => {
     expect(navDirection("[A", {})).toBe("up");
     expect(navDirection("[B", {})).toBe("down");
   });
 
-  test("application-cursor mode (ESC O A / O B)", () => {
-    expect(navDirection("OA", {})).toBe("up");
-    expect(navDirection("OB", {})).toBe("down");
+  test("application-cursor mode (SS3), with ESC and stripped", () => {
+    expect(navDirection("\x1bOA", {})).toBe("up");
+    expect(navDirection("\x1bOB", {})).toBe("down");
     expect(navDirection("OA", {})).toBe("up");
     expect(navDirection("OB", {})).toBe("down");
   });

@@ -136,7 +136,7 @@ const SWEEP_COLUMNS: Column<SweepRow>[] = [
   { header: "CYC", width: 3, align: "right", value: (r) => String(r.cycles), tone: () => "dim" },
 ];
 
-function SweepsView({ sweeps, cursor, error }: { sweeps: SweepRow[]; cursor: number; error: string | null }) {
+function SweepsView({ sweeps, cursor, empty }: { sweeps: SweepRow[]; cursor: number; empty: string }) {
   const stats = heroStats(sweeps);
   const ready = readyRows(sweeps);
   const needs = needsYouRows(sweeps);
@@ -159,13 +159,11 @@ function SweepsView({ sweeps, cursor, error }: { sweeps: SweepRow[]; cursor: num
         <Text color={PALETTE.dim}>agents drive to the gate; you decide.</Text>
       </Box>
 
-      {error ? <Text color={PALETTE.red}>error: {error}</Text> : null}
-
       <Box flexDirection="row">
         <Box flexDirection="column" flexGrow={2} marginRight={1}>
           <Panel title="SWEEP_QUEUE" meta={`${sweeps.length} JOBS`}>
             {sweeps.length === 0
-              ? <Text color={PALETTE.dim}>{CONSOLE_SCREENS[0]!.empty}</Text>
+              ? <Text color={PALETTE.dim}>{empty}</Text>
               : <Table columns={SWEEP_COLUMNS} data={sweeps} selected={cursor} />}
           </Panel>
         </Box>
@@ -194,14 +192,14 @@ function SweepsView({ sweeps, cursor, error }: { sweeps: SweepRow[]; cursor: num
   );
 }
 
-function BoardsView({ rows, cursor }: { rows: BoardRow[]; cursor: number }) {
+function BoardsView({ rows, cursor, empty }: { rows: BoardRow[]; cursor: number; empty: string }) {
   return (
     <Box flexDirection="column">
       <Vhead title="BOARDS" sub="What's workable right now, and what to attack first." />
       <Box flexDirection="row">
         <Box flexDirection="column" flexGrow={1} marginRight={1}>
           <Panel title="UNBLOCKED" meta={`${rows.length}`}>
-            {rows.length === 0 ? <Text color={PALETTE.dim}>{CONSOLE_SCREENS[1]!.empty}</Text>
+            {rows.length === 0 ? <Text color={PALETTE.dim}>{empty}</Text>
               : <Table columns={[
                 { header: "TICKET", width: 8, value: (r: BoardRow) => r.ticketKey },
                 { header: "TITLE", width: 24, value: (r: BoardRow) => r.title, tone: () => "ink" },
@@ -226,12 +224,12 @@ function BoardsView({ rows, cursor }: { rows: BoardRow[]; cursor: number }) {
   );
 }
 
-function AssignView({ rows, cursor }: { rows: AssignRow[]; cursor: number }) {
+function AssignView({ rows, cursor, empty }: { rows: AssignRow[]; cursor: number; empty: string }) {
   return (
     <Box flexDirection="column">
       <Vhead title="ASSIGN" sub="Suggested owner per unblocked ticket — from load, fit, and the do-next order. You approve; nothing auto-assigns." />
       <Panel title="SUGGESTIONS" meta={`${rows.length}`}>
-        {rows.length === 0 ? <Text color={PALETTE.dim}>{CONSOLE_SCREENS[2]!.empty}</Text>
+        {rows.length === 0 ? <Text color={PALETTE.dim}>{empty}</Text>
           : <Table columns={[
             { header: "TICKET", width: 8, value: (r: AssignRow) => r.ticketKey },
             { header: "→ SUGGEST", width: 22, value: (r: AssignRow) => r.name, tone: () => "pink" },
@@ -243,12 +241,12 @@ function AssignView({ rows, cursor }: { rows: AssignRow[]; cursor: number }) {
   );
 }
 
-function LeadDeskView({ rows, cursor }: { rows: DeskRow[]; cursor: number }) {
+function LeadDeskView({ rows, cursor, empty }: { rows: DeskRow[]; cursor: number; empty: string }) {
   return (
     <Box flexDirection="column">
       <Vhead title="LEAD DESK" sub="Ad-hoc lead/ops work handed to another lead — a Lead Ops Linear issue + a Slack DM. The sweeps never touch these." />
       <Panel title="DELEGATED" meta={`${rows.length} OPEN`} accent="pink">
-        {rows.length === 0 ? <Text color={PALETTE.dim}>{CONSOLE_SCREENS[3]!.empty}</Text>
+        {rows.length === 0 ? <Text color={PALETTE.dim}>{empty}</Text>
           : rows.map((r, i) => (
             <Text key={r.ticketKey} wrap="truncate">
               <Text color={PALETTE.pink}>{i === cursor ? "▎" : " "}● </Text>
@@ -262,12 +260,12 @@ function LeadDeskView({ rows, cursor }: { rows: DeskRow[]; cursor: number }) {
   );
 }
 
-function RosterView({ rows, cursor }: { rows: RosterRow[]; cursor: number }) {
+function RosterView({ rows, cursor, empty }: { rows: RosterRow[]; cursor: number; empty: string }) {
   return (
     <Box flexDirection="column">
       <Vhead title="ROSTER" sub="The team from shared/roster.ts — the Linear↔GitHub↔Slack identity map the sweeps and lead desk resolve people through." />
       <Panel title="MEMBERS" meta={`${rows.length}`}>
-        {rows.length === 0 ? <Text color={PALETTE.dim}>{CONSOLE_SCREENS[4]!.empty}</Text>
+        {rows.length === 0 ? <Text color={PALETTE.dim}>{empty}</Text>
           : <Table columns={[
             { header: "NAME", width: 22, value: (r: RosterRow) => r.name, tone: () => "ink" },
             { header: "NETID", width: 8, value: (r: RosterRow) => r.netid, tone: () => "dim" },
@@ -336,7 +334,7 @@ function Console({ client, onAction }: { client: DaemonClient; onAction: (a: Sur
 
   // The active non-SWEEPS list screen's rows (SWEEPS reads from the always-on poll above; ASK has none).
   useEffect(() => {
-    if (!listScreen || onSweeps) { setRows([]); return; }
+    if (!listScreen || onSweeps) { setRows([]); setError(null); return; } // no list error while on SWEEPS/ASK
     let alive = true;
     const load = () => client.request<unknown[]>(listScreen.request)
       .then((r) => { if (alive) { setRows(Array.isArray(r) ? r : []); setError(null); } })
@@ -381,19 +379,28 @@ function Console({ client, onAction }: { client: DaemonClient; onAction: (a: Sur
     }
   });
 
+  // One content area per screen. SWEEPS + ASK own their data (always-on poll / chat); the four list screens
+  // share the `rows` poll and render a red line on a request error, else their view with its empty-state text.
+  const renderContent = (): React.ReactNode => {
+    if (onAsk) return <AskView log={askLog} input={askInput} busy={askBusy} />;
+    if (onSweeps) return <SweepsView sweeps={sweeps} cursor={cursor} empty={listScreen!.empty} />;
+    if (error) return <Text color={PALETTE.red}>error: {error}</Text>;
+    const empty = listScreen!.empty;
+    switch (screenIdx) {
+      case 1: return <BoardsView rows={rows as BoardRow[]} cursor={cursor} empty={empty} />;
+      case 2: return <AssignView rows={rows as AssignRow[]} cursor={cursor} empty={empty} />;
+      case 3: return <LeadDeskView rows={rows as DeskRow[]} cursor={cursor} empty={empty} />;
+      default: return <RosterView rows={rows as RosterRow[]} cursor={cursor} empty={empty} />;
+    }
+  };
+
   return (
     <Box flexDirection="column">
       <Topbar crumb={crumbLabel(screenIdx)} daemonOk={daemonOk} needsYou={heroStats(sweeps).needsYou} />
       <Box flexDirection="row">
         <Sidebar screenIdx={screenIdx} />
         <Box flexDirection="column" flexGrow={1} paddingX={1} paddingTop={1}>
-          {onAsk ? <AskView log={askLog} input={askInput} busy={askBusy} />
-            : onSweeps ? <SweepsView sweeps={sweeps} cursor={cursor} error={error} />
-              : error ? <Text color={PALETTE.red}>error: {error}</Text>
-                : screenIdx === 1 ? <BoardsView rows={rows as BoardRow[]} cursor={cursor} />
-                  : screenIdx === 2 ? <AssignView rows={rows as AssignRow[]} cursor={cursor} />
-                    : screenIdx === 3 ? <LeadDeskView rows={rows as DeskRow[]} cursor={cursor} />
-                      : <RosterView rows={rows as RosterRow[]} cursor={cursor} />}
+          {renderContent()}
         </Box>
       </Box>
       <Box paddingX={1}>

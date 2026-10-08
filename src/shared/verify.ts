@@ -69,3 +69,20 @@ export interface VerifyClassification {
   /** Whether the ticket has screen-observable behavior a human QA can tap through. */
   hasUi: boolean;
 }
+
+/** A classified Verifying ticket — what the Verify tab / `ao verify` render. */
+export interface VerifyRow extends VerifyClassification {
+  ticketKey: string;
+  title: string;
+  prNumber: number | null;
+}
+
+/** Classify one Verifying ticket from its title+description + its merged PR's changed paths. Pure. */
+export function verifyRow(
+  issue: { identifier: string; title: string; description: string | null },
+  changedPaths: readonly string[],
+  prNumber: number | null,
+): VerifyRow {
+  const c = classifyVerification(`${issue.title} ${issue.description ?? ""}`, changedPaths);
+  return { ticketKey: issue.identifier, title: issue.title, prNumber, ...c };
+}

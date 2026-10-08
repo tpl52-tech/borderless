@@ -92,3 +92,9 @@ export async function fetchPr(repo: string, number: number): Promise<Record<stri
   const rollup = pr.statusCheckRollup?.nodes?.[0]?.commit?.statusCheckRollup;
   return { ...pr, statusCheckRollup: rollup ?? null };
 }
+
+/** The changed file paths of a PR (open or merged). Throws on failure (never "no files"). */
+export async function prFiles(repo: string, number: number): Promise<string[]> {
+  const r = await ghJson<{ files?: Array<{ path?: string }> }>(["pr", "view", String(number), "--repo", repo, "--json", "files"]);
+  return (r.files ?? []).map((f) => f.path).filter((p): p is string => typeof p === "string");
+}

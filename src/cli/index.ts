@@ -24,10 +24,12 @@
  *   ao console                                 the lead console TUI (SWEEPS/BOARDS/ASSIGN/LEAD DESK/ROSTER)
  *   ao web                                     open the browser lead console (the mockup design, live data)
  *   ao sync                                    pull the live Linear board into the store (no sweeps)
+ *   ao verify                                  classify the Verifying tickets (ui / backend / mixed)
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
 import type { DelegateResult } from "../shared/lead-desk.ts";
+import type { VerifyRow } from "../shared/verify.ts";
 
 const SUBCOMMANDS = [
   "setup", "daemon", "autonomy", "monitor", "history", "worktree", "pr", "issue", "awake",
@@ -151,6 +153,20 @@ export async function main(argv: string[]): Promise<void> {
     await withDaemon("sync", async (client) => {
       const r = await client.request<{ synced: number; configured: boolean }>("sync.run");
       console.log(r.configured ? `sync: ${r.synced} issue(s) pulled from Linear` : "sync: set `linearApiKey` + `linearTeamKeys` in ~/.borderless/config.json");
+    });
+    return;
+  }
+
+  // `ao verify` — classify the Verifying tickets (PRD §13 V1): what human QA can tap-through vs the invisible
+  // backend properties (RLS/trigger/schema/server-logic/data-integrity/storage) that need verification.
+  if (sub === "verify") {
+    await withDaemon("verify", async (client) => {
+      const rows = await client.request<VerifyRow[]>("verify.scan");
+      if (rows.length === 0) { console.log("verify: no tickets in Verifying (or no repo configured)"); return; }
+      for (const r of rows) {
+        const props = r.backendProperties.length ? `  needs: ${r.backendProperties.join(", ")}` : "";
+        console.log(`  ${r.ticketKey}  [${r.verifiability}]${props}  ${r.title}`);
+      }
     });
     return;
   }

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { classifyVerification } from "../src/shared/verify.ts";
+import { classifyVerification, verifyRow } from "../src/shared/verify.ts";
 
 describe("classifyVerification (verify sweep, PRD §13)", () => {
   test("COR-35 Favorites — fully screen-observable (persistence included), no backend check", () => {
@@ -71,5 +71,17 @@ describe("classifyVerification (verify sweep, PRD §13)", () => {
     // Regression: a whole-string join with a bare `$` only matched the LAST path.
     expect(classifyVerification("neutral text", ["db/0001_init.sql", "app/x.tsx"]).backendProperties).toContain("schema");
     expect(classifyVerification("neutral text", ["ui/Button.tsx", "lib/x.ts"]).hasUi).toBe(true); // .tsx not last
+  });
+
+  test("verifyRow composes the classification with the ticket meta + PR number", () => {
+    const r = verifyRow(
+      { identifier: "COR-27", title: "profiles: deny-all RLS baseline", description: "a user cannot read another user's row" },
+      ["supabase/policies/profiles.sql"], 42,
+    );
+    expect(r.ticketKey).toBe("COR-27");
+    expect(r.prNumber).toBe(42);
+    expect(r.verifiability).toBe("backend");
+    expect(r.backendProperties).toContain("rls");
+    expect(verifyRow({ identifier: "COR-1", title: "x", description: null }, [], null).prNumber).toBeNull();
   });
 });

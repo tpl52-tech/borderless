@@ -25,6 +25,7 @@ import { startAutonomy, parseAutonomyConfig, type AutonomyEngine } from "./auton
 import { createAlertDispatcher, shellNarrator, type AlertDispatcher } from "./alerts.ts";
 import { startUsageLedger, type UsageLedger } from "./monitors/usage.ts";
 import { reapWorktrees } from "./worktree.ts";
+import { verifyScan, liveMergedPrFor } from "./verify-scan.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
@@ -168,6 +169,13 @@ export function startDaemon(home = stateHome()): Daemon {
     const r = authorizeRescue(store, ticket);
     return { ticketKey: r.job.ticketKey, created: r.created, started: false };
   };
+  // Verify scan (PRD §13 V1) — read-only, so it needs only a repo + branchOwner (no localCwd / supervisor):
+  // classify the Verifying tickets from their merged PRs. No repo → an empty scan.
+  let runVerifyScan: UdsServerDeps["verifyScan"] = async () => [];
+  if (config.repo && config.branchOwner) {
+    const repo = config.repo, branchOwner = config.branchOwner;
+    runVerifyScan = () => verifyScan(store, { mergedPrFor: liveMergedPrFor(repo, branchOwner) });
+  }
   const sweepProfile = config.profiles.find((pr) => pr.repo === config.repo && pr.localCwd);
   if (config.repo && config.branchOwner && sweepProfile?.localCwd) {
     const repo = config.repo;
@@ -275,7 +283,7 @@ export function startDaemon(home = stateHome()): Daemon {
     return { synced, created, started };
   };
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard });
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan });
 
   // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only. It is
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.

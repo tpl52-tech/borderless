@@ -53,4 +53,18 @@ describe("classifyVerification (verify sweep, PRD §13)", () => {
   test("defaults to ui when nothing signals backend, even with no explicit UI words", () => {
     expect(classifyVerification("Rename the Donate label to Give", []).verifiability).toBe("ui");
   });
+
+  // Precision frontier: the invisible-property signals must NOT fire on ordinary UI language.
+  test("generic verbs / UI senses stay ui — no spurious backend flag", () => {
+    expect(classifyVerification("Tapping the heart triggers the favorite animation", []).backendProperties).toEqual([]); // verb "triggers", not a DB trigger
+    expect(classifyVerification("Privacy policy screen with a scroll view", []).backendProperties).toEqual([]); // "policy" ≠ RLS policy
+    expect(classifyVerification("Logged-out users can't see the grid", []).backendProperties).toEqual([]); // UI visibility, not cross-user RLS
+    expect(classifyVerification("Favorites persist to local storage and survive a reload", []).backendProperties).toEqual([]); // device-local, screen-observable
+  });
+
+  test("a changed .sql path is caught regardless of its position in the list (per-path matching)", () => {
+    // Regression: a whole-string join with a bare `$` only matched the LAST path.
+    expect(classifyVerification("neutral text", ["db/0001_init.sql", "app/x.tsx"]).backendProperties).toContain("schema");
+    expect(classifyVerification("neutral text", ["ui/Button.tsx", "lib/x.ts"]).hasUi).toBe(true); // .tsx not last
+  });
 });

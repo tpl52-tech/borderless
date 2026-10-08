@@ -149,7 +149,7 @@ export type RequestType =
   | "game.scores"
   | "workitem.list" | "workitem.refresh" | "workitem.add" | "workitem.remove"
   | "workitem.action"
-  | "project.setHidden" | "linear.refresh" | "linear.list"
+  | "project.setHidden"
   | "sweep.scanInReview" | "rescue.scan" | "rescue.authorize"
   | "boards.get" | "assign.suggest" | "lead.desk" | "lead.delegate" | "ask.run" | "sync.run"
   | "sweep.list" | "roster.get"

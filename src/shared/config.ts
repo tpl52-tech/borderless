@@ -152,6 +152,8 @@ export interface OperatorConfigLite {
   openRouterModel?: string;
   /** Localhost port for the web console (PRD §11 browser mirror); defaults to DEFAULT_WEB_PORT. */
   webPort?: number;
+  /** Topbar label on the web console (e.g. "ReUse · Fall 2026"); cosmetic, defaults to "Borderless". */
+  projectLabel?: string;
 }
 
 /** Default Ask Borderless model (overridable via `openRouterModel`). */
@@ -199,6 +201,7 @@ export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
     openRouterApiKey: typeof raw.openRouterApiKey === "string" && raw.openRouterApiKey.trim() ? raw.openRouterApiKey.trim() : undefined,
     openRouterModel: typeof raw.openRouterModel === "string" && raw.openRouterModel.trim() ? raw.openRouterModel.trim() : undefined,
     webPort: Number.isInteger(raw.webPort) && raw.webPort >= 1 && raw.webPort <= 65535 ? raw.webPort : undefined,
+    projectLabel: typeof raw.projectLabel === "string" && raw.projectLabel.trim() ? raw.projectLabel.trim() : undefined,
   };
 }
 

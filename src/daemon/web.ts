@@ -12,6 +12,8 @@ import type { Store } from "./store.ts";
 export interface WebServerDeps {
   store: Store;
   leadOpsProject?: string;
+  /** Topbar project label (the semester/workspace), from config — not baked into the pure payload. */
+  projectLabel: string;
   /** Advisory Ask Borderless over the chosen backend (the browser never gets the action tools). */
   askRun: (question: string, allowActions: boolean) => Promise<{ answer: string; configured: boolean }>;
   port: number;
@@ -31,7 +33,8 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         return new Response(Bun.file(pagePath), { headers: { "content-type": "text/html; charset=utf-8" } });
       }
       if (pathname === "/api/console") {
-        return Response.json(consolePayload(deps.store.listLinearIssues(), deps.store.listSweepJobs(), deps.leadOpsProject));
+        const data = consolePayload(deps.store.listLinearIssues(), deps.store.listSweepJobs(), deps.leadOpsProject);
+        return Response.json({ ...data, project: deps.projectLabel });
       }
       if (pathname === "/api/ask" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { question?: unknown };

@@ -354,7 +354,7 @@
 
   // ---- helpers ----
   const $ = (id) => document.getElementById(id);
-  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const stateClass = (st) => ({ ready: "s-green", merged: "s-green", needs_human: "s-pink", failed: "s-pink", queued: "s-dim", ci: "s-dim" }[st] || "s-ink");
   const ACTIVE = new Set(["implementing", "fixing", "reviewing", "ci", "queued"]);
 

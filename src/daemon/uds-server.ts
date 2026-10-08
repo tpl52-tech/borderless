@@ -19,7 +19,7 @@ import { doNext } from "../shared/boards.ts";
 import { activeLoads, suggestAssignments } from "../shared/assign.ts";
 import { deskOverview, type DelegateRequest, type DelegateResult } from "../shared/lead-desk.ts";
 import { ROSTER } from "../shared/roster.ts";
-import { sweepRow, rosterRow } from "../shared/console-rows.ts";
+import { sweepRow, rosterRow, boardRow, assignRow } from "../shared/console-rows.ts";
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { WorkItemMonitor } from "./monitors/work-item.ts";
@@ -228,13 +228,10 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
 
       // --- boards + assignment (PRD §7-§8): pure reads over synced linear_issues + roster, no live I/O ---
       case "boards.get":
-        return doNext(store.listLinearIssues()).map((e) => ({
-          ticketKey: e.issue.identifier, title: e.issue.title, downstream: e.downstream,
-        }));
+        return doNext(store.listLinearIssues()).map(boardRow);
       case "assign.suggest": {
         const issues = store.listLinearIssues();
-        return suggestAssignments(doNext(issues), ROSTER, activeLoads(issues, ROSTER))
-          .map((s) => ({ ticketKey: s.ticketKey, netid: s.netid, name: s.name, load: s.load }));
+        return suggestAssignments(doNext(issues), ROSTER, activeLoads(issues, ROSTER)).map(assignRow);
       }
 
       // --- lead desk (PRD §9): open Lead Ops tasks, a plain human task list (no gate, no agent) ----------

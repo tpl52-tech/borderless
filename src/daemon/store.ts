@@ -870,6 +870,12 @@ export class Store {
     return row ? rowToLinearIssue(row) : null;
   }
 
+  /** Lookup by the human identifier (e.g. "COR-35") — indexed single-row read, not a full-list scan. */
+  getLinearIssueByIdentifier(identifier: string): LinearIssue | null {
+    const row = this.db.query("SELECT * FROM linear_issues WHERE identifier = ? LIMIT 1").get(identifier) as Row | null;
+    return row ? rowToLinearIssue(row) : null;
+  }
+
   /**
    * Enqueue an in-review sweep job for every Linear issue in `stateName` that does not
    * already have an active in-review job. The first live slice: linear_issues -> sweep_job.

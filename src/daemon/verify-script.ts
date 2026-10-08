@@ -8,7 +8,7 @@
  */
 
 import type { Chat } from "./openrouter/runner.ts";
-import { classifyVerification, verifyScriptPrompt } from "../shared/verify.ts";
+import { classifyVerification, verifyScriptPrompt, issueText } from "../shared/verify.ts";
 
 /** Classify the ticket from its text + merged-PR paths, then ask the LLM for the human tap-through script. */
 export async function buildVerifyScript(
@@ -16,7 +16,7 @@ export async function buildVerifyScript(
   changedPaths: readonly string[],
   chat: Chat,
 ): Promise<string> {
-  const classification = classifyVerification(`${issue.title} ${issue.description ?? ""}`, changedPaths);
+  const classification = classifyVerification(issueText(issue), changedPaths);
   const res = await chat([{ role: "user", content: verifyScriptPrompt(issue, classification) }], []);
   return res.text?.trim() || "(no script generated)";
 }

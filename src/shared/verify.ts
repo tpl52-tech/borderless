@@ -97,12 +97,17 @@ export function verifyScriptPrompt(
   ].join("\n\n");
 }
 
+/** The classification haystack for an issue — title + description, single-sourced so both callers agree. */
+export function issueText(issue: { title: string; description: string | null }): string {
+  return `${issue.title} ${issue.description ?? ""}`;
+}
+
 /** Classify one Verifying ticket from its title+description + its merged PR's changed paths. Pure. */
 export function verifyRow(
   issue: { identifier: string; title: string; description: string | null },
   changedPaths: readonly string[],
   prNumber: number | null,
 ): VerifyRow {
-  const c = classifyVerification(`${issue.title} ${issue.description ?? ""}`, changedPaths);
+  const c = classifyVerification(issueText(issue), changedPaths);
   return { ticketKey: issue.identifier, title: issue.title, prNumber, ...c };
 }

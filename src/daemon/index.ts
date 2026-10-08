@@ -179,7 +179,7 @@ export function startDaemon(home = stateHome()): Daemon {
     const mergedPrFor = liveMergedPrFor(config.repo, branchOwner);
     runVerifyScan = () => verifyScan(store, { mergedPrFor });
     runVerifyScript = async (ticketKey) => {
-      const issue = store.listLinearIssues().find((i) => i.identifier === ticketKey);
+      const issue = store.getLinearIssueByIdentifier(ticketKey);
       if (!issue) return { ticketKey, script: `verify: no ticket ${ticketKey} in the store — run \`ao sync\` first?` };
       const pr = await mergedPrFor(issue);
       return { ticketKey, script: await buildVerifyScript(issue, pr?.paths ?? [], claudeCliChat({ model: config.askModel })) };
@@ -250,7 +250,7 @@ export function startDaemon(home = stateHome()): Daemon {
       chat = claudeCliChat({ model: config.askModel }); // subscription: no key, answer-only (sandboxed)
     }
     const linear = config.linearApiKey ? httpLinearClient(config.linearApiKey) : null;
-    const issueUuid = (ticketKey: string) => store.listLinearIssues().find((i) => i.identifier === ticketKey)?.id ?? null;
+    const issueUuid = (ticketKey: string) => store.getLinearIssueByIdentifier(ticketKey)?.id ?? null;
     // These throw on a guard miss so the fleet tool reports it as an error (not a false success); the
     // ask-borderless runTool catches it. The happy path returns the human-readable result line.
     const reassign = async (ticketKey: string, assigneeLinearId: string): Promise<string> => {

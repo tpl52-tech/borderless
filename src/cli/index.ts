@@ -161,7 +161,8 @@ export async function main(argv: string[]): Promise<void> {
   // `ao verify` — classify the Verifying tickets (PRD §13 V1): what human QA can tap-through vs the invisible
   // backend properties (RLS/trigger/schema/server-logic/data-integrity/storage) that need verification.
   if (sub === "verify") {
-    // `ao verify script <COR-123>` — generate the human-QA tap-through for one Verifying ticket.
+    // `ao verify script <COR-123>` — generate the human-QA tap-through for one ticket (any state, so a lead
+    // can pre-generate before a ticket reaches Verifying); `ao verify` (no args) lists the Verifying queue.
     if (rest[0] === "script") {
       const ticketKey = rest[1];
       if (!ticketKey) throw new Error("usage: ao verify script <TICKET>");

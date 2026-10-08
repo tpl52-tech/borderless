@@ -58,7 +58,7 @@ export interface AuthorizeResult {
  * active rescue for the ticket is returned rather than duplicated.
  */
 export function authorizeRescue(store: Store, ticket: string): AuthorizeResult {
-  const issue = store.getLinearIssue(ticket) ?? store.listLinearIssues().find((i) => i.identifier === ticket);
+  const issue = store.getLinearIssue(ticket) ?? store.getLinearIssueByIdentifier(ticket);
   if (!issue) throw new Error(`rescue: unknown ticket ${ticket}`);
   const active = store.listSweepJobs({ kind: "rescue" }).find(
     (j) => j.ticketId === issue.id && j.state !== "merged" && j.state !== "failed",

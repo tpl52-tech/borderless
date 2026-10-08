@@ -1,0 +1,466 @@
+<title>Borderless Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap">
+<style>
+  /* committed single-theme terminal UI — pink + green (reUSE: nature + feminine) */
+  :root {
+    --bg:      #0b0f0c;
+    --panel:   #0f1511;
+    --panel-2: #131c16;
+    --line:    #243029;
+    --line-2:  #35463b;
+    --ink:     #d6e4db;
+    --ink-2:   #89a093;
+    --dim:     #5d7067;
+    --green:   #7ce7a6;
+    --green-2: #4b946e;
+    --pink:    #ff9ed4;
+    --pink-2:  #c870a6;
+    --amber:   #f0ca6c;
+    --red:     #ff818d;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--mono);
+    font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  .crt { position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background: repeating-linear-gradient(to bottom, rgba(255,255,255,.012) 0 1px, transparent 1px 3px); }
+
+  .app { min-height: 100%; display: flex; flex-direction: column; }
+
+  /* top bar */
+  .topbar { display: flex; align-items: center; gap: 1.1rem; padding: .55rem .9rem;
+    border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  .brand { font-weight: 800; letter-spacing: .06em; color: var(--pink); }
+  .brand .ver { font-weight: 500; color: var(--dim); font-size: .78em; letter-spacing: .1em; margin-left: .5rem; }
+  .crumb { color: var(--ink-2); letter-spacing: .08em; font-size: .82em; }
+  .crumb b { color: var(--green); }
+  .status { margin-left: auto; display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
+  .badge { font-size: .74em; letter-spacing: .06em; padding: .22em .5em; border: 1px solid var(--line-2); border-radius: 3px; color: var(--ink-2); white-space: nowrap; }
+  .badge.ok { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--line-2)); }
+  .badge.pink { color: var(--pink); border-color: color-mix(in srgb, var(--pink) 45%, var(--line-2)); }
+  .select { font-size: .78em; color: var(--ink); border: 1px solid var(--line-2); border-radius: 3px; padding: .22em .55em; }
+
+  .main { flex: 1; display: flex; }
+
+  /* sidebar */
+  .side { width: 176px; flex: none; border-right: 1px solid var(--line); background: var(--panel);
+    display: flex; flex-direction: column; padding: .8rem 0; }
+  .nav { display: block; width: 100%; text-align: left; font-family: var(--mono); font-size: .82em;
+    padding: .5rem 1rem; color: var(--ink-2); letter-spacing: .09em; border: 0; border-left: 2px solid transparent;
+    background: transparent; cursor: pointer; }
+  .nav:hover { color: var(--ink); background: var(--panel-2); }
+  .nav.active { color: var(--pink); border-left-color: var(--pink); background: color-mix(in srgb, var(--pink) 8%, transparent); }
+  .side-foot { margin-top: auto; padding: .9rem 1rem .2rem; border-top: 1px solid var(--line); font-size: .8em; color: var(--ink-2); }
+  .online { color: var(--green); letter-spacing: .05em; }
+  .cursor { animation: blink 1.1s steps(1) infinite; color: var(--green); }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+
+  .content { flex: 1; min-width: 0; padding: 1rem; }
+  .view[hidden] { display: none; }
+
+  /* hero */
+  .hero { position: relative; border: 1px solid var(--line); background: var(--panel); padding: 1.2rem 1.4rem; overflow: hidden; margin-bottom: 1rem; }
+  .hero-num { position: absolute; right: .7rem; top: -.7rem; font-size: 6.5rem; font-weight: 800; line-height: 1;
+    color: color-mix(in srgb, var(--pink) 9%, transparent); user-select: none; }
+  .hero h1 { margin: 0 0 .45rem; font-size: 1.7rem; font-weight: 800; letter-spacing: .02em; color: var(--pink); }
+  .hero-sub { margin: 0 0 1rem; color: var(--ink-2); max-width: 62ch; }
+  .hero-actions { display: flex; gap: .55rem; flex-wrap: wrap; }
+  .vhead { margin: .1rem 0 1rem; } .vhead h1 { margin: 0 0 .3rem; font-size: 1.45rem; color: var(--pink); letter-spacing: .02em; }
+  .vhead p { margin: 0; color: var(--ink-2); max-width: 72ch; }
+
+  /* buttons */
+  .btn { font-family: var(--mono); font-size: .8rem; font-weight: 700; letter-spacing: .04em; padding: .5em .85em;
+    border: 1px solid var(--line-2); background: transparent; color: var(--ink); border-radius: 3px; cursor: pointer; }
+  .btn:hover { border-color: var(--ink-2); }
+  .btn.green { background: var(--green); color: #063018; border-color: var(--green); }
+  .btn.green:hover { background: color-mix(in srgb, var(--green) 88%, white); }
+  .btn.pink { background: var(--pink); color: #3a0c28; border-color: var(--pink); }
+  .btn.pink:hover { background: color-mix(in srgb, var(--pink) 88%, white); }
+  .btn.o-green { color: var(--green); border-color: color-mix(in srgb, var(--green) 50%, var(--line-2)); }
+  .btn.o-pink { color: var(--pink); border-color: color-mix(in srgb, var(--pink) 50%, var(--line-2)); }
+  .btn.ghost { color: var(--ink-2); }
+  .btn.full { width: 100%; margin-top: .5rem; }
+  .btn.sm { font-size: .72rem; padding: .4em .7em; } .btn.xs { font-size: .68rem; padding: .25em .55em; }
+
+  /* layout cols */
+  .cols { display: grid; gap: 1rem; align-items: start; }
+  .cols.c-2a { grid-template-columns: 1.6fr 1fr; }
+  .cols.c-2 { grid-template-columns: 1fr 1fr; }
+  .cols.c-stack { grid-template-columns: 1fr; }
+  .col { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+
+  /* panels */
+  .panel { border: 1px solid var(--line); background: var(--panel); }
+  .panel.g { border-color: color-mix(in srgb, var(--green) 28%, var(--line)); }
+  .panel.p { border-color: color-mix(in srgb, var(--pink) 28%, var(--line)); }
+  .ph { display: flex; justify-content: space-between; align-items: center; padding: .5rem .8rem;
+    border-bottom: 1px solid var(--line); color: var(--green); letter-spacing: .1em; font-size: .78rem; font-weight: 700; }
+  .ph.pink { color: var(--pink); }
+  .ph-meta { color: var(--dim); font-weight: 500; font-size: .88em; letter-spacing: .04em; }
+  .pb { padding: .85rem .8rem; } .pb.nopad { padding: 0; }
+  .note { font-size: .78rem; color: var(--ink-2); margin: 0 0 .7rem; }
+
+  /* tables */
+  .table-wrap { overflow-x: auto; }
+  table.tbl { border-collapse: collapse; width: 100%; font-size: .8rem; min-width: 24rem; }
+  .tbl th { text-align: left; color: var(--dim); font-weight: 500; letter-spacing: .07em; padding: .5rem .8rem; border-bottom: 1px solid var(--line); }
+  .tbl td { padding: .5rem .8rem; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); font-variant-numeric: tabular-nums; }
+  .tbl tbody tr:last-child td { border-bottom: none; }
+  .tbl tr.sel td { background: color-mix(in srgb, var(--green) 11%, transparent); }
+  .tbl tr.sel td:first-child { box-shadow: inset 2px 0 0 var(--pink); }
+  .k-rescue { color: var(--pink); } .k-review { color: var(--ink-2); }
+  .s-green { color: var(--green); } .s-ink { color: var(--ink); } .s-dim { color: var(--dim); }
+  .s-pink { color: var(--pink); } .s-amber { color: var(--amber); }
+  .phase { font-size: .68rem; color: var(--green); border: 1px solid color-mix(in srgb, var(--green) 32%, var(--line-2)); border-radius: 3px; padding: .04em .35em; }
+
+  /* event log */
+  .log { display: flex; flex-direction: column; gap: .3rem; font-size: .78rem; }
+  .log .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
+  .log .t { color: var(--dim); }
+  .tag { font-weight: 700; }
+  .tag.green { color: var(--green); } .tag.pink { color: var(--pink); } .tag.amber { color: var(--amber); }
+  .tag.red { color: var(--red); } .tag.dim { color: var(--dim); }
+
+  /* merge / needs-you rows */
+  .row-card { border: 1px solid var(--line); border-radius: 3px; padding: .65rem .7rem; margin-bottom: .6rem; }
+  .row-card:last-child { margin-bottom: 0; }
+  .rc-top { font-size: .85rem; } .rc-top b { color: var(--green); } .muted { color: var(--ink-2); }
+  .rc-meta { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .45rem; }
+  .chip { font-size: .68rem; letter-spacing: .03em; padding: .16em .45em; border: 1px solid var(--line-2); border-radius: 3px; color: var(--ink-2); }
+  .chip.green { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--line-2)); }
+  .chip.pink { color: var(--pink); border-color: color-mix(in srgb, var(--pink) 45%, var(--line-2)); }
+
+  /* ranked list (do-next) */
+  .rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
+  .rank li { display: flex; align-items: center; gap: .6rem; font-size: .82rem; }
+  .rank .n { color: var(--pink); font-weight: 800; width: 1rem; }
+  .rank .nm { color: var(--ink); }
+  .rank .u { margin-left: auto; color: var(--green); }
+  .rank .u b { color: var(--green); }
+
+  /* task list (lead desk) */
+  .tasks { list-style: none; margin: 0 0 .8rem; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
+  .tasks li { display: flex; align-items: center; gap: .55rem; font-size: .82rem; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .dot.open { background: var(--pink); } .dot.done { background: var(--dim); }
+  .done-txt { color: var(--dim); text-decoration: line-through; }
+  .tasks .to { margin-left: auto; color: var(--green-2); }
+  .tasks .due { color: var(--amber); font-size: .9em; }
+
+  /* roster-load mini list */
+  .load { list-style: none; margin: 0; padding: 0; font-size: .8rem; }
+  .load li { display: flex; justify-content: space-between; padding: .28rem 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+  .load li:last-child { border-bottom: none; }
+  .load .cnt { color: var(--dim); } .load .cnt.free { color: var(--green); }
+
+  :focus-visible { outline: 1px solid var(--pink); outline-offset: 2px; }
+
+  /* ask ao — plain chat (deliberately NOT the terminal panels; PRD §10) */
+  .chat-wrap { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; min-height: calc(100vh - 120px); }
+  .chat-top { padding-bottom: .8rem; border-bottom: 1px solid var(--line); margin-bottom: 1.4rem; }
+  .chat-title { font-family: -apple-system, system-ui, sans-serif; font-size: 1.25rem; font-weight: 600; color: var(--ink); }
+  .chat-ctx { margin-top: .3rem; font-size: .74rem; color: var(--dim); }
+  .chat-stream { flex: 1; display: flex; flex-direction: column; gap: 1.5rem; padding-bottom: 1.3rem; }
+  .cmsg { display: flex; flex-direction: column; gap: .35rem; }
+  .crole { font-size: .72rem; font-weight: 700; letter-spacing: .02em; }
+  .cmsg.user .crole { color: var(--pink); }
+  .cmsg.ai .crole { color: var(--green); }
+  .ctext { font-family: -apple-system, system-ui, sans-serif; font-size: .93rem; line-height: 1.62; color: var(--ink); white-space: pre-wrap; max-width: 68ch; }
+  .cmsg.user .ctext { background: color-mix(in srgb, var(--pink) 8%, transparent); border: 1px solid color-mix(in srgb, var(--pink) 20%, var(--line)); border-radius: 12px; padding: .7rem .9rem; }
+  .chat-input { position: sticky; bottom: 0; background: var(--bg); padding: .8rem 0 .2rem; display: flex; gap: .6rem; align-items: center; }
+  .ci-field { flex: 1; border: 1px solid var(--line-2); border-radius: 12px; padding: .75rem .95rem; color: var(--dim); font-family: -apple-system, system-ui, sans-serif; font-size: .9rem; }
+  .ci-send { background: var(--pink); color: #3a0c28; border: 0; border-radius: 12px; padding: .7rem 1.2rem; font-weight: 700; font-family: -apple-system, system-ui, sans-serif; cursor: pointer; }
+  .ci-send:hover { background: color-mix(in srgb, var(--pink) 88%, white); }
+
+  @media (max-width: 880px) {
+    .cols.c-2a, .cols.c-2 { grid-template-columns: 1fr; }
+    .main { flex-direction: column; }
+    .side { width: auto; flex-direction: row; overflow-x: auto; padding: .4rem; border-right: none; border-bottom: 1px solid var(--line); }
+    .nav { width: auto; border-left: none; border-bottom: 2px solid transparent; white-space: nowrap; }
+    .nav.active { border-left: none; border-bottom-color: var(--pink); }
+    .side-foot { display: none; }
+  }
+</style>
+
+<div class="crt"></div>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">BORDERLESS<span class="ver">v0.3 // DRAFT</span></div>
+    <div class="crumb">ROOT / <b id="crumb-view">SWEEPS</b></div>
+    <div class="status">
+      <span class="badge ok" id="daemon-badge">DAEMON: …</span>
+      <span class="badge pink" id="needyou-badge" hidden>0 NEED YOU</span>
+      <span class="select" id="project-badge">ReUse &middot; Fall 2026 &#9662;</span>
+    </div>
+  </header>
+
+  <div class="main">
+    <nav class="side">
+      <button class="nav active" data-view="sweeps">SWEEPS</button>
+      <button class="nav" data-view="boards">BOARDS</button>
+      <button class="nav" data-view="assign">ASSIGN</button>
+      <button class="nav" data-view="leaddesk">LEAD_DESK</button>
+      <button class="nav" data-view="roster">ROSTER</button>
+      <button class="nav" data-view="chat">ASK</button>
+      <div class="side-foot">LEAD: tpl52<br><span class="online">&#9679; ONLINE<span class="cursor">&#9612;</span></span></div>
+    </nav>
+
+    <div class="content">
+
+      <!-- ============ SWEEPS ============ -->
+      <section class="view" id="sweeps">
+        <div class="hero">
+          <div class="hero-num" id="s-heronum">0</div>
+          <h1>SWEEP CONSOLE</h1>
+          <p class="hero-sub" id="s-herosub">loading&hellip;</p>
+          <div class="hero-actions">
+            <button class="btn green" data-cmd='ao sweep "In Review"'>&#9654; SWEEP IN REVIEW</button>
+            <button class="btn o-pink" data-cmd="ao rescue">&#10227; SCAN OVERDUE</button>
+          </div>
+        </div>
+
+        <div class="cols c-2a">
+          <div class="col">
+            <div class="panel">
+              <div class="ph">SWEEP_QUEUE <span class="ph-meta" id="s-queuemeta">0 JOBS</span></div>
+              <div class="pb nopad"><div class="table-wrap">
+                <table class="tbl">
+                  <thead><tr><th>TICKET</th><th>KIND</th><th>OWNER</th><th>STATE</th><th>CYC</th></tr></thead>
+                  <tbody id="s-queue"></tbody>
+                </table>
+              </div></div>
+            </div>
+          </div>
+
+          <div class="col">
+            <div class="panel g">
+              <div class="ph">READY_TO_MERGE <span class="ph-meta" id="s-readymeta">0</span></div>
+              <div class="pb" id="s-ready"></div>
+            </div>
+
+            <div class="panel p">
+              <div class="ph pink">NEEDS_YOU <span class="ph-meta" id="s-needsmeta">0</span></div>
+              <div class="pb" id="s-needs"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ BOARDS ============ -->
+      <section class="view" id="boards" hidden>
+        <div class="vhead"><h1>BOARDS</h1><p>What&rsquo;s workable right now, and what to attack first.</p></div>
+        <div class="cols c-2">
+          <div class="panel">
+            <div class="ph">UNBLOCKED <span class="ph-meta" id="b-meta">0</span></div>
+            <div class="pb nopad"><div class="table-wrap">
+              <table class="tbl">
+                <thead><tr><th>TICKET</th><th>TITLE</th><th>UNBLOCKS</th></tr></thead>
+                <tbody id="b-unblocked"></tbody>
+              </table>
+            </div></div>
+          </div>
+
+          <div class="panel p">
+            <div class="ph pink">DO NEXT <span class="ph-meta">BY LEVERAGE</span></div>
+            <div class="pb">
+              <p class="note">Unblocked tickets ranked by how much downstream work each one frees up. Start at the top.</p>
+              <ol class="rank" id="b-donext"></ol>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ASSIGN ============ -->
+      <section class="view" id="assign" hidden>
+        <div class="vhead"><h1>ASSIGN</h1><p>Suggested owner for each unblocked ticket &mdash; from load, past fit, and the DO-NEXT order. You approve; nothing auto-assigns.</p></div>
+        <div class="cols c-2a">
+          <div class="panel">
+            <div class="ph">SUGGESTIONS <span class="ph-meta" id="a-meta">0</span></div>
+            <div class="pb nopad"><div class="table-wrap">
+              <table class="tbl">
+                <thead><tr><th>TICKET</th><th>&rarr; SUGGEST</th><th>WHY</th></tr></thead>
+                <tbody id="a-suggest"></tbody>
+              </table>
+            </div></div>
+          </div>
+          <div class="panel">
+            <div class="ph">ROSTER_LOAD <span class="ph-meta">ACTIVE TKTS</span></div>
+            <div class="pb"><ul class="load" id="a-load"></ul></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ LEAD_DESK ============ -->
+      <section class="view" id="leaddesk" hidden>
+        <div class="vhead"><h1>LEAD DESK</h1><p>Ad-hoc lead / ops work handed to another lead &mdash; a <b style="color:var(--green)">Lead Ops</b> Linear issue + a Slack DM. The sweeps never touch these.</p></div>
+        <div class="panel p">
+          <div class="ph pink">DELEGATED <span class="ph-meta" id="d-meta">0 OPEN</span></div>
+          <div class="pb"><ul class="tasks" id="d-tasks"></ul></div>
+        </div>
+      </section>
+
+      <!-- ============ ROSTER ============ -->
+      <section class="view" id="roster" hidden>
+        <div class="vhead"><h1>ROSTER</h1><p>The team, from <b style="color:var(--green)">shared/roster.ts</b> &mdash; the Linear&harr;GitHub&harr;Slack identity map the sweeps and lead desk resolve people through.</p></div>
+        <div class="panel">
+          <div class="ph">MEMBERS <span class="ph-meta" id="r-meta">0</span></div>
+          <div class="pb nopad"><div class="table-wrap">
+            <table class="tbl">
+              <thead><tr><th>NAME</th><th>NETID</th><th>GITHUB</th><th>ROLE</th></tr></thead>
+              <tbody id="r-members"></tbody>
+            </table>
+          </div></div>
+        </div>
+      </section>
+
+      <!-- ============ ASK AO (plain chat, not the TUI) ============ -->
+      <section class="view" id="chat" hidden>
+        <div class="chat-wrap">
+          <div class="chat-top">
+            <div class="chat-title">Ask Borderless</div>
+            <div class="chat-ctx">context: sweeps &middot; boards &middot; roster &middot; PRD &middot; ARCHITECTURE.md &middot; advisory</div>
+          </div>
+          <div class="chat-stream" id="chat-stream">
+            <div class="cmsg ai"><div class="crole">Borderless</div><div class="ctext">Ask about the fleet &mdash; what&rsquo;s blocked, who&rsquo;s overloaded, what to do next. (Advisory: I answer, I don&rsquo;t act.)</div></div>
+          </div>
+          <div class="chat-input">
+            <input class="ci-field" id="chat-field" placeholder="Ask anything about the project or what Borderless is working on…" autocomplete="off" style="background:transparent;color:var(--ink);outline:none" />
+            <button class="ci-send" id="chat-send">Send</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---- nav ----
+  const navs = document.querySelectorAll(".nav[data-view]");
+  const views = document.querySelectorAll(".view");
+  const crumb = document.getElementById("crumb-view");
+  navs.forEach((n) => n.addEventListener("click", () => {
+    navs.forEach((x) => x.classList.remove("active"));
+    n.classList.add("active");
+    const id = n.dataset.view;
+    views.forEach((v) => { v.hidden = v.id !== id; });
+    crumb.textContent = n.textContent;
+    window.scrollTo(0, 0);
+  }));
+
+  // ---- helpers ----
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const stateClass = (st) => ({ ready: "s-green", merged: "s-green", needs_human: "s-pink", failed: "s-pink", queued: "s-dim", ci: "s-dim" }[st] || "s-ink");
+  const ACTIVE = new Set(["implementing", "fixing", "reviewing", "ci", "queued"]);
+
+  // ---- render ----
+  function render(d) {
+    // SWEEPS
+    const sw = d.sweeps || [];
+    const ready = sw.filter((j) => j.state === "ready");
+    const needs = sw.filter((j) => j.state === "needs_human");
+    const active = sw.filter((j) => ACTIVE.has(j.state)).length;
+    $("s-heronum").textContent = String(needs.length);
+    $("s-herosub").innerHTML = `${sw.length} in scope &middot; <b style="color:var(--green)">${ready.length} ready</b> &middot; <b style="color:var(--pink)">${needs.length} need you</b> &middot; ${active} active. Agents drive to the gate; you decide.`;
+    $("s-queuemeta").textContent = `${sw.length} JOBS`;
+    $("s-queue").innerHTML = sw.length
+      ? sw.map((j) => `<tr><td>${esc(j.ticketKey)}</td><td class="${j.kind === "rescue" ? "k-rescue" : "k-review"}">${j.kind === "rescue" ? "rescue" : "review"}</td><td>${esc(j.owner) || "&mdash;"}</td><td class="${stateClass(j.state)}">${esc(String(j.state).toUpperCase())}</td><td>${esc(j.cycles)}</td></tr>`).join("")
+      : `<tr><td colspan="5" class="s-dim">no sweep jobs yet &mdash; nothing in review, nothing rescued</td></tr>`;
+    $("s-readymeta").textContent = String(ready.length);
+    $("s-ready").innerHTML = ready.length
+      ? ready.map((j) => `<div class="row-card"><div class="rc-top"><b>${esc(j.ticketKey)}</b> <span class="muted">${j.prNumber != null ? "PR #" + esc(j.prNumber) : ""}</span></div></div>`).join("")
+      : `<p class="note">nothing at the gate</p>`;
+    $("s-needsmeta").textContent = String(needs.length);
+    $("s-needs").innerHTML = needs.length
+      ? needs.map((j) => `<div class="row-card"><div class="rc-top"><b style="color:var(--pink)">${esc(j.ticketKey)}</b> <span class="muted">${esc(j.cycles)} cyc</span></div>${j.reason ? `<p class="note" style="margin:.4rem 0 0">${esc(j.reason)}</p>` : ""}</div>`).join("")
+      : `<p class="note">nothing waiting on you</p>`;
+
+    // BOARDS
+    const b = d.boards || [];
+    $("b-meta").textContent = String(b.length);
+    $("b-unblocked").innerHTML = b.length
+      ? b.map((r) => `<tr><td>${esc(r.ticketKey)}</td><td>${esc(r.title)}</td><td class="s-green">+${esc(r.downstream)}</td></tr>`).join("")
+      : `<tr><td colspan="3" class="s-dim">nothing actionable right now</td></tr>`;
+    $("b-donext").innerHTML = b.slice(0, 6).map((r, i) => `<li><span class="n">${i + 1}</span><span class="nm">${esc(r.ticketKey)} ${esc(r.title)}</span><span class="u">unblocks <b>${esc(r.downstream)}</b></span></li>`).join("");
+
+    // ASSIGN
+    const a = d.assign || [];
+    $("a-meta").textContent = String(a.length);
+    $("a-suggest").innerHTML = a.length
+      ? a.map((s) => `<tr><td>${esc(s.ticketKey)}</td><td class="s-pink">${esc(s.name)}</td><td class="s-dim">${esc(s.netid)} &middot; load ${esc(s.load)}</td></tr>`).join("")
+      : `<tr><td colspan="3" class="s-dim">nothing to suggest</td></tr>`;
+    $("a-load").innerHTML = (d.rosterLoad || []).map((m) => `<li><span>${esc(m.name)}${m.lead ? ' <span class="muted">lead</span>' : ""}</span><span class="cnt ${m.load === 0 ? "free" : ""}">${esc(m.load)}</span></li>`).join("");
+
+    // LEAD DESK
+    const desk = d.desk || [];
+    $("d-meta").textContent = `${desk.length} OPEN`;
+    $("d-tasks").innerHTML = desk.length
+      ? desk.map((t) => `<li><span class="dot open"></span>${esc(t.title)} <span class="s-dim">[${esc(t.state)}]</span><span class="to">&rarr; ${esc(t.assignee)}</span></li>`).join("")
+      : `<li><span class="muted">no open Lead Ops tasks</span></li>`;
+
+    // ROSTER
+    const r = d.roster || [];
+    $("r-meta").textContent = String(r.length);
+    $("r-members").innerHTML = r.map((m) => `<tr><td>${esc(m.name)}</td><td class="s-dim">${esc(m.netid)}</td><td>${esc(m.github)}</td><td class="${m.lead ? "s-pink" : "s-dim"}">${m.lead ? "lead" : "member"}</td></tr>`).join("");
+
+    // topbar
+    if (d.project) $("project-badge").innerHTML = `${esc(d.project)} &#9662;`;
+    const nb = $("needyou-badge");
+    if (needs.length > 0) { nb.hidden = false; nb.textContent = `${needs.length} NEED YOU`; } else { nb.hidden = true; }
+  }
+
+  function setDaemon(ok) {
+    const el = $("daemon-badge");
+    el.textContent = ok ? "DAEMON: OK" : "DAEMON: DOWN";
+    el.className = ok ? "badge ok" : "badge";
+    el.style.color = ok ? "" : "var(--red)";
+  }
+
+  async function load() {
+    try {
+      const res = await fetch("/api/console", { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      render(await res.json());
+      setDaemon(true);
+    } catch { setDaemon(false); }
+  }
+  load();
+  setInterval(load, 2000);
+
+  // ---- hero actions: terminal-driven in v1, so show the command ----
+  document.querySelectorAll("[data-cmd]").forEach((btn) =>
+    btn.addEventListener("click", () => window.alert(`Run this in your terminal:\n\n${btn.dataset.cmd}`)));
+
+  // ---- ASK ----
+  const field = $("chat-field"), stream = $("chat-stream");
+  function bubble(role, text) {
+    const d = document.createElement("div");
+    d.className = "cmsg " + (role === "You" ? "user" : "ai");
+    d.innerHTML = `<div class="crole">${esc(role)}</div><div class="ctext">${esc(text)}</div>`;
+    stream.appendChild(d);
+    stream.scrollTop = stream.scrollHeight;
+    return d;
+  }
+  async function ask() {
+    const q = field.value.trim();
+    if (!q) return;
+    field.value = "";
+    bubble("You", q);
+    const thinking = bubble("Borderless", "… thinking");
+    try {
+      const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q }) });
+      const j = await res.json();
+      thinking.querySelector(".ctext").textContent = j.configured === false
+        ? "Ask Borderless is off — set a chat backend in ~/.borderless/config.json"
+        : (j.answer || "(no answer)");
+    } catch (e) { thinking.querySelector(".ctext").textContent = "error: " + e; }
+    stream.scrollTop = stream.scrollHeight;
+  }
+  $("chat-send").addEventListener("click", ask);
+  field.addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
+</script>

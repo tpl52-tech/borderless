@@ -18,7 +18,8 @@ import {
 import { doNext } from "../shared/boards.ts";
 import { activeLoads, suggestAssignments } from "../shared/assign.ts";
 import { deskOverview, type DelegateRequest, type DelegateResult } from "../shared/lead-desk.ts";
-import { ROSTER, memberByLinearId } from "../shared/roster.ts";
+import { ROSTER } from "../shared/roster.ts";
+import { sweepRow, rosterRow, boardRow, assignRow } from "../shared/console-rows.ts";
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { WorkItemMonitor } from "./monitors/work-item.ts";
@@ -227,13 +228,10 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
 
       // --- boards + assignment (PRD §7-§8): pure reads over synced linear_issues + roster, no live I/O ---
       case "boards.get":
-        return doNext(store.listLinearIssues()).map((e) => ({
-          ticketKey: e.issue.identifier, title: e.issue.title, downstream: e.downstream,
-        }));
+        return doNext(store.listLinearIssues()).map(boardRow);
       case "assign.suggest": {
         const issues = store.listLinearIssues();
-        return suggestAssignments(doNext(issues), ROSTER, activeLoads(issues, ROSTER))
-          .map((s) => ({ ticketKey: s.ticketKey, netid: s.netid, name: s.name, load: s.load }));
+        return suggestAssignments(doNext(issues), ROSTER, activeLoads(issues, ROSTER)).map(assignRow);
       }
 
       // --- lead desk (PRD §9): open Lead Ops tasks, a plain human task list (no gate, no agent) ----------
@@ -244,14 +242,11 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
       case "ask.run":
         return deps.askRun(String(p.question ?? ""), p.allowActions === true);
 
-      // --- console reads (PRD §11 Ink TUI): plain reads for the SWEEPS + ROSTER screens -----------------
+      // --- console reads (PRD §11): the SWEEPS + ROSTER screens share the row shapes with the web console --
       case "sweep.list":
-        return store.listSweepJobs().map((j) => ({
-          ticketKey: j.ticketKey, kind: j.kind, state: j.state, owner: sweepOwner(j.assignee),
-          prNumber: j.prNumber, cycles: j.cycles, reason: j.reason, sessionId: j.sessionId,
-        }));
+        return store.listSweepJobs().map(sweepRow);
       case "roster.get":
-        return ROSTER.map((m) => ({ name: m.name, netid: m.netid, github: m.github, lead: Boolean(m.lead) }));
+        return ROSTER.map(rosterRow);
 
       // --- usage / quota ---
       case "usage.get":
@@ -324,10 +319,4 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
 
 function sizeOf(p: Record<string, any>): { cols: number; rows: number } | undefined {
   return p.cols && p.rows ? { cols: p.cols, rows: p.rows } : undefined;
-}
-
-/** The OWNER cell for a sweep job: the assignee's roster first name, else the raw Linear id, else null. */
-function sweepOwner(assignee: string | null): string | null {
-  if (!assignee) return null;
-  return memberByLinearId(assignee)?.name.split(" ")[0] ?? assignee;
 }

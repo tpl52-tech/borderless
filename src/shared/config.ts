@@ -150,10 +150,17 @@ export interface OperatorConfigLite {
   openRouterApiKey?: string;
   /** OpenRouter model id for the openrouter backend; defaults to DEFAULT_OPENROUTER_MODEL. */
   openRouterModel?: string;
+  /** Localhost port for the web console (PRD §11 browser mirror); defaults to DEFAULT_WEB_PORT. */
+  webPort?: number;
+  /** Topbar label on the web console (e.g. "ReUse · Fall 2026"); cosmetic, defaults to "Borderless". */
+  projectLabel?: string;
 }
 
 /** Default Ask Borderless model (overridable via `openRouterModel`). */
 export const DEFAULT_OPENROUTER_MODEL = "anthropic/claude-sonnet-4";
+
+/** Default localhost port for the web console (overridable via `webPort`). */
+export const DEFAULT_WEB_PORT = 7420;
 
 export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
   const file = paths(home).config;
@@ -193,6 +200,8 @@ export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
     askModel: typeof raw.askModel === "string" && raw.askModel.trim() ? raw.askModel.trim() : undefined,
     openRouterApiKey: typeof raw.openRouterApiKey === "string" && raw.openRouterApiKey.trim() ? raw.openRouterApiKey.trim() : undefined,
     openRouterModel: typeof raw.openRouterModel === "string" && raw.openRouterModel.trim() ? raw.openRouterModel.trim() : undefined,
+    webPort: Number.isInteger(raw.webPort) && raw.webPort >= 1 && raw.webPort <= 65535 ? raw.webPort : undefined,
+    projectLabel: typeof raw.projectLabel === "string" && raw.projectLabel.trim() ? raw.projectLabel.trim() : undefined,
   };
 }
 

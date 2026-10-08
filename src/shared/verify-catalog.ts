@@ -100,6 +100,5 @@ const PROBES: Partial<Record<BackendProperty, (target: string) => CatalogProbe>>
 export function catalogProbe(check: VerifyCheck): CatalogProbe | null {
   if (check.mechanism !== "db-read") return null; // session/http checks have no catalog proxy — escalate
   const build = PROBES[check.property];
-  const target = check.targets[0];
-  return build && target ? build(target) : null;
+  return build && check.target ? build(check.target) : null;
 }

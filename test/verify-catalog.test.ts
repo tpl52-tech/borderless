@@ -23,7 +23,7 @@ describe("catalogProbe (verify sweep V2b — structural checks over pg_catalog)"
 
   test("a db-read check with no derivable target table has no probe (→ escalate)", () => {
     const noTarget = planChecks(["rls"], ["README.md"])[0]!; // nothing yields a table name
-    expect(noTarget.targets).toEqual([]);
+    expect(noTarget.target).toBeNull();
     expect(catalogProbe(noTarget)).toBeNull();
   });
 

@@ -15,12 +15,11 @@
  *   - "http"     — call a Worker endpoint and assert its contract (status / body)
  * And the three safety tiers (biased conservative — a false escalation costs a human glance; a missed write
  * guard corrupts prod):
- *   - "read-only"       — pure reads; always safe to run unattended
- *   - "throwaway-write" — writes, but only as a disposable user whose rows the runner cleans up
- *   - "escalate"        — ambiguous or consequential (money / external side-effects): hand to a human, never act
- * On prod (the only target until staging lands) the plan uses only "read-only" + "escalate": every check is a
- * residue-free catalog read, and anything behavioral escalates. "throwaway-write" / "session" come into play on
- * the disposable V3 env. See CHECK_SPECS.
+ *   - "read-only" — pure reads; always safe to run unattended
+ *   - "escalate"  — behavioral, ambiguous, or consequential (money / external side-effects): hand to a human
+ * Prod (the only target until staging lands) emits only these two: every check is a residue-free catalog read,
+ * and anything behavioral escalates. V3's disposable env will reintroduce a "throwaway-write" tier (writes as a
+ * cleaned-up disposable user) in the PR that first consumes it. See CHECK_SPECS.
  */
 
 import type { BackendProperty } from "./verify.ts";
@@ -28,16 +27,18 @@ import type { BackendProperty } from "./verify.ts";
 /** How the live runner executes a check — one per capability the V2 access level grants. */
 export type CheckMechanism = "session" | "db-read" | "http";
 
-/** How safe a check is to run unattended against prod (conservative: ambiguous ⇒ escalate). */
-export type SafetyTier = "read-only" | "throwaway-write" | "escalate";
+/** How safe a check is to run unattended against prod (conservative: ambiguous ⇒ escalate). V3's disposable
+ *  env will add a "throwaway-write" tier; prod emits only these two. */
+export type SafetyTier = "read-only" | "escalate";
 
-/** One concrete check for one invisible property — what the live runner executes and asserts. */
+/** One concrete check for one invisible property against one resource — what the live runner executes/asserts. */
 export interface VerifyCheck {
   property: BackendProperty;
   mechanism: CheckMechanism;
   safetyTier: SafetyTier;
-  /** Best-effort resource hints from the merged-PR paths (table / endpoint / bucket); empty ⇒ runner infers. */
-  targets: string[];
+  /** The single resource this check verifies (table / endpoint / bucket) from the merged-PR paths, or null when
+   *  none was derivable. One target per check, so the assertion names exactly what the runner probes. */
+  target: string | null;
   /** Human-readable statement of what must hold (shown in the console + handed to the runner/human). */
   assertion: string;
 }
@@ -96,22 +97,26 @@ function targetsFor(mechanism: CheckMechanism, paths: readonly string[]): string
   return out;
 }
 
-/** Splice the resource hints into an assertion's `<target>` slot(s) (falls back to a generic phrase when none). */
-function fillAssertion(template: string, targets: string[]): string {
-  return template.replaceAll("<target>", targets.length ? targets.join(", ") : "the affected resource");
+/** Splice the resource into an assertion's `<target>` slot(s) (falls back to a generic phrase when none). */
+function fillAssertion(template: string, target: string | null): string {
+  return template.replaceAll("<target>", target ?? "the affected resource");
 }
 
 /**
- * Plan the auto-verification checks for the invisible properties the classifier found. One check per property,
- * in the classifier's stable property order; `targets` are derived from the merged PR's changed paths. Pure —
- * the live runner (V2b/c) executes each check over the provisioned session / db-read / http capabilities.
- * Takes `backendProperties` (not the whole VerifyRow): the row carries no other field this needs, and taking
- * the properties + paths as peer inputs keeps the derivation symmetric (both came from classifying the ticket).
+ * Plan the auto-verification checks for the invisible properties the classifier found. One check per
+ * (property, target) — each check names exactly the one resource it verifies — in the classifier's stable
+ * property order; targets are derived from the merged PR's changed paths. Pure — the live runner (V2b/c)
+ * executes each check over the provisioned session / db-read / http capabilities. Takes `backendProperties`
+ * (not the whole VerifyRow): the row carries no other field this needs, and taking the properties + paths as
+ * peer inputs keeps the derivation symmetric (both came from classifying the ticket).
  */
 export function planChecks(backendProperties: readonly BackendProperty[], changedPaths: readonly string[] = []): VerifyCheck[] {
-  return backendProperties.map((property) => {
+  return backendProperties.flatMap((property) => {
     const spec = CHECK_SPECS[property];
+    const make = (target: string | null): VerifyCheck =>
+      ({ property, mechanism: spec.mechanism, safetyTier: spec.safetyTier, target, assertion: fillAssertion(spec.assertion, target) });
+    // one check per derived target (each names exactly what it verifies); no target ⇒ one check that escalates.
     const targets = targetsFor(spec.mechanism, changedPaths);
-    return { property, mechanism: spec.mechanism, safetyTier: spec.safetyTier, targets, assertion: fillAssertion(spec.assertion, targets) };
+    return targets.length ? targets.map(make) : [make(null)];
   });
 }

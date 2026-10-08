@@ -26,6 +26,7 @@ import { createAlertDispatcher, shellNarrator, type AlertDispatcher } from "./al
 import { startUsageLedger, type UsageLedger } from "./monitors/usage.ts";
 import { reapWorktrees } from "./worktree.ts";
 import { verifyScan, liveMergedPrFor } from "./verify-scan.ts";
+import { buildVerifyScript } from "./verify-script.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
@@ -172,9 +173,17 @@ export function startDaemon(home = stateHome()): Daemon {
   // Verify scan (PRD §13 V1) — read-only, so it needs only a repo + branchOwner (no localCwd / supervisor):
   // classify the Verifying tickets from their merged PRs. No repo → an empty scan.
   let runVerifyScan: UdsServerDeps["verifyScan"] = async () => [];
+  let runVerifyScript: UdsServerDeps["verifyScript"] = async (ticketKey) => ({ ticketKey, script: "verify: no repo configured" });
   if (config.repo && config.branchOwner) {
-    const repo = config.repo, branchOwner = config.branchOwner;
-    runVerifyScan = () => verifyScan(store, { mergedPrFor: liveMergedPrFor(repo, branchOwner) });
+    const branchOwner = config.branchOwner;
+    const mergedPrFor = liveMergedPrFor(config.repo, branchOwner);
+    runVerifyScan = () => verifyScan(store, { mergedPrFor });
+    runVerifyScript = async (ticketKey) => {
+      const issue = store.getLinearIssueByIdentifier(ticketKey);
+      if (!issue) return { ticketKey, script: `verify: no ticket ${ticketKey} in the store — run \`ao sync\` first?` };
+      const pr = await mergedPrFor(issue);
+      return { ticketKey, script: await buildVerifyScript(issue, pr?.paths ?? [], claudeCliChat({ model: config.askModel })) };
+    };
   }
   const sweepProfile = config.profiles.find((pr) => pr.repo === config.repo && pr.localCwd);
   if (config.repo && config.branchOwner && sweepProfile?.localCwd) {
@@ -241,7 +250,7 @@ export function startDaemon(home = stateHome()): Daemon {
       chat = claudeCliChat({ model: config.askModel }); // subscription: no key, answer-only (sandboxed)
     }
     const linear = config.linearApiKey ? httpLinearClient(config.linearApiKey) : null;
-    const issueUuid = (ticketKey: string) => store.listLinearIssues().find((i) => i.identifier === ticketKey)?.id ?? null;
+    const issueUuid = (ticketKey: string) => store.getLinearIssueByIdentifier(ticketKey)?.id ?? null;
     // These throw on a guard miss so the fleet tool reports it as an error (not a false success); the
     // ask-borderless runTool catches it. The happy path returns the human-readable result line.
     const reassign = async (ticketKey: string, assigneeLinearId: string): Promise<string> => {
@@ -283,7 +292,7 @@ export function startDaemon(home = stateHome()): Daemon {
     return { synced, created, started };
   };
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan });
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyScript: runVerifyScript });
 
   // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only. It is
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.

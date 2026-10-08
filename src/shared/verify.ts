@@ -77,12 +77,37 @@ export interface VerifyRow extends VerifyClassification {
   prNumber: number | null;
 }
 
+/**
+ * The prompt for the human-QA tap-through script (PRD §13 V1). The backend properties are auto-verified
+ * separately, so the script stays on the screen-observable half (like the Favorites writeup). Pure — the
+ * caller runs it on the LLM.
+ */
+export function verifyScriptPrompt(
+  issue: { identifier: string; title: string; description: string | null },
+  classification: VerifyClassification,
+): string {
+  const skip = classification.backendProperties.length
+    ? `The following are auto-verified separately (NOT by this human tester) — do NOT write steps for them: ${classification.backendProperties.join(", ")}.`
+    : "Everything here is screen-observable.";
+  return [
+    `Write a QA tap-through script for a human tester of a React Native app running in Expo Go, for ticket ${issue.identifier}: "${issue.title}".`,
+    `Audience: a non-technical teammate testing on their own phone. ${skip} Do NOT poke the database or inspect the backend — cover only what is visible on screen.`,
+    `Format: a short "Before you start" (preconditions), then numbered steps. Each step says what to tap and what to observe (✅) and what counts as a failure (❌). Cover the empty state and persistence-across-reload where relevant. Plain, friendly, concrete.`,
+    `Acceptance criteria:\n${(issue.description ?? "(none provided)").slice(0, 4000)}`,
+  ].join("\n\n");
+}
+
+/** The classification haystack for an issue — title + description, single-sourced so both callers agree. */
+export function issueText(issue: { title: string; description: string | null }): string {
+  return `${issue.title} ${issue.description ?? ""}`;
+}
+
 /** Classify one Verifying ticket from its title+description + its merged PR's changed paths. Pure. */
 export function verifyRow(
   issue: { identifier: string; title: string; description: string | null },
   changedPaths: readonly string[],
   prNumber: number | null,
 ): VerifyRow {
-  const c = classifyVerification(`${issue.title} ${issue.description ?? ""}`, changedPaths);
+  const c = classifyVerification(issueText(issue), changedPaths);
   return { ticketKey: issue.identifier, title: issue.title, prNumber, ...c };
 }

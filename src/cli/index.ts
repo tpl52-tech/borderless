@@ -25,6 +25,7 @@
  *   ao web                                     open the browser lead console (the mockup design, live data)
  *   ao sync                                    pull the live Linear board into the store (no sweeps)
  *   ao verify                                  classify the Verifying tickets (ui / backend / mixed)
+ *   ao verify script <TICKET>                  generate the human-QA tap-through for one Verifying ticket
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
@@ -160,6 +161,17 @@ export async function main(argv: string[]): Promise<void> {
   // `ao verify` — classify the Verifying tickets (PRD §13 V1): what human QA can tap-through vs the invisible
   // backend properties (RLS/trigger/schema/server-logic/data-integrity/storage) that need verification.
   if (sub === "verify") {
+    // `ao verify script <COR-123>` — generate the human-QA tap-through for one ticket (any state, so a lead
+    // can pre-generate before a ticket reaches Verifying); `ao verify` (no args) lists the Verifying queue.
+    if (rest[0] === "script") {
+      const ticketKey = rest[1];
+      if (!ticketKey) throw new Error("usage: ao verify script <TICKET>");
+      await withDaemon("verify", async (client) => {
+        const r = await client.request<{ ticketKey: string; script: string }>("verify.script", { ticketKey });
+        console.log(r.script);
+      });
+      return;
+    }
     await withDaemon("verify", async (client) => {
       const rows = await client.request<VerifyRow[]>("verify.scan");
       if (rows.length === 0) { console.log("verify: no tickets in Verifying (or no repo configured)"); return; }

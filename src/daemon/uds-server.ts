@@ -56,6 +56,8 @@ export interface UdsServerDeps {
   syncBoard: () => Promise<{ synced: number; configured: boolean }>;
   /** PRD §13 V1: classify the Verifying tickets (ui / backend / mixed) from their merged PRs. Read-only. */
   verifyScan: () => Promise<VerifyRow[]>;
+  /** PRD §13 V1: generate the human-QA tap-through script for one Verifying ticket (subscription LLM). */
+  verifyScript: (ticketKey: string) => Promise<{ ticketKey: string; script: string }>;
 }
 
 export interface UdsServer {
@@ -250,6 +252,8 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
         return deps.syncBoard();
       case "verify.scan":
         return deps.verifyScan();
+      case "verify.script":
+        return deps.verifyScript(String(p.ticketKey ?? ""));
 
       // --- console reads (PRD §11): the SWEEPS + ROSTER screens share the row shapes with the web console --
       case "sweep.list":

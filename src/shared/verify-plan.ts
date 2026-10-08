@@ -18,6 +18,9 @@
  *   - "read-only"       — pure reads; always safe to run unattended
  *   - "throwaway-write" — writes, but only as a disposable user whose rows the runner cleans up
  *   - "escalate"        — ambiguous or consequential (money / external side-effects): hand to a human, never act
+ * On prod (the only target until staging lands) the plan uses only "read-only" + "escalate": every check is a
+ * residue-free catalog read, and anything behavioral escalates. "throwaway-write" / "session" come into play on
+ * the disposable V3 env. See CHECK_SPECS.
  */
 
 import type { BackendProperty } from "./verify.ts";
@@ -40,32 +43,37 @@ export interface VerifyCheck {
 }
 
 // Property → how it is checked. Stable: the assertion names <target> so the planner can splice the hint in.
-// Conservative by design — see the tier doc above; server-logic defaults to escalate (Workers routinely touch
-// money / auth / external services, which a planner can't prove is throwaway-safe from paths alone).
+//
+// Current stance = prod verification (verifyTarget "prod", no staging yet): READ-ONLY + STRUCTURAL. Each
+// db-read check confirms the invisible guarantee EXISTS in the Postgres catalog (table/constraint/trigger/RLS
+// policy present) — residue-free, derivable from the merged diff + catalog. The BEHAVIORAL proof (a live
+// cross-user read, a trigger actually firing, a real dedup, an upload) creates residue that the safe prod
+// access can't clean up, so it waits for a disposable env (V3 / staging) — see PRD §13. server-logic + storage
+// are behavioral-only, so on prod they escalate to a human.
 const CHECK_SPECS: Record<BackendProperty, { mechanism: CheckMechanism; safetyTier: SafetyTier; assertion: string }> = {
   rls: {
-    mechanism: "session", safetyTier: "throwaway-write",
-    assertion: "A disposable user cannot read another user's rows in <target> (deny-all / owner-scoped RLS holds).",
+    mechanism: "db-read", safetyTier: "read-only",
+    assertion: "RLS is enabled on <target> and at least one access policy is defined (the deny-all / owner-scoped guard exists).",
   },
   schema: {
     mechanism: "db-read", safetyTier: "read-only",
-    assertion: "The migration's table, columns and constraints exist in <target> as defined.",
+    assertion: "The table <target> the migration defines exists in the catalog.",
   },
   trigger: {
     mechanism: "db-read", safetyTier: "read-only",
-    assertion: "The expected trigger is attached to <target> in the catalog (observing it fire is a later pass).",
+    assertion: "The expected trigger is attached to <target> in the catalog.",
   },
   "data-integrity": {
-    mechanism: "session", safetyTier: "throwaway-write",
-    assertion: "Repeating the action as a disposable user leaves one row in <target>, not duplicates (idempotent / upsert).",
+    mechanism: "db-read", safetyTier: "read-only",
+    assertion: "A unique or primary-key constraint on <target> structurally backs the no-duplicate / upsert guarantee.",
   },
   "server-logic": {
     mechanism: "http", safetyTier: "escalate",
-    assertion: "The Worker <target> enforces its server-side contract (JWT / signature / pricing) — verify by hand (may touch money / external services).",
+    assertion: "The Worker <target> enforces its server-side contract (JWT / signature / pricing) — behavioral, verify by hand or on staging.",
   },
   storage: {
-    mechanism: "session", safetyTier: "throwaway-write",
-    assertion: "A disposable user's upload lands in <target> and the bucket's access rules hold.",
+    mechanism: "session", safetyTier: "escalate",
+    assertion: "A user's upload lands in <target> and the bucket's access rules hold — behavioral, verify by hand or on staging.",
   },
 };
 

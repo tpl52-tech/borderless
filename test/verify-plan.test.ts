@@ -9,15 +9,16 @@ describe("planChecks (verify sweep V2 — properties → concrete checks)", () =
     expect(planChecks([])).toEqual([]);
   });
 
-  test("each property maps to its mechanism + conservative safety tier", () => {
+  test("each property maps to its mechanism + conservative safety tier (prod = read-only structural)", () => {
     const c = byProp(planChecks(["rls", "schema", "trigger", "data-integrity", "server-logic", "storage"]));
-    expect([c.rls!.mechanism, c.rls!.safetyTier]).toEqual(["session", "throwaway-write"]);
+    // The structural, catalog-derivable guarantees run read-only on prod.
+    expect([c.rls!.mechanism, c.rls!.safetyTier]).toEqual(["db-read", "read-only"]);
     expect([c.schema!.mechanism, c.schema!.safetyTier]).toEqual(["db-read", "read-only"]);
     expect([c.trigger!.mechanism, c.trigger!.safetyTier]).toEqual(["db-read", "read-only"]);
-    expect([c["data-integrity"]!.mechanism, c["data-integrity"]!.safetyTier]).toEqual(["session", "throwaway-write"]);
-    // Worker logic is ambiguous/consequential from paths alone → escalate to a human, never auto-act.
+    expect([c["data-integrity"]!.mechanism, c["data-integrity"]!.safetyTier]).toEqual(["db-read", "read-only"]);
+    // Behavioral-only → escalate to a human on prod (run freely on the disposable V3 env).
     expect([c["server-logic"]!.mechanism, c["server-logic"]!.safetyTier]).toEqual(["http", "escalate"]);
-    expect([c.storage!.mechanism, c.storage!.safetyTier]).toEqual(["session", "throwaway-write"]);
+    expect([c.storage!.mechanism, c.storage!.safetyTier]).toEqual(["session", "escalate"]);
   });
 
   test("one check per property, preserving the classifier's stable property order", () => {
@@ -64,6 +65,6 @@ describe("planChecks (verify sweep V2 — properties → concrete checks)", () =
     const c = byProp(planChecks(r.backendProperties, paths));
     expect(c.rls!.targets).toEqual(["profiles"]);
     expect(c.schema!.safetyTier).toBe("read-only");
-    expect(c["data-integrity"]!.mechanism).toBe("session"); // the upsert the classifier flagged
+    expect(c["data-integrity"]!.mechanism).toBe("db-read"); // the upsert the classifier flagged → structural constraint check
   });
 });

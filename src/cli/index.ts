@@ -29,6 +29,7 @@
 
 import type { DaemonClient } from "../client/daemon-client.ts";
 import type { DelegateResult } from "../shared/lead-desk.ts";
+import type { VerifyRow } from "../shared/verify.ts";
 
 const SUBCOMMANDS = [
   "setup", "daemon", "autonomy", "monitor", "history", "worktree", "pr", "issue", "awake",
@@ -160,7 +161,7 @@ export async function main(argv: string[]): Promise<void> {
   // backend properties (RLS/trigger/schema/server-logic/data-integrity/storage) that need verification.
   if (sub === "verify") {
     await withDaemon("verify", async (client) => {
-      const rows = await client.request<Array<{ ticketKey: string; title: string; verifiability: string; backendProperties: string[] }>>("verify.scan");
+      const rows = await client.request<VerifyRow[]>("verify.scan");
       if (rows.length === 0) { console.log("verify: no tickets in Verifying (or no repo configured)"); return; }
       for (const r of rows) {
         const props = r.backendProperties.length ? `  needs: ${r.backendProperties.join(", ")}` : "";

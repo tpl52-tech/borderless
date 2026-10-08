@@ -8,6 +8,8 @@
 import type { Store } from "./store.ts";
 import type { LinearIssue } from "../shared/types.ts";
 import { verifyRow, type VerifyRow } from "../shared/verify.ts";
+import { listPrsForBranch, prFiles } from "./github.ts";
+import { prBranchCandidates } from "./worktree.ts";
 
 export interface VerifyScanDeps {
   /** The merged PR + its changed paths for a Verifying ticket (live gh); null when none is found. */
@@ -24,4 +26,25 @@ export async function verifyScan(store: Pick<Store, "listLinearIssues">, deps: V
     rows.push(verifyRow(issue, pr?.paths ?? [], pr?.prNumber ?? null));
   }
   return rows;
+}
+
+/**
+ * Live `mergedPrFor` (gh) — the named factory the daemon injects, mirroring rescue-scan's `liveProgressCheck`.
+ * Discovers the ticket's MERGED PR via its branch candidates and reads its changed files. Returns null when no
+ * merged PR exists, and is resilient per-ticket: a gh hiccup on one ticket degrades it to text-only (null),
+ * never aborting the whole read-only scan.
+ */
+export function liveMergedPrFor(repo: string, branchOwner: string): VerifyScanDeps["mergedPrFor"] {
+  return async (issue) => {
+    for (const branch of prBranchCandidates(issue.identifier, branchOwner, issue.gitBranchName)) {
+      let merged;
+      try { merged = (await listPrsForBranch(repo, branch)).find((p) => p.state === "MERGED"); }
+      catch { continue; }
+      if (merged) {
+        try { return { prNumber: merged.number, paths: await prFiles(repo, merged.number) }; }
+        catch { return { prNumber: merged.number, paths: [] }; } // have the PR, files unavailable
+      }
+    }
+    return null;
+  };
 }

@@ -8,6 +8,7 @@
 
 import { consolePayload } from "../shared/console-rows.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
+import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 import type { Store } from "./store.ts";
 
 export interface WebServerDeps {
@@ -21,6 +22,8 @@ export interface WebServerDeps {
   syncBoard: () => Promise<{ synced: number; configured: boolean }>;
   /** PRD §13: classify the Verifying tickets from their merged PRs. A live gh scan — on-demand, never polled. */
   verifyScan: () => Promise<VerifyScanResult>;
+  /** PRD §13 V2b: run the structural checks over the read-only DB role → a verdict per Verifying ticket. */
+  verifyRun: () => Promise<VerifyRunResult>;
   port: number;
 }
 
@@ -46,6 +49,9 @@ export function startWebServer(deps: WebServerDeps): WebServer {
       }
       if (pathname === "/api/verify" && req.method === "POST") {
         return Response.json(await deps.verifyScan()); // on-demand live gh scan — never polled (the VERIFY tab's button)
+      }
+      if (pathname === "/api/verify/run" && req.method === "POST") {
+        return Response.json(await deps.verifyRun()); // executes the catalog checks over the read-only role
       }
       if (pathname === "/api/ask" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { question?: unknown };

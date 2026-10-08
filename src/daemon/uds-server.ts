@@ -53,6 +53,8 @@ export interface UdsServerDeps {
   askRun: (question: string, allowActions: boolean) => Promise<{ answer: string; steps: number; costMicros: number; configured: boolean }>;
   /** Pull the live Linear board into the store (no sweeps) — the `ao sync` / Refresh-button path. */
   syncBoard: () => Promise<{ synced: number; configured: boolean }>;
+  /** PRD §13 V1: classify the Verifying tickets (ui / backend / mixed) from their merged PRs. Read-only. */
+  verifyScan: () => Promise<import("../shared/verify.ts").VerifyRow[]>;
 }
 
 export interface UdsServer {
@@ -245,6 +247,8 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
         return deps.askRun(String(p.question ?? ""), p.allowActions === true);
       case "sync.run":
         return deps.syncBoard();
+      case "verify.scan":
+        return deps.verifyScan();
 
       // --- console reads (PRD §11): the SWEEPS + ROSTER screens share the row shapes with the web console --
       case "sweep.list":

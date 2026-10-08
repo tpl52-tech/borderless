@@ -21,7 +21,7 @@ import type { CheckState, RequiredCheck } from "../shared/sweep-gate.ts";
 import { REQUIRED_CHECKS } from "../shared/sweep-gate.ts";
 import type { SweepEngineDeps, ReviewVerdict, WorkerResult, WorkerFeedback, PollResult } from "./sweep-engine.ts";
 import { territoryWarning, type Territory } from "../shared/collision.ts";
-import { fetchPr, listPrsForBranch } from "./github.ts";
+import { fetchPr, listPrsForBranch, prFiles } from "./github.ts";
 import { branchName, prBranchCandidates } from "./worktree.ts";
 import { sessionDir } from "../shared/paths.ts";
 import { runWithDeadline } from "./ssh.ts";
@@ -208,7 +208,7 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
     async pollCi(job): Promise<PollResult> {
       if (job.prNumber == null) return { checks: {}, changedPaths: [] };
       const pr = await fetchPr(cfg.repo, job.prNumber);
-      return { checks: checkStates(pr.statusCheckRollup), changedPaths: await changedPaths(cfg.repo, job.prNumber) };
+      return { checks: checkStates(pr.statusCheckRollup), changedPaths: await prFiles(cfg.repo, job.prNumber) };
     },
     async review(job): Promise<ReviewVerdict> {
       // ignoreSeedTicket: the reviewer only reads the PR via gh — keep it off the worker's ticket-branch
@@ -222,14 +222,6 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
     },
     wait: (ms) => Bun.sleep(ms),
   };
-}
-
-/** Changed file paths for a PR, for the dangerous-tier gate. Live-only. */
-async function changedPaths(repo: string, number: number): Promise<string[]> {
-  const r = await runWithDeadline(["gh", "pr", "view", String(number), "--repo", repo, "--json", "files"]);
-  if (r.code !== 0) throw new Error(`gh pr view files failed (code ${r.code}): ${r.stderr}`);
-  const parsed = JSON.parse(r.stdout) as { files?: Array<{ path?: string }> };
-  return (parsed.files ?? []).map((f) => f.path).filter((p): p is string => typeof p === "string");
 }
 
 /** Context for a worker's seed: the rescue ticket's acceptance criteria (embedded inline because a spawned

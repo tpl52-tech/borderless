@@ -3,13 +3,13 @@
  * does it need backend verification?" brain.
  *
  * From a ticket's acceptance criteria/description + its merged PR's changed paths, it decides which parts
- * are screen-observable (→ a human tap-through, like the Favorites ticket) and which are the invisible
+ * are screen-observable (left to human QA, like the Favorites ticket) and which are the invisible
  * properties a human can't see (RLS isolation, DB triggers, schema, Worker server-logic, data integrity,
  * Storage writes) — the QA blind spot the verify sweep automates.
  *
  * No I/O: the scan passes the text + the changed paths; this returns the classification that drives the
- * human-script generation (V1) and the auto-verification (V2/V3). Precision-biased toward flagging a
- * backend property: a false "needs a backend check" costs a human glance; a missed one ships broken.
+ * auto-verification (V2/V3) and the Verifying console tab. Precision-biased toward flagging a backend
+ * property: a false "needs a backend check" costs a human glance; a missed one ships broken.
  *
  * Path signals are tested PER PATH (like sweep-gate.ts/collision.ts), so `^`/`$` anchor each path — a
  * whole-string join would make `.sql$` match only the last path. Text signals require noun/DB context where
@@ -85,26 +85,6 @@ export interface VerifyRow extends VerifyClassification {
 export interface VerifyScanResult {
   rows: VerifyRow[];
   configured: boolean;
-}
-
-/**
- * The prompt for the human-QA tap-through script (PRD §13 V1). The backend properties are auto-verified
- * separately, so the script stays on the screen-observable half (like the Favorites writeup). Pure — the
- * caller runs it on the LLM.
- */
-export function verifyScriptPrompt(
-  issue: { identifier: string; title: string; description: string | null },
-  classification: VerifyClassification,
-): string {
-  const skip = classification.backendProperties.length
-    ? `The following are auto-verified separately (NOT by this human tester) — do NOT write steps for them: ${classification.backendProperties.join(", ")}.`
-    : "Everything here is screen-observable.";
-  return [
-    `Write a QA tap-through script for a human tester of a React Native app running in Expo Go, for ticket ${issue.identifier}: "${issue.title}".`,
-    `Audience: a non-technical teammate testing on their own phone. ${skip} Do NOT poke the database or inspect the backend — cover only what is visible on screen.`,
-    `Format: a short "Before you start" (preconditions), then numbered steps. Each step says what to tap and what to observe (✅) and what counts as a failure (❌). Cover the empty state and persistence-across-reload where relevant. Plain, friendly, concrete.`,
-    `Acceptance criteria:\n${(issue.description ?? "(none provided)").slice(0, 4000)}`,
-  ].join("\n\n");
 }
 
 /** The classification haystack for an issue — title + description, single-sourced so both callers agree. */

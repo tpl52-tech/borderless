@@ -20,7 +20,7 @@
  *   - "escalate"        — ambiguous or consequential (money / external side-effects): hand to a human, never act
  */
 
-import type { BackendProperty, VerifyRow } from "./verify.ts";
+import type { BackendProperty } from "./verify.ts";
 
 /** How the live runner executes a check — one per capability the V2 access level grants. */
 export type CheckMechanism = "session" | "db-read" | "http";
@@ -74,33 +74,34 @@ const SQL_PATH = /(?:^|\/)(?:supabase\/)?(?:migrations?|policies?)\/(.+?)\.sql$/
 const FN_PATH = /(?:^|\/)functions?\/(?:api\/)?(.+?)(?:\.[cm]?[jt]s)?$/; // → a Worker route name
 const MIGRATION_PREFIX = /^\d+[-_]/; // strip a leading "0007_" / "20240102-" ordering prefix off a stem
 
-/** Which mechanisms consume path targets (http → endpoints, db-read/session → db objects). */
-const DB_MECHANISMS = new Set<CheckMechanism>(["db-read", "session"]);
-
 /** Best-effort resource hints for a mechanism from the changed paths. Pure; deduped, order-preserving. */
 function targetsFor(mechanism: CheckMechanism, paths: readonly string[]): string[] {
+  const isHttp = mechanism === "http"; // http → a Worker route; session/db-read → a db object (the only split)
+  const re = isHttp ? FN_PATH : SQL_PATH;
   const out: string[] = [];
   for (const p of paths) {
-    const m = mechanism === "http" ? FN_PATH.exec(p) : DB_MECHANISMS.has(mechanism) ? SQL_PATH.exec(p) : null;
+    const m = re.exec(p);
     if (!m) continue;
-    const name = (mechanism === "http" ? m[1]! : m[1]!.replace(MIGRATION_PREFIX, "")).trim();
+    const name = (isHttp ? m[1]! : m[1]!.replace(MIGRATION_PREFIX, "")).trim();
     if (name && !out.includes(name)) out.push(name);
   }
   return out;
 }
 
-/** Splice the resource hints into an assertion's `<target>` slot (falls back to a generic phrase when none). */
+/** Splice the resource hints into an assertion's `<target>` slot(s) (falls back to a generic phrase when none). */
 function fillAssertion(template: string, targets: string[]): string {
-  return template.replace("<target>", targets.length ? targets.join(", ") : "the affected resource");
+  return template.replaceAll("<target>", targets.length ? targets.join(", ") : "the affected resource");
 }
 
 /**
- * Plan the auto-verification checks for one classified Verifying ticket. One check per backend property, in the
- * classifier's stable property order; `targets` are derived from the merged PR's changed paths. Pure — the live
- * runner (V2b/c) executes each check over the provisioned session / db-read / http capabilities.
+ * Plan the auto-verification checks for the invisible properties the classifier found. One check per property,
+ * in the classifier's stable property order; `targets` are derived from the merged PR's changed paths. Pure —
+ * the live runner (V2b/c) executes each check over the provisioned session / db-read / http capabilities.
+ * Takes `backendProperties` (not the whole VerifyRow): the row carries no other field this needs, and taking
+ * the properties + paths as peer inputs keeps the derivation symmetric (both came from classifying the ticket).
  */
-export function planChecks(row: VerifyRow, changedPaths: readonly string[] = []): VerifyCheck[] {
-  return row.backendProperties.map((property) => {
+export function planChecks(backendProperties: readonly BackendProperty[], changedPaths: readonly string[] = []): VerifyCheck[] {
+  return backendProperties.map((property) => {
     const spec = CHECK_SPECS[property];
     const targets = targetsFor(spec.mechanism, changedPaths);
     return { property, mechanism: spec.mechanism, safetyTier: spec.safetyTier, targets, assertion: fillAssertion(spec.assertion, targets) };

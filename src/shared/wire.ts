@@ -151,7 +151,8 @@ export type RequestType =
   | "workitem.action"
   | "project.setHidden"
   | "sweep.scanInReview" | "rescue.scan" | "rescue.authorize"
-  | "boards.get" | "assign.suggest" | "lead.desk" | "lead.delegate" | "ask.run" | "sync.run" | "verify.scan"
+  | "boards.get" | "assign.suggest" | "lead.desk" | "lead.delegate" | "ask.run" | "sync.run"
+  | "verify.scan" | "verify.script"
   | "sweep.list" | "roster.get"
   | "usage.get" | "quota.get";
 

@@ -3,13 +3,13 @@
  * does it need backend verification?" brain.
  *
  * From a ticket's acceptance criteria/description + its merged PR's changed paths, it decides which parts
- * are screen-observable (→ a human tap-through, like the Favorites ticket) and which are the invisible
+ * are screen-observable (left to human QA, like the Favorites ticket) and which are the invisible
  * properties a human can't see (RLS isolation, DB triggers, schema, Worker server-logic, data integrity,
  * Storage writes) — the QA blind spot the verify sweep automates.
  *
  * No I/O: the scan passes the text + the changed paths; this returns the classification that drives the
- * human-script generation (V1) and the auto-verification (V2/V3). Precision-biased toward flagging a
- * backend property: a false "needs a backend check" costs a human glance; a missed one ships broken.
+ * auto-verification (V2/V3) and the Verifying console tab. Precision-biased toward flagging a backend
+ * property: a false "needs a backend check" costs a human glance; a missed one ships broken.
  *
  * Path signals are tested PER PATH (like sweep-gate.ts/collision.ts), so `^`/`$` anchor each path — a
  * whole-string join would make `.sql$` match only the last path. Text signals require noun/DB context where

@@ -62,6 +62,11 @@ describe("classifyVerification (verify sweep, PRD §13)", () => {
     expect(classifyVerification("Favorites persist to local storage and survive a reload", []).backendProperties).toEqual([]); // device-local, screen-observable
   });
 
+  test("restored recall: bare 'to Storage' and 'database trigger' still flag (not just upload/noun forms)", () => {
+    expect(classifyVerification("the compressed image is saved to Storage", ["lib/api/photos.ts"]).backendProperties).toContain("storage");
+    expect(classifyVerification("adds a database trigger for an audit log", []).backendProperties).toContain("trigger");
+  });
+
   test("a changed .sql path is caught regardless of its position in the list (per-path matching)", () => {
     // Regression: a whole-string join with a bare `$` only matched the LAST path.
     expect(classifyVerification("neutral text", ["db/0001_init.sql", "app/x.tsx"]).backendProperties).toContain("schema");

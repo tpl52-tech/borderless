@@ -28,13 +28,14 @@ export type BackendProperty = "rls" | "trigger" | "schema" | "server-logic" | "d
 const BACKEND_SIGNALS: ReadonlyArray<readonly [BackendProperty, { text: RegExp; path?: RegExp }]> = [
   // cross-user access control — not the "privacy policy screen" or "can't see the grid" UI senses.
   ["rls", { text: /\brls\b|row[- ]level|deny[- ]all|(?:rls|security|access) polic(?:y|ies)|can(?:'?t| ?not) (?:see|read|access) (?:another|other|others|each other|a different)/, path: /(?:^|\/)(?:policies?|rls)\b/ }],
-  // DB trigger, not the verb "triggers" — needs an insert/row/notification noun nearby, or a migration path.
-  ["trigger", { text: /\btrigger(?:s|ed|ing)?\b[^.\n]{0,40}\b(?:insert|inserts|row|rows|record|notification|table|function|on (?:approv|sold|insert|update|delete))|\b(?:insert|inserts|row|notification|record)[^.\n]{0,40}\btrigger/, path: /(?:^|\/)migrations?\/|\.sql$/ }],
+  // DB trigger, not the verb "triggers" — needs a DB-noun nearby, an explicit "db/sql trigger", or a migration path.
+  ["trigger", { text: /\btrigger(?:s|ed|ing)?\b[^.\n]{0,40}\b(?:insert|inserts|row|rows|record|notification|table|function|on (?:approv|sold|insert|update|delete))|\b(?:insert|inserts|row|notification|record)[^.\n]{0,40}\btrigger|\b(?:db|database|sql)[- ]?trigger/, path: /(?:^|\/)migrations?\/|\.sql$/ }],
   ["schema", { text: /\b(?:migration|schema|constraint)\b/, path: /(?:^|\/)migrations?\/|\.sql$/ }],
   ["server-logic", { text: /server[- ]side|\bjwt\b|webhook|signature|\bworker\b|server[- ]authoritative/, path: /(?:^|\/)functions?\// }],
   ["data-integrity", { text: /idempoten|duplicate|dedup|\bupsert\b/ }],
-  // Supabase Storage — not device-local "local storage" / AsyncStorage, which is screen-observable (COR-35).
-  ["storage", { text: /\bsupabase storage\b|storage bucket|\bbucket\b|upload[^.\n]*(?:file|photo|image)/ }],
+  // Supabase Storage — the negative lookbehinds keep bare "to Storage" recall while excluding the
+  // device-local "local storage" / "async storage" senses, which are screen-observable (COR-35).
+  ["storage", { text: /(?<!local )(?<!async )\bstorage\b|\bbucket\b|upload[^.\n]*(?:file|photo|image)/ }],
 ];
 
 // Screen-observable signals: a human can tap/look to confirm.

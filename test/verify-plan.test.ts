@@ -9,50 +9,56 @@ describe("planChecks (verify sweep V2 — properties → concrete checks)", () =
     expect(planChecks([])).toEqual([]);
   });
 
-  test("each property maps to its mechanism + conservative safety tier", () => {
+  test("each property maps to its mechanism + conservative safety tier (prod = read-only structural)", () => {
     const c = byProp(planChecks(["rls", "schema", "trigger", "data-integrity", "server-logic", "storage"]));
-    expect([c.rls!.mechanism, c.rls!.safetyTier]).toEqual(["session", "throwaway-write"]);
+    // The structural, catalog-derivable guarantees run read-only on prod.
+    expect([c.rls!.mechanism, c.rls!.safetyTier]).toEqual(["db-read", "read-only"]);
     expect([c.schema!.mechanism, c.schema!.safetyTier]).toEqual(["db-read", "read-only"]);
     expect([c.trigger!.mechanism, c.trigger!.safetyTier]).toEqual(["db-read", "read-only"]);
-    expect([c["data-integrity"]!.mechanism, c["data-integrity"]!.safetyTier]).toEqual(["session", "throwaway-write"]);
-    // Worker logic is ambiguous/consequential from paths alone → escalate to a human, never auto-act.
+    expect([c["data-integrity"]!.mechanism, c["data-integrity"]!.safetyTier]).toEqual(["db-read", "read-only"]);
+    // Behavioral-only → escalate to a human on prod (run freely on the disposable V3 env).
     expect([c["server-logic"]!.mechanism, c["server-logic"]!.safetyTier]).toEqual(["http", "escalate"]);
-    expect([c.storage!.mechanism, c.storage!.safetyTier]).toEqual(["session", "throwaway-write"]);
+    expect([c.storage!.mechanism, c.storage!.safetyTier]).toEqual(["session", "escalate"]);
   });
 
   test("one check per property, preserving the classifier's stable property order", () => {
     expect(planChecks(["rls", "schema", "server-logic"]).map((c) => c.property)).toEqual(["rls", "schema", "server-logic"]);
   });
 
-  test("db targets come from policy/migration paths, with the migration ordering prefix stripped", () => {
+  test("db target comes from the policy/migration path, with the migration ordering prefix stripped", () => {
     const rls = planChecks(["rls"], ["supabase/policies/profiles.sql"])[0]!;
-    expect(rls.targets).toEqual(["profiles"]);
+    expect(rls.target).toBe("profiles");
     expect(rls.assertion).toContain("profiles");
 
     const schema = planChecks(["schema"], ["supabase/migrations/0007_profiles.sql"])[0]!;
-    expect(schema.targets).toEqual(["profiles"]); // "0007_" prefix stripped
+    expect(schema.target).toBe("profiles"); // "0007_" prefix stripped
   });
 
-  test("http targets come from Worker function paths — api/ folder optional, extension (ts/mjs) stripped", () => {
-    expect(planChecks(["server-logic"], ["functions/api/create-payment-intent.ts"])[0]!.targets).toEqual(["create-payment-intent"]);
-    expect(planChecks(["server-logic"], ["functions/webhook.mjs"])[0]!.targets).toEqual(["webhook"]); // no api/, .mjs ext
+  test("http target comes from a Worker function path — api/ folder optional, extension (ts/mjs) stripped", () => {
+    expect(planChecks(["server-logic"], ["functions/api/create-payment-intent.ts"])[0]!.target).toBe("create-payment-intent");
+    expect(planChecks(["server-logic"], ["functions/webhook.mjs"])[0]!.target).toBe("webhook"); // no api/, .mjs ext
   });
 
   test("targets are mechanism-scoped: a db check ignores a Worker path and an http check ignores a .sql path", () => {
-    expect(planChecks(["rls"], ["functions/api/pay.ts"])[0]!.targets).toEqual([]); // session ⇏ Worker path
-    expect(planChecks(["server-logic"], ["supabase/policies/items.sql"])[0]!.targets).toEqual([]); // http ⇏ sql path
+    expect(planChecks(["rls"], ["functions/api/pay.ts"])[0]!.target).toBeNull(); // db-read ⇏ Worker path
+    expect(planChecks(["server-logic"], ["supabase/policies/items.sql"])[0]!.target).toBeNull(); // http ⇏ sql path
   });
 
-  test("no usable path → empty targets and a generic assertion (no dangling <target>)", () => {
-    const c = planChecks(["schema"], ["README.md", "app/x.tsx"])[0]!;
-    expect(c.targets).toEqual([]);
-    expect(c.assertion).not.toContain("<target>");
-    expect(c.assertion).toContain("the affected resource");
+  test("no usable path → a single check with a null target and a generic assertion (no dangling <target>)", () => {
+    const cs = planChecks(["schema"], ["README.md", "app/x.tsx"]);
+    expect(cs).toHaveLength(1);
+    expect(cs[0]!.target).toBeNull();
+    expect(cs[0]!.assertion).not.toContain("<target>");
+    expect(cs[0]!.assertion).toContain("the affected resource");
   });
 
-  test("a usable path is found regardless of its position, and multiple targets dedupe in order", () => {
-    const c = planChecks(["schema"], ["app/x.tsx", "supabase/migrations/0009_notifications.sql", "supabase/migrations/0007_profiles.sql"])[0]!;
-    expect(c.targets).toEqual(["notifications", "profiles"]); // both, order-preserving
+  test("multiple derived targets fan out into one check each, every assertion naming only its own table", () => {
+    const cs = planChecks(["schema"], ["app/x.tsx", "supabase/migrations/0009_notifications.sql", "supabase/migrations/0007_profiles.sql"]);
+    expect(cs.map((c) => c.target)).toEqual(["notifications", "profiles"]); // one check per table, order-preserving
+    expect(cs.every((c) => c.property === "schema")).toBe(true);
+    expect(cs[0]!.assertion).toContain("notifications");
+    expect(cs[0]!.assertion).not.toContain("profiles"); // each check names only its own target
+    expect(cs[1]!.assertion).toContain("profiles");
   });
 
   test("composes on a real classifier row (verifyRow → planChecks over its backendProperties)", () => {
@@ -62,8 +68,8 @@ describe("planChecks (verify sweep V2 — properties → concrete checks)", () =
       paths, 42,
     );
     const c = byProp(planChecks(r.backendProperties, paths));
-    expect(c.rls!.targets).toEqual(["profiles"]);
+    expect(c.rls!.target).toBe("profiles");
     expect(c.schema!.safetyTier).toBe("read-only");
-    expect(c["data-integrity"]!.mechanism).toBe("session"); // the upsert the classifier flagged
+    expect(c["data-integrity"]!.mechanism).toBe("db-read"); // the upsert the classifier flagged → structural constraint check
   });
 });

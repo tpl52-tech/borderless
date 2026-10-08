@@ -7,6 +7,7 @@
  */
 
 import { consolePayload } from "../shared/console-rows.ts";
+import type { VerifyRow } from "../shared/verify.ts";
 import type { Store } from "./store.ts";
 
 export interface WebServerDeps {
@@ -18,6 +19,10 @@ export interface WebServerDeps {
   askRun: (question: string, allowActions: boolean) => Promise<{ answer: string; configured: boolean }>;
   /** Pull the live Linear board into the store (no sweeps) — the Refresh button. */
   syncBoard: () => Promise<{ synced: number; configured: boolean }>;
+  /** PRD §13 V1: classify the Verifying tickets from their merged PRs. A live gh scan — on-demand, never polled. */
+  verifyScan: () => Promise<VerifyRow[]>;
+  /** PRD §13 V1: the human-QA tap-through for one Verifying ticket (subscription LLM). */
+  verifyScript: (ticketKey: string) => Promise<{ ticketKey: string; script: string }>;
   port: number;
 }
 
@@ -40,6 +45,15 @@ export function startWebServer(deps: WebServerDeps): WebServer {
       }
       if (pathname === "/api/sync" && req.method === "POST") {
         return Response.json(await deps.syncBoard()); // sync-only: pull Linear → store, no sweeps
+      }
+      if (pathname === "/api/verify" && req.method === "POST") {
+        return Response.json(await deps.verifyScan()); // on-demand live gh scan — never polled (the VERIFY tab's button)
+      }
+      if (pathname === "/api/verify/script" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { ticketKey?: unknown };
+        const ticketKey = typeof body.ticketKey === "string" ? body.ticketKey.trim() : "";
+        if (!ticketKey) return Response.json({ ticketKey: "", script: "" });
+        return Response.json(await deps.verifyScript(ticketKey));
       }
       if (pathname === "/api/ask" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { question?: unknown };

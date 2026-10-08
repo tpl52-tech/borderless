@@ -182,7 +182,7 @@ Not a wrapper — it runs on the orchestrator's runtime with live fleet state + 
   session) runs at $0. Even triage and Ask Borderless (§10) run as subscription sessions. The plan's rate
   limit is the only ambient ceiling and self-regulates — not a knob.
 
-## §13 Feature — Verify sweep (post-merge QA automation) · added v0.7 2026-10-08
+## §13 Feature — Verify sweep (post-merge QA automation) · added v0.7 2026-10-08 · revised 2026-10-08 (backend-only: no human-QA scripts)
 The third sweep (alongside §4 in-review and §5 rescue). Where §6 moves a merged ticket to **Verifying**
 and hands it to human QA, this sweep covers **what human QA cannot verify from the app UI** — the blind
 spot where a feature's screen looks right but the logic underneath is quietly broken.
@@ -197,11 +197,13 @@ fully screen-observable, reload included. The verify sweep targets the acceptanc
 - **Worker server-logic** — JWT verify, *server-side* pricing, webhook signature verification.
 - **Data integrity** — first-sign-in upsert doesn't duplicate; idempotency; photo actually lands in Storage.
 
-**Per Verifying ticket, it splits the work (complements QA, never replaces it):**
-1. **Visible half → a human tap-through script** for QA (Neha) — a step-by-step checklist generated from the
-   acceptance criteria + the merged diff. Needs no credentials (a subscription LLM session, $0).
-2. **Invisible half → auto-verified with evidence** → the §4 gate shape (acceptance-criteria-satisfied +
-   evidence, confirmed by a fresh independent reviewer) → `verified | needs_human`.
+**Per Verifying ticket, it auto-verifies the invisible half (complements QA, never replaces it).** The
+invisible acceptance criteria are checked against the backend **with evidence** → the §4 gate shape
+(acceptance-criteria-satisfied + evidence, confirmed by a fresh independent reviewer) → `verified | needs_human`.
+The screen-observable half stays **entirely** with human QA (Neha): the sweep writes **nothing** for human
+testers — no tap-through scripts, no checklists — it only reports which invisible properties it checked and the
+result. (The classifier still labels the visible/invisible split so the lead sees what the sweep does and
+doesn't cover; it just never generates tester-facing prose.)
 
 **Classifier** (pure): from a ticket's ACs + its merged PR's changed paths, label each aspect `ui` vs
 `backend` and the ticket `ui | backend | mixed`. Signals: paths (`supabase/migrations`, policies,
@@ -215,10 +217,13 @@ cleanup/rollback; anything destructive or ambiguous **escalates to Neha**, never
 ready, `verifyTarget` flips to the staging endpoints and the write checks run freely — **no code change**.
 
 **Phases (each a gated grade-A PR, pure/tested brain first):**
-- **V1** — classifier + human-QA-script generator + a Verifying console tab. **No credentials, no backend
-  access.** Immediately useful: QA gets a checklist, and the lead sees which merged tickets have properties
-  no one can check by hand.
-- **V2** — read-only verification agent (prod, a read key): RLS reads, schema/constraint checks, idempotent
-  endpoints, with evidence. Gated only on provisioning a read key. No writes to prod.
-- **V3** — write / trigger verification: lands cleanly once `verifyTarget` points at **staging**. Riskiest;
-  heaviest gate (the reviewer confirms the evidence AND that nothing touched prod). Blocked on staging.
+- **V1 (done)** — the pure classifier + `ao verify` + a Verifying console tab (the classified queue). **No
+  credentials, no backend access.** The lead sees which merged tickets carry properties no one can check by hand.
+- **V2** — the auto-verifier. The pure **check planner** (each invisible property → a concrete check: mechanism
+  + safety tier + resource targets; done) then the live runners over the provisioned access: the app's **public
+  anon key + throwaway user sessions** (RLS isolation, data-integrity, Storage, Worker-JWT) **plus a read-only
+  (SELECT-only) Postgres role** (schema / attached triggers). Each check emits a pass/fail + evidence;
+  `server-logic` and anything ambiguous escalate to a human. **Never `service_role`.**
+- **V3** — full write/trigger thoroughness (observe a trigger actually fire; exercise Worker logic) once
+  `verifyTarget` points at **staging**. Riskiest; heaviest gate (the reviewer confirms the evidence AND that
+  nothing touched prod). Blocked on staging.

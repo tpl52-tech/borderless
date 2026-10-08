@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { classifyVerification, verifyRow, verifyScriptPrompt } from "../src/shared/verify.ts";
+import { classifyVerification, verifyRow } from "../src/shared/verify.ts";
 
 describe("classifyVerification (verify sweep, PRD §13)", () => {
   test("COR-35 Favorites — fully screen-observable (persistence included), no backend check", () => {
@@ -85,16 +85,4 @@ describe("classifyVerification (verify sweep, PRD §13)", () => {
     expect(verifyRow({ identifier: "COR-1", title: "x", description: null }, [], null).prNumber).toBeNull();
   });
 
-  test("verifyScriptPrompt focuses the LLM on the UI half and names the auto-verified props to skip", () => {
-    const p = verifyScriptPrompt(
-      { identifier: "COR-35", title: "Favorites", description: "tap a heart; it persists across reload" },
-      { verifiability: "mixed", backendProperties: ["rls", "schema"], hasUi: true },
-    );
-    expect(p).toContain("COR-35");
-    expect(p).toContain("Expo Go");
-    expect(p).toContain("do NOT write steps for them: rls, schema");
-    expect(p).toContain("tap a heart"); // the acceptance criteria are included
-    expect(verifyScriptPrompt({ identifier: "COR-1", title: "x", description: null }, { verifiability: "ui", backendProperties: [], hasUi: true }))
-      .toContain("Everything here is screen-observable");
-  });
 });

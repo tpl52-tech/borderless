@@ -93,6 +93,18 @@ const PROBES: Partial<Record<BackendProperty, (target: string) => CatalogProbe>>
   }),
 };
 
+/** The public-schema table names (catalog-only) — the live runner uses these to target a check from the ticket
+ *  text when a merged PR yielded no path. The query lives here (not in the thin daemon client) so all the
+ *  catalog SQL stays in one place. */
+export const PUBLIC_TABLES_QUERY = `select c.relname as name
+  from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  where c.relkind in ('r','p') and n.nspname = 'public' order by 1`;
+
+/** Parse the PUBLIC_TABLES_QUERY rows into table names. Pure. */
+export function publicTableNames(rows: CatalogRow[]): string[] {
+  return rows.map((r) => String(r.name));
+}
+
 /**
  * The catalog probe for a `db-read` check, or null when it isn't catalog-derivable — a non-db-read mechanism
  * (session/http → behavioral) or no target table the migration file yielded. The runner escalates a null.

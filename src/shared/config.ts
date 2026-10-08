@@ -154,6 +154,9 @@ export interface OperatorConfigLite {
   webPort?: number;
   /** Topbar label on the web console (e.g. "ReUse · Fall 2026"); cosmetic, defaults to "Borderless". */
   projectLabel?: string;
+  /** Postgres connection string for the verify sweep's structural checks (PRD §13 V2b) — a SELECT-only /
+   *  catalog-only role (secret; 0600 operator config only). Absent → `ao verify run` is a no-op. */
+  verifyDbUrl?: string;
 }
 
 /** Default Ask Borderless model (overridable via `openRouterModel`). */
@@ -202,6 +205,7 @@ export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
     openRouterModel: typeof raw.openRouterModel === "string" && raw.openRouterModel.trim() ? raw.openRouterModel.trim() : undefined,
     webPort: Number.isInteger(raw.webPort) && raw.webPort >= 1 && raw.webPort <= 65535 ? raw.webPort : undefined,
     projectLabel: typeof raw.projectLabel === "string" && raw.projectLabel.trim() ? raw.projectLabel.trim() : undefined,
+    verifyDbUrl: typeof raw.verifyDbUrl === "string" && raw.verifyDbUrl.trim() ? raw.verifyDbUrl.trim() : undefined,
   };
 }
 

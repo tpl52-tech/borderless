@@ -25,11 +25,13 @@
  *   ao web                                     open the browser lead console (the mockup design, live data)
  *   ao sync                                    pull the live Linear board into the store (no sweeps)
  *   ao verify                                  classify the Verifying tickets (ui / backend / mixed)
+ *   ao verify run [TICKET]                     run the structural checks over the DB → verdict + evidence
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
 import type { DelegateResult } from "../shared/lead-desk.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
+import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 
 const SUBCOMMANDS = [
   "setup", "daemon", "autonomy", "monitor", "history", "worktree", "pr", "issue", "awake",
@@ -160,6 +162,22 @@ export async function main(argv: string[]): Promise<void> {
   // `ao verify` — classify the Verifying tickets (PRD §13): what human QA can see on screen vs the invisible
   // backend properties (RLS/trigger/schema/server-logic/data-integrity/storage) the verify sweep checks.
   if (sub === "verify") {
+    // `ao verify run [TICKET]` — execute the structural checks over the read-only DB role → a verdict per
+    // ticket with evidence (behavioral checks escalate). Needs repo + branchOwner + verifyDbUrl configured.
+    if (rest[0] === "run") {
+      const ticketKey = rest[1];
+      await withDaemon("verify", async (client) => {
+        const { rows, configured } = await client.request<VerifyRunResult>("verify.run", ticketKey ? { ticketKey } : {});
+        if (!configured) { console.log("verify run: set `repo` + `branchOwner` + `verifyDbUrl` in ~/.borderless/config.json"); return; }
+        if (rows.length === 0) { console.log(ticketKey ? `verify run: no ticket ${ticketKey} in the store — run \`ao sync\`?` : "verify run: nothing in Verifying"); return; }
+        for (const r of rows) {
+          const mark = r.verdict === "verified" ? "✓" : r.verdict === "ui" ? "·" : "⚠";
+          console.log(`${mark} ${r.ticketKey}  [${r.verdict}]  ${r.title}`);
+          for (const c of r.results) console.log(`    ${c.status.padEnd(12)} ${c.property}${c.target ? ` (${c.target})` : ""} — ${c.evidence}`);
+        }
+      });
+      return;
+    }
     await withDaemon("verify", async (client) => {
       const { rows, configured } = await client.request<VerifyScanResult>("verify.scan");
       if (!configured) { console.log("verify: set `repo` + `branchOwner` in ~/.borderless/config.json"); return; }

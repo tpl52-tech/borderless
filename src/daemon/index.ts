@@ -26,6 +26,8 @@ import { createAlertDispatcher, shellNarrator, type AlertDispatcher } from "./al
 import { startUsageLedger, type UsageLedger } from "./monitors/usage.ts";
 import { reapWorktrees } from "./worktree.ts";
 import { verifyScan, liveMergedPrFor } from "./verify-scan.ts";
+import { runVerify, verifyTicket } from "./verify-run.ts";
+import { openCatalogDb } from "./verify-db.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
@@ -172,9 +174,29 @@ export function startDaemon(home = stateHome()): Daemon {
   // Verify scan (PRD §13 V1) — read-only, so it needs only a repo + branchOwner (no localCwd / supervisor):
   // classify the Verifying tickets from their merged PRs. No repo → an empty scan.
   let runVerifyScan: UdsServerDeps["verifyScan"] = async () => ({ rows: [], configured: false });
+  // V2b runner: runs the structural checks over the read-only DB role. Needs a repo (for the merged-PR lookup)
+  // AND config.verifyDbUrl (the catalog role); absent either → a no-op. A DB connection is opened per run.
+  let runVerifyRun: UdsServerDeps["verifyRun"] = async () => ({ rows: [], configured: false });
   if (config.repo && config.branchOwner) {
     const mergedPrFor = liveMergedPrFor(config.repo, config.branchOwner);
     runVerifyScan = async () => ({ rows: await verifyScan(store, { mergedPrFor }), configured: true });
+    const verifyDbUrl = config.verifyDbUrl;
+    if (verifyDbUrl) {
+      runVerifyRun = async (ticketKey) => {
+        const db = openCatalogDb(verifyDbUrl);
+        try {
+          const knownTables = await db.tables().catch(() => [] as string[]); // best-effort text-targeting
+          const deps = { mergedPrFor, catalogRun: db.run, knownTables };
+          if (ticketKey) {
+            const issue = store.getLinearIssueByIdentifier(ticketKey);
+            return { rows: issue ? [await verifyTicket(issue, deps)] : [], configured: true };
+          }
+          return { rows: await runVerify(store, deps), configured: true };
+        } finally {
+          await db.close();
+        }
+      };
+    }
   }
   const sweepProfile = config.profiles.find((pr) => pr.repo === config.repo && pr.localCwd);
   if (config.repo && config.branchOwner && sweepProfile?.localCwd) {
@@ -283,7 +305,7 @@ export function startDaemon(home = stateHome()): Daemon {
     return { synced, created, started };
   };
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan });
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun });
 
   // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only. It is
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.

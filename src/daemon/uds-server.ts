@@ -21,7 +21,7 @@ import { deskOverview, type DelegateRequest, type DelegateResult } from "../shar
 import { ROSTER } from "../shared/roster.ts";
 import { sweepRow, rosterRow, boardRow, assignRow } from "../shared/console-rows.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
-import type { VerifyRunRow } from "./verify-run.ts";
+import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { WorkItemMonitor } from "./monitors/work-item.ts";
@@ -58,7 +58,7 @@ export interface UdsServerDeps {
   /** PRD §13: classify the Verifying tickets (ui / backend / mixed) from their merged PRs. Read-only. */
   verifyScan: () => Promise<VerifyScanResult>;
   /** PRD §13 V2b: run the structural checks over the read-only DB role → a verdict per Verifying ticket. */
-  verifyRun: (ticketKey?: string) => Promise<{ rows: VerifyRunRow[]; configured: boolean }>;
+  verifyRun: (ticketKey?: string) => Promise<VerifyRunResult>;
 }
 
 export interface UdsServer {

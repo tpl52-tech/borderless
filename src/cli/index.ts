@@ -31,7 +31,7 @@
 import type { DaemonClient } from "../client/daemon-client.ts";
 import type { DelegateResult } from "../shared/lead-desk.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
-import type { VerifyRunRow } from "../daemon/verify-run.ts";
+import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 
 const SUBCOMMANDS = [
   "setup", "daemon", "autonomy", "monitor", "history", "worktree", "pr", "issue", "awake",
@@ -167,9 +167,9 @@ export async function main(argv: string[]): Promise<void> {
     if (rest[0] === "run") {
       const ticketKey = rest[1];
       await withDaemon("verify", async (client) => {
-        const { rows, configured } = await client.request<{ rows: VerifyRunRow[]; configured: boolean }>("verify.run", ticketKey ? { ticketKey } : {});
+        const { rows, configured } = await client.request<VerifyRunResult>("verify.run", ticketKey ? { ticketKey } : {});
         if (!configured) { console.log("verify run: set `repo` + `branchOwner` + `verifyDbUrl` in ~/.borderless/config.json"); return; }
-        if (rows.length === 0) { console.log(ticketKey ? `verify run: no ticket ${ticketKey} in Verifying (or not synced)` : "verify run: nothing in Verifying"); return; }
+        if (rows.length === 0) { console.log(ticketKey ? `verify run: no ticket ${ticketKey} in the store — run \`ao sync\`?` : "verify run: nothing in Verifying"); return; }
         for (const r of rows) {
           const mark = r.verdict === "verified" ? "✓" : r.verdict === "ui" ? "·" : "⚠";
           console.log(`${mark} ${r.ticketKey}  [${r.verdict}]  ${r.title}`);

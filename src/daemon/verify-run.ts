@@ -7,10 +7,10 @@
 
 import type { Store } from "./store.ts";
 import type { LinearIssue } from "../shared/types.ts";
-import { verifyRow, issueText, type VerifyRow } from "../shared/verify.ts";
+import { verifyRow, issueText } from "../shared/verify.ts";
 import { planChecks, tableFromText } from "../shared/verify-plan.ts";
 import { catalogProbe, type CatalogProbe, type CatalogRow } from "../shared/verify-catalog.ts";
-import { rollupVerdict, type CheckResult, type TicketVerdict } from "../shared/verify-verdict.ts";
+import { rollupVerdict, type CheckResult, type VerifyRunRow } from "../shared/verify-verdict.ts";
 
 export interface VerifyRunDeps {
   /** The merged PR + its changed paths for a Verifying ticket (live gh); null when none is found. */
@@ -23,23 +23,16 @@ export interface VerifyRunDeps {
   stateName?: string;
 }
 
-/** A classified Verifying ticket plus its executed verdict — what `ao verify run` / the console render. */
-export interface VerifyRunRow extends VerifyRow, TicketVerdict {}
-
 /** Run every structural check for one Verifying ticket and roll up its verdict. */
 export async function verifyTicket(issue: LinearIssue, deps: VerifyRunDeps): Promise<VerifyRunRow> {
   const pr = await deps.mergedPrFor(issue);
   const paths = pr?.paths ?? [];
   const row = verifyRow(issue, paths, pr?.prNumber ?? null);
+  // When the merged PR had no path, let a catalog check target a table named in the ticket text (∩ real tables).
+  const fallbackTarget = deps.knownTables?.length ? tableFromText(issueText(issue), deps.knownTables) : null;
 
   const results: CheckResult[] = [];
-  for (const planned of planChecks(row.backendProperties, paths)) {
-    // When a catalog check got no target from the PR paths, try to bind one from the ticket text ∩ real tables.
-    let check = planned;
-    if (check.mechanism === "db-read" && !check.target && deps.knownTables?.length) {
-      const t = tableFromText(issueText(issue), deps.knownTables);
-      if (t) check = { ...check, target: t, assertion: check.assertion.replace("the affected resource", `${t} (table inferred from the ticket text)`) };
-    }
+  for (const check of planChecks(row.backendProperties, paths, fallbackTarget)) {
     const base = { property: check.property, target: check.target, mechanism: check.mechanism, assertion: check.assertion };
     const probe = catalogProbe(check);
     if (!probe) { // behavioral (session/http) or no target → a human / the staging env, not this run

@@ -26,7 +26,7 @@ import { createAlertDispatcher, shellNarrator, type AlertDispatcher } from "./al
 import { startUsageLedger, type UsageLedger } from "./monitors/usage.ts";
 import { reapWorktrees } from "./worktree.ts";
 import { verifyScan, liveMergedPrFor } from "./verify-scan.ts";
-import { runVerify, verifyTicket, type VerifyRunRow } from "./verify-run.ts";
+import { runVerify, verifyTicket } from "./verify-run.ts";
 import { openCatalogDb } from "./verify-db.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
@@ -176,7 +176,7 @@ export function startDaemon(home = stateHome()): Daemon {
   let runVerifyScan: UdsServerDeps["verifyScan"] = async () => ({ rows: [], configured: false });
   // V2b runner: runs the structural checks over the read-only DB role. Needs a repo (for the merged-PR lookup)
   // AND config.verifyDbUrl (the catalog role); absent either → a no-op. A DB connection is opened per run.
-  let runVerifyRun: UdsServerDeps["verifyRun"] = async () => ({ rows: [] as VerifyRunRow[], configured: false });
+  let runVerifyRun: UdsServerDeps["verifyRun"] = async () => ({ rows: [], configured: false });
   if (config.repo && config.branchOwner) {
     const mergedPrFor = liveMergedPrFor(config.repo, config.branchOwner);
     runVerifyScan = async () => ({ rows: await verifyScan(store, { mergedPrFor }), configured: true });
@@ -186,7 +186,7 @@ export function startDaemon(home = stateHome()): Daemon {
         const db = openCatalogDb(verifyDbUrl);
         try {
           const knownTables = await db.tables().catch(() => [] as string[]); // best-effort text-targeting
-          const deps = { mergedPrFor, catalogRun: (p: Parameters<typeof db.run>[0]) => db.run(p), knownTables };
+          const deps = { mergedPrFor, catalogRun: db.run, knownTables };
           if (ticketKey) {
             const issue = store.getLinearIssueByIdentifier(ticketKey);
             return { rows: issue ? [await verifyTicket(issue, deps)] : [], configured: true };

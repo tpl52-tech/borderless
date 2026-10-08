@@ -6,7 +6,7 @@
  */
 
 import { SQL } from "bun";
-import type { CatalogProbe, CatalogRow } from "../shared/verify-catalog.ts";
+import { PUBLIC_TABLES_QUERY, publicTableNames, type CatalogProbe, type CatalogRow } from "../shared/verify-catalog.ts";
 
 export interface CatalogDb {
   /** Run a probe's parameterized SQL ($1…) and return its rows. */
@@ -25,10 +25,7 @@ export function openCatalogDb(url: string): CatalogDb {
       return (await db.unsafe(probe.sql, probe.params)) as CatalogRow[]; // $1-bound params; never string-spliced
     },
     async tables() {
-      const rows = (await db`select c.relname as name from pg_catalog.pg_class c
-        join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-        where c.relkind in ('r','p') and n.nspname = 'public' order by 1`) as { name: string }[];
-      return rows.map((r) => r.name);
+      return publicTableNames((await db.unsafe(PUBLIC_TABLES_QUERY)) as CatalogRow[]);
     },
     async close() {
       try { await db.end(); } catch { /* already closed */ }

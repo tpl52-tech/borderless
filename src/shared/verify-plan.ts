@@ -103,14 +103,6 @@ function fillAssertion(template: string, target: string | null): string {
 }
 
 /**
- * Plan the auto-verification checks for the invisible properties the classifier found. One check per
- * (property, target) — each check names exactly the one resource it verifies — in the classifier's stable
- * property order; targets are derived from the merged PR's changed paths. Pure — the live runner (V2b/c)
- * executes each check over the provisioned session / db-read / http capabilities. Takes `backendProperties`
- * (not the whole VerifyRow): the row carries no other field this needs, and taking the properties + paths as
- * peer inputs keeps the derivation symmetric (both came from classifying the ticket).
- */
-/**
  * The first known DB table named in the ticket text (underscore/space tolerant), or null. Lets the live runner
  * target a catalog check when the merged PR's paths yielded no table — e.g. no PR was found (the team moves
  * tickets to Verifying pre-PR). Best-effort + grounded: only a name that is actually a table in the catalog
@@ -119,18 +111,40 @@ function fillAssertion(template: string, target: string | null): string {
 export function tableFromText(text: string, knownTables: readonly string[]): string | null {
   const hay = text.toLowerCase();
   for (const t of knownTables) {
-    if (new RegExp(`\\b${t.toLowerCase().replace(/_/g, "[ _]")}\\b`).test(hay)) return t;
+    // Escape regex metachars first (names cross a trust boundary — the catalog), THEN allow `_`↔space leniency.
+    const pat = t.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/_/g, "[ _]");
+    if (new RegExp(`\\b${pat}\\b`).test(hay)) return t;
   }
   return null;
 }
 
-export function planChecks(backendProperties: readonly BackendProperty[], changedPaths: readonly string[] = []): VerifyCheck[] {
+/**
+ * Plan the auto-verification checks for the invisible properties the classifier found. One check per
+ * (property, target) — each check names exactly the one resource it verifies — in the classifier's stable
+ * property order; targets are derived from the merged PR's changed paths. Pure — the live runner (V2b/c)
+ * executes each check over the provisioned session / db-read / http capabilities. Takes `backendProperties`
+ * (not the whole VerifyRow): the row carries no other field this needs, and taking the properties + paths as
+ * peer inputs keeps the derivation symmetric (both came from classifying the ticket).
+ *
+ * `fallbackTarget` is a table name the caller resolved from the ticket text (see {@link tableFromText}) for when
+ * the merged PR had no path: a db-read check with no path target falls back to it (noted as inferred), since the
+ * team often reaches Verifying before opening a PR. Non-db-read checks ignore it.
+ */
+export function planChecks(
+  backendProperties: readonly BackendProperty[],
+  changedPaths: readonly string[] = [],
+  fallbackTarget: string | null = null,
+): VerifyCheck[] {
   return backendProperties.flatMap((property) => {
     const spec = CHECK_SPECS[property];
-    const make = (target: string | null): VerifyCheck =>
-      ({ property, mechanism: spec.mechanism, safetyTier: spec.safetyTier, target, assertion: fillAssertion(spec.assertion, target) });
-    // one check per derived target (each names exactly what it verifies); no target ⇒ one check that escalates.
+    const make = (target: string | null, inferred = false): VerifyCheck => ({
+      property, mechanism: spec.mechanism, safetyTier: spec.safetyTier, target,
+      assertion: fillAssertion(spec.assertion, target) + (inferred ? " (table inferred from the ticket text)" : ""),
+    });
+    // one check per path-derived target (each names exactly what it verifies).
     const targets = targetsFor(spec.mechanism, changedPaths);
-    return targets.length ? targets.map(make) : [make(null)];
+    if (targets.length) return targets.map((t) => make(t));
+    // no path target: a catalog check may fall back to a table named in the ticket text; else a null-target escalate.
+    return spec.mechanism === "db-read" && fallbackTarget ? [make(fallbackTarget, true)] : [make(null)];
   });
 }

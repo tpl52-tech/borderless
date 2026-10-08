@@ -5,6 +5,7 @@
  */
 
 import type { VerifyCheck } from "./verify-plan.ts";
+import type { VerifyRow } from "./verify.ts";
 
 /** A check's outcome: pass/fail/inconclusive from a catalog probe, or escalated (no catalog proxy — behavioral). */
 export type CheckStatus = "pass" | "fail" | "inconclusive" | "escalated";
@@ -26,6 +27,15 @@ export interface TicketVerdict {
   verdict: Verdict;
   results: CheckResult[];
   summary: Record<CheckStatus, number>;
+}
+
+/** A classified Verifying ticket plus its executed verdict — the wire shape `ao verify run` / the console render. */
+export interface VerifyRunRow extends VerifyRow, TicketVerdict {}
+
+/** The verify-run result as the daemon surfaces it (mirrors VerifyScanResult): the rows + whether it's configured. */
+export interface VerifyRunResult {
+  rows: VerifyRunRow[];
+  configured: boolean;
 }
 
 /**

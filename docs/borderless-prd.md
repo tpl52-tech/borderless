@@ -1,6 +1,6 @@
 # Borderless — Lead Console (PRD)
 
-Product Requirements · Borderless · Draft v0.6 · `tpl52-tech/borderless` · 2026-10-07
+Product Requirements · Borderless · Draft v0.7 · `tpl52-tech/borderless` · 2026-10-08
 
 Two autonomous sweeps, live project boards, assisted assignment, a lead desk, and a
 context-loaded chat — the supervisory layer of the `ao` orchestrator.
@@ -181,3 +181,44 @@ Not a wrapper — it runs on the orchestrator's runtime with live fleet state + 
   concurrent sessions ⇒ every call (implement, fix, the independent review as a separate fresh
   session) runs at $0. Even triage and Ask Borderless (§10) run as subscription sessions. The plan's rate
   limit is the only ambient ceiling and self-regulates — not a knob.
+
+## §13 Feature — Verify sweep (post-merge QA automation) · added v0.7 2026-10-08
+The third sweep (alongside §4 in-review and §5 rescue). Where §6 moves a merged ticket to **Verifying**
+and hands it to human QA, this sweep covers **what human QA cannot verify from the app UI** — the blind
+spot where a feature's screen looks right but the logic underneath is quietly broken.
+
+**The line — "can you confirm it by looking at the screen?"** If yes, it stays with human QA: e.g. the
+Favorites ticket (tap a heart → it turns red → appears in the Favorites tab → survives an app reload) is
+fully screen-observable, reload included. The verify sweep targets the acceptance criteria that are
+**invisible on screen**:
+- **RLS isolation** — can user A read user B's rows? (sign-in-as-two-users / role probes)
+- **Triggers / side-effects** — a notification row inserted on approve/sold; the screen may show nothing.
+- **Migrations / schema** — columns, constraints, indexes. Not on screen at all.
+- **Worker server-logic** — JWT verify, *server-side* pricing, webhook signature verification.
+- **Data integrity** — first-sign-in upsert doesn't duplicate; idempotency; photo actually lands in Storage.
+
+**Per Verifying ticket, it splits the work (complements QA, never replaces it):**
+1. **Visible half → a human tap-through script** for QA (Neha) — a step-by-step checklist generated from the
+   acceptance criteria + the merged diff. Needs no credentials (a subscription LLM session, $0).
+2. **Invisible half → auto-verified with evidence** → the §4 gate shape (acceptance-criteria-satisfied +
+   evidence, confirmed by a fresh independent reviewer) → `verified | needs_human`.
+
+**Classifier** (pure): from a ticket's ACs + its merged PR's changed paths, label each aspect `ui` vs
+`backend` and the ticket `ui | backend | mixed`. Signals: paths (`supabase/migrations`, policies,
+`functions/` Workers, `lib/api`) + AC keywords (RLS/policy/trigger/deny/server-side/webhook/signature/JWT/
+idempotent/duplicate/migration/schema/Storage → invisible; tap/screen/tab/shows/grid/renders → visible).
+
+**Verification target is config (`verifyTarget`) — prod now, staging later.** There is no staging env yet
+(it's under development), so the invisible checks run against **prod** under a strict safety protocol:
+read-only first (RLS reads, schema inspection, idempotent GETs); any write uses a throwaway test user with
+cleanup/rollback; anything destructive or ambiguous **escalates to Neha**, never guesses. The day staging is
+ready, `verifyTarget` flips to the staging endpoints and the write checks run freely — **no code change**.
+
+**Phases (each a gated grade-A PR, pure/tested brain first):**
+- **V1** — classifier + human-QA-script generator + a Verifying console tab. **No credentials, no backend
+  access.** Immediately useful: QA gets a checklist, and the lead sees which merged tickets have properties
+  no one can check by hand.
+- **V2** — read-only verification agent (prod, a read key): RLS reads, schema/constraint checks, idempotent
+  endpoints, with evidence. Gated only on provisioning a read key. No writes to prod.
+- **V3** — write / trigger verification: lands cleanly once `verifyTarget` points at **staging**. Riskiest;
+  heaviest gate (the reviewer confirms the evidence AND that nothing touched prod). Blocked on staging.

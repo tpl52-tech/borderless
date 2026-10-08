@@ -194,6 +194,7 @@
     <div class="status">
       <span class="badge ok" id="daemon-badge">DAEMON: …</span>
       <span class="badge pink" id="needyou-badge" hidden>0 NEED YOU</span>
+      <button class="btn sm" id="refresh-btn" title="Pull the live Linear board (no sweeps)">&#8635; Refresh</button>
       <span class="select" id="project-badge">ReUse &middot; Fall 2026 &#9662;</span>
     </div>
   </header>
@@ -463,4 +464,21 @@
   }
   $("chat-send").addEventListener("click", ask);
   field.addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
+
+  // ---- Refresh: pull the live Linear board, then re-render ----
+  const refreshBtn = $("refresh-btn");
+  refreshBtn.addEventListener("click", async () => {
+    if (refreshBtn.disabled) return;
+    refreshBtn.disabled = true;
+    const orig = refreshBtn.innerHTML;
+    refreshBtn.textContent = "⟳ syncing…";
+    try {
+      const res = await fetch("/api/sync", { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      const j = await res.json();
+      await load();
+      refreshBtn.textContent = j.configured === false ? "no Linear key" : `✓ ${j.synced} synced`;
+    } catch { refreshBtn.textContent = "sync failed"; }
+    setTimeout(() => { refreshBtn.innerHTML = orig; refreshBtn.disabled = false; }, 2500);
+  });
 </script>

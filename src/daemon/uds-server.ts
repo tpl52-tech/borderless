@@ -20,7 +20,7 @@ import { activeLoads, suggestAssignments } from "../shared/assign.ts";
 import { deskOverview, type DelegateRequest, type DelegateResult } from "../shared/lead-desk.ts";
 import { ROSTER } from "../shared/roster.ts";
 import { sweepRow, rosterRow, boardRow, assignRow } from "../shared/console-rows.ts";
-import type { VerifyRow } from "../shared/verify.ts";
+import type { VerifyScanResult } from "../shared/verify.ts";
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { WorkItemMonitor } from "./monitors/work-item.ts";
@@ -55,7 +55,7 @@ export interface UdsServerDeps {
   /** Pull the live Linear board into the store (no sweeps) — the `ao sync` / Refresh-button path. */
   syncBoard: () => Promise<{ synced: number; configured: boolean }>;
   /** PRD §13 V1: classify the Verifying tickets (ui / backend / mixed) from their merged PRs. Read-only. */
-  verifyScan: () => Promise<VerifyRow[]>;
+  verifyScan: () => Promise<VerifyScanResult>;
   /** PRD §13 V1: generate the human-QA tap-through script for one Verifying ticket (subscription LLM). */
   verifyScript: (ticketKey: string) => Promise<{ ticketKey: string; script: string }>;
 }

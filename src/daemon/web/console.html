@@ -533,11 +533,14 @@
     try {
       const res = await fetch("/api/verify", { method: "POST" });
       if (!res.ok) throw new Error(String(res.status));
-      const rows = await res.json();
-      vMeta.textContent = `${rows.length} IN VERIFYING`;
+      const data = await res.json();
+      const rows = data.rows || [];
+      vMeta.textContent = data.configured === false ? "NO REPO" : `${rows.length} IN VERIFYING`;
       vRows.innerHTML = rows.length
         ? rows.map(verifyRowHtml).join("")
-        : `<tr><td colspan="5" class="s-dim">nothing in Verifying (or no repo configured)</td></tr>`;
+        : data.configured === false
+          ? `<tr><td colspan="5" class="s-dim">no repo configured &mdash; set repo + branchOwner in ~/.borderless/config.json</td></tr>`
+          : `<tr><td colspan="5" class="s-dim">nothing in Verifying</td></tr>`;
     } catch { vRows.innerHTML = `<tr><td colspan="5" class="s-pink">scan failed &mdash; is the daemon configured with a repo?</td></tr>`; }
     finally { vScan.innerHTML = orig; vScan.disabled = false; }
   });

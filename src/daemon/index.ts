@@ -172,12 +172,12 @@ export function startDaemon(home = stateHome()): Daemon {
   };
   // Verify scan (PRD §13 V1) — read-only, so it needs only a repo + branchOwner (no localCwd / supervisor):
   // classify the Verifying tickets from their merged PRs. No repo → an empty scan.
-  let runVerifyScan: UdsServerDeps["verifyScan"] = async () => [];
+  let runVerifyScan: UdsServerDeps["verifyScan"] = async () => ({ rows: [], configured: false });
   let runVerifyScript: UdsServerDeps["verifyScript"] = async (ticketKey) => ({ ticketKey, script: "verify: no repo configured" });
   if (config.repo && config.branchOwner) {
     const branchOwner = config.branchOwner;
     const mergedPrFor = liveMergedPrFor(config.repo, branchOwner);
-    runVerifyScan = () => verifyScan(store, { mergedPrFor });
+    runVerifyScan = async () => ({ rows: await verifyScan(store, { mergedPrFor }), configured: true });
     runVerifyScript = async (ticketKey) => {
       const issue = store.getLinearIssueByIdentifier(ticketKey);
       if (!issue) return { ticketKey, script: `verify: no ticket ${ticketKey} in the store — run \`ao sync\` first?` };

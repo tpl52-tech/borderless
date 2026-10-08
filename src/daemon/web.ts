@@ -16,6 +16,8 @@ export interface WebServerDeps {
   projectLabel: string;
   /** Advisory Ask Borderless over the chosen backend (the browser never gets the action tools). */
   askRun: (question: string, allowActions: boolean) => Promise<{ answer: string; configured: boolean }>;
+  /** Pull the live Linear board into the store (no sweeps) — the Refresh button. */
+  syncBoard: () => Promise<{ synced: number; configured: boolean }>;
   port: number;
 }
 
@@ -35,6 +37,9 @@ export function startWebServer(deps: WebServerDeps): WebServer {
       if (pathname === "/api/console") {
         const data = consolePayload(deps.store.listLinearIssues(), deps.store.listSweepJobs(), deps.leadOpsProject);
         return Response.json({ ...data, project: deps.projectLabel });
+      }
+      if (pathname === "/api/sync" && req.method === "POST") {
+        return Response.json(await deps.syncBoard()); // sync-only: pull Linear → store, no sweeps
       }
       if (pathname === "/api/ask" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { question?: unknown };

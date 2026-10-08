@@ -23,6 +23,7 @@
  *   ao ask "<question>" [--yes]                Ask Borderless over live fleet state (PRD §10; --yes acts)
  *   ao console                                 the lead console TUI (SWEEPS/BOARDS/ASSIGN/LEAD DESK/ROSTER)
  *   ao web                                     open the browser lead console (the mockup design, live data)
+ *   ao sync                                    pull the live Linear board into the store (no sweeps)
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
@@ -141,6 +142,15 @@ export async function main(argv: string[]): Promise<void> {
       console.log(r.answer || "(no answer)");
       const cost = r.costMicros ? ` · $${(r.costMicros / 1e6).toFixed(4)}` : "";
       console.error(`(${r.steps} step${r.steps === 1 ? "" : "s"}${cost})`); // stderr: keeps the answer clean on stdout
+    });
+    return;
+  }
+
+  // `ao sync` — pull the live Linear board into the store (no sweeps). The terminal twin of the Refresh button.
+  if (sub === "sync") {
+    await withDaemon("sync", async (client) => {
+      const r = await client.request<{ synced: number; configured: boolean }>("sync.run");
+      console.log(r.configured ? `sync: ${r.synced} issue(s) pulled from Linear` : "sync: set `linearApiKey` + `linearTeamKeys` in ~/.borderless/config.json");
     });
     return;
   }

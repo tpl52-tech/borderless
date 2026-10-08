@@ -51,6 +51,8 @@ export interface UdsServerDeps {
   leadDelegate: (req: DelegateRequest) => Promise<DelegateResult>;
   /** PRD §10: Ask Borderless — answer over live fleet state; allowActions confirms the (consequential) tools. */
   askRun: (question: string, allowActions: boolean) => Promise<{ answer: string; steps: number; costMicros: number; configured: boolean }>;
+  /** Pull the live Linear board into the store (no sweeps) — the `ao sync` / Refresh-button path. */
+  syncBoard: () => Promise<{ synced: number; configured: boolean }>;
 }
 
 export interface UdsServer {
@@ -241,6 +243,8 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
         return deps.leadDelegate({ who: String(p.who ?? ""), title: String(p.title ?? ""), notes: typeof p.notes === "string" ? p.notes : undefined });
       case "ask.run":
         return deps.askRun(String(p.question ?? ""), p.allowActions === true);
+      case "sync.run":
+        return deps.syncBoard();
 
       // --- console reads (PRD §11): the SWEEPS + ROSTER screens share the row shapes with the web console --
       case "sweep.list":

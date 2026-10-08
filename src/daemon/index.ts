@@ -259,24 +259,29 @@ export function startDaemon(home = stateHome()): Daemon {
     return { answer: answer + note, steps: result.steps, costMicros: result.costMicros, configured: true };
   };
 
-  const scanInReview = async (stateName = "In Review"): Promise<{ synced: number; created: number; started: number }> => {
-    let synced = 0;
+  // Sync-only: pull the live Linear board into the store (no sweeps). Shared by the refresh button / `ao sync`
+  // and by scanInReview, so there is one sync path. configured=false when no key/teams are set.
+  const syncBoard = async (): Promise<{ synced: number; configured: boolean }> => {
     const teamKeys = config.linearTeamKeys ?? [];
-    if (config.linearApiKey && teamKeys.length > 0) {
-      ({ synced } = await syncLinearIssues(store, httpLinearClient(config.linearApiKey), teamKeys));
-    }
+    if (!config.linearApiKey || teamKeys.length === 0) return { synced: 0, configured: false };
+    const { synced } = await syncLinearIssues(store, httpLinearClient(config.linearApiKey), teamKeys);
+    return { synced, configured: true };
+  };
+
+  const scanInReview = async (stateName = "In Review"): Promise<{ synced: number; created: number; started: number }> => {
+    const { synced } = await syncBoard();
     const created = store.enqueueInReviewSweeps(stateName, config.leadOpsProject).length;
     const started = sweepSupervisor?.pickup().length ?? 0; // kick the engine on the newly-queued jobs
     return { synced, created, started };
   };
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun });
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard });
 
   // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only. It is
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, projectLabel: config.projectLabel ?? "Borderless", askRun, port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

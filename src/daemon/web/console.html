@@ -157,6 +157,11 @@
   .load li:last-child { border-bottom: none; }
   .load .cnt { color: var(--dim); } .load .cnt.free { color: var(--green); }
 
+  /* verify — the QA tap-through output */
+  .tbl tr[data-ticket] { cursor: pointer; }
+  .tbl tr[data-ticket]:hover td { background: color-mix(in srgb, var(--pink) 7%, transparent); }
+  .script-out { font-size: .8rem; line-height: 1.62; color: var(--ink); white-space: pre-wrap; max-width: 72ch; }
+
   :focus-visible { outline: 1px solid var(--pink); outline-offset: 2px; }
 
   /* ask ao — plain chat (deliberately NOT the terminal panels; PRD §10) */
@@ -206,6 +211,7 @@
       <button class="nav" data-view="assign">ASSIGN</button>
       <button class="nav" data-view="leaddesk">LEAD_DESK</button>
       <button class="nav" data-view="roster">ROSTER</button>
+      <button class="nav" data-view="verify">VERIFY</button>
       <button class="nav" data-view="chat">ASK</button>
       <div class="side-foot">LEAD: tpl52<br><span class="online">&#9679; ONLINE<span class="cursor">&#9612;</span></span></div>
     </nav>
@@ -315,6 +321,31 @@
               <tbody id="r-members"></tbody>
             </table>
           </div></div>
+        </div>
+      </section>
+
+      <!-- ============ VERIFY (PRD §13 V1 — on-demand live scan, not the 2s poll) ============ -->
+      <section class="view" id="verify" hidden>
+        <div class="vhead"><h1>VERIFY</h1><p>The post-merge blind spot: the invisible properties behind each <b style="color:var(--green)">Verifying</b> ticket &mdash; RLS isolation, DB triggers, schema, Worker logic, data integrity, Storage &mdash; that QA can&rsquo;t confirm from the app screen. Run a scan to classify the queue; click a ticket to generate a human tap-through for its screen-observable half.</p></div>
+        <div class="cols c-2a">
+          <div class="col">
+            <div class="panel">
+              <div class="ph"><span>VERIFYING_QUEUE <span class="ph-meta" id="v-meta">&mdash;</span></span>
+                <button class="btn xs o-green" id="v-scan" title="Classify the Verifying tickets from their merged PRs (live)">&#10227; Run scan</button></div>
+              <div class="pb nopad"><div class="table-wrap">
+                <table class="tbl">
+                  <thead><tr><th>TICKET</th><th>CHECK</th><th>NEEDS</th><th>PR</th><th>TITLE</th></tr></thead>
+                  <tbody id="v-rows"><tr><td colspan="5" class="s-dim">press Run scan to classify the Verifying tickets</td></tr></tbody>
+                </table>
+              </div></div>
+            </div>
+          </div>
+          <div class="col">
+            <div class="panel p">
+              <div class="ph pink">QA_SCRIPT <span class="ph-meta" id="v-script-meta"></span></div>
+              <div class="pb"><div class="script-out" id="v-script">Click a ticket&rsquo;s row to generate a human tap-through for its screen-observable behavior &mdash; the backend properties are auto-verified separately.</div></div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -480,5 +511,55 @@
       refreshBtn.textContent = j.configured === false ? "no Linear key" : `✓ ${j.synced} synced`;
     } catch { refreshBtn.textContent = "sync failed"; }
     setTimeout(() => { refreshBtn.innerHTML = orig; refreshBtn.disabled = false; }, 2500);
+  });
+
+  // ---- VERIFY: an on-demand live scan (gh), isolated from the /api/console poll ----
+  const vScan = $("v-scan"), vRows = $("v-rows"), vMeta = $("v-meta"), vScript = $("v-script"), vScriptMeta = $("v-script-meta");
+  const CHECK_CLASS = { ui: "s-green", backend: "s-pink", mixed: "s-amber" };
+  let vScripting = false;
+
+  const verifyRowHtml = (r) => {
+    const needs = (r.backendProperties || []).length ? r.backendProperties.join(", ") : "—";
+    const pr = r.prNumber != null ? "#" + esc(r.prNumber) : "—";
+    return `<tr data-ticket="${esc(r.ticketKey)}" title="generate the QA tap-through"><td>${esc(r.ticketKey)}</td><td class="${CHECK_CLASS[r.verifiability] || "s-ink"}">${esc(r.verifiability)}</td><td class="s-dim">${esc(needs)}</td><td class="s-dim">${pr}</td><td>${esc(r.title)}</td></tr>`;
+  };
+
+  vScan.addEventListener("click", async () => {
+    if (vScan.disabled) return;
+    vScan.disabled = true;
+    const orig = vScan.innerHTML;
+    vScan.textContent = "⟳ scanning…";
+    vRows.innerHTML = `<tr><td colspan="5" class="s-dim">scanning merged PRs…</td></tr>`;
+    try {
+      const res = await fetch("/api/verify", { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      const rows = data.rows || [];
+      vMeta.textContent = data.configured === false ? "NO REPO" : `${rows.length} IN VERIFYING`;
+      vRows.innerHTML = rows.length
+        ? rows.map(verifyRowHtml).join("")
+        : data.configured === false
+          ? `<tr><td colspan="5" class="s-dim">no repo configured &mdash; set repo + branchOwner in ~/.borderless/config.json</td></tr>`
+          : `<tr><td colspan="5" class="s-dim">nothing in Verifying</td></tr>`;
+    } catch { vRows.innerHTML = `<tr><td colspan="5" class="s-pink">scan failed &mdash; is the daemon configured with a repo?</td></tr>`; }
+    finally { vScan.innerHTML = orig; vScan.disabled = false; }
+  });
+
+  vRows.addEventListener("click", async (e) => {
+    const tr = e.target.closest("tr[data-ticket]");
+    if (!tr || vScripting) return;
+    const ticketKey = tr.dataset.ticket;
+    vScripting = true;
+    vRows.querySelectorAll("tr.sel").forEach((x) => x.classList.remove("sel"));
+    tr.classList.add("sel");
+    vScriptMeta.textContent = ticketKey;
+    vScript.textContent = "… generating the tap-through";
+    try {
+      const res = await fetch("/api/verify/script", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ticketKey }) });
+      if (!res.ok) throw new Error(String(res.status));
+      const j = await res.json();
+      vScript.textContent = j.script || "(no script generated)";
+    } catch (err) { vScript.textContent = "error: " + err; }
+    finally { vScripting = false; }
   });
 </script>

@@ -78,6 +78,16 @@ export interface VerifyRow extends VerifyClassification {
 }
 
 /**
+ * The verify scan as the daemon surfaces it (not the pure scan): the classified rows plus whether a repo is
+ * configured. `configured: false` with empty `rows` means "no repo" — distinct from "nothing in Verifying" —
+ * so the consoles/CLI never conflate the two (mirrors how syncBoard carries its own `configured`).
+ */
+export interface VerifyScanResult {
+  rows: VerifyRow[];
+  configured: boolean;
+}
+
+/**
  * The prompt for the human-QA tap-through script (PRD §13 V1). The backend properties are auto-verified
  * separately, so the script stays on the screen-observable half (like the Favorites writeup). Pure — the
  * caller runs it on the LLM.

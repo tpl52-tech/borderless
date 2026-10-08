@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { planChecks, type VerifyCheck } from "../src/shared/verify-plan.ts";
+import { planChecks, tableFromText, type VerifyCheck } from "../src/shared/verify-plan.ts";
 import { verifyRow } from "../src/shared/verify.ts";
 
 const byProp = (checks: VerifyCheck[]) => Object.fromEntries(checks.map((c) => [c.property, c]));
@@ -59,6 +59,14 @@ describe("planChecks (verify sweep V2 — properties → concrete checks)", () =
     expect(cs[0]!.assertion).toContain("notifications");
     expect(cs[0]!.assertion).not.toContain("profiles"); // each check names only its own target
     expect(cs[1]!.assertion).toContain("profiles");
+  });
+
+  test("tableFromText finds a known table named in the ticket text (underscore/space tolerant), else null", () => {
+    const tables = ["announcements", "favorites", "item_photos", "items", "profiles"];
+    expect(tableFromText("profiles table: deny-all RLS baseline", tables)).toBe("profiles");
+    expect(tableFromText("upload the photo to item photos", tables)).toBe("item_photos"); // space ↔ underscore
+    expect(tableFromText("just some UI copy change", tables)).toBeNull();
+    expect(tableFromText("profiles", [])).toBeNull(); // no known tables ⇒ no match
   });
 
   test("composes on a real classifier row (verifyRow → planChecks over its backendProperties)", () => {

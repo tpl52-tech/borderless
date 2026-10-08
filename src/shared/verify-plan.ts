@@ -110,6 +110,20 @@ function fillAssertion(template: string, target: string | null): string {
  * (not the whole VerifyRow): the row carries no other field this needs, and taking the properties + paths as
  * peer inputs keeps the derivation symmetric (both came from classifying the ticket).
  */
+/**
+ * The first known DB table named in the ticket text (underscore/space tolerant), or null. Lets the live runner
+ * target a catalog check when the merged PR's paths yielded no table — e.g. no PR was found (the team moves
+ * tickets to Verifying pre-PR). Best-effort + grounded: only a name that is actually a table in the catalog
+ * can match, so it can't invent a target.
+ */
+export function tableFromText(text: string, knownTables: readonly string[]): string | null {
+  const hay = text.toLowerCase();
+  for (const t of knownTables) {
+    if (new RegExp(`\\b${t.toLowerCase().replace(/_/g, "[ _]")}\\b`).test(hay)) return t;
+  }
+  return null;
+}
+
 export function planChecks(backendProperties: readonly BackendProperty[], changedPaths: readonly string[] = []): VerifyCheck[] {
   return backendProperties.flatMap((property) => {
     const spec = CHECK_SPECS[property];

@@ -9,7 +9,7 @@ import type { Store } from "./store.ts";
 import type { LinearIssue } from "../shared/types.ts";
 import { verifyRow, issueText } from "../shared/verify.ts";
 import { planChecks, tableFromText } from "../shared/verify-plan.ts";
-import { catalogProbe, type CatalogProbe, type CatalogRow } from "../shared/verify-catalog.ts";
+import { catalogProbe, type CatalogProbe, type CatalogRow, type CheckOutcome } from "../shared/verify-catalog.ts";
 import { rollupVerdict, type CheckResult, type VerifyRunRow } from "../shared/verify-verdict.ts";
 
 export interface VerifyRunDeps {
@@ -19,8 +19,21 @@ export interface VerifyRunDeps {
   catalogRun: (probe: CatalogProbe) => Promise<CatalogRow[]>;
   /** The real public-schema tables — used to target a catalog check from the ticket text when no PR path did. */
   knownTables?: readonly string[];
+  /** Behavioral RLS probe (app session). When set, each RLS table also gets a "does RLS actually gate reads?"
+   *  check on top of the structural "a policy exists" one. Absent → only the structural check runs. */
+  rlsProbe?: (table: string) => Promise<CheckOutcome>;
   /** Linear state treated as "Verifying" (default "Verifying"). */
   stateName?: string;
+}
+
+/** Run one probe into a CheckResult; a thrown probe degrades to inconclusive (resilient), never crashes the run. */
+async function runCheck(base: Omit<CheckResult, "status" | "evidence">, run: () => Promise<CheckOutcome>, failNote: string): Promise<CheckResult> {
+  try {
+    const o = await run();
+    return { ...base, status: o.status, evidence: o.evidence };
+  } catch (err) {
+    return { ...base, status: "inconclusive", evidence: `${failNote}: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 /** Run every structural check for one Verifying ticket and roll up its verdict. */
@@ -39,11 +52,21 @@ export async function verifyTicket(issue: LinearIssue, deps: VerifyRunDeps): Pro
       results.push({ ...base, status: "escalated", evidence: "behavioral check — needs a human or the staging env" });
       continue;
     }
-    try {
-      const outcome = probe.interpret(await deps.catalogRun(probe));
-      results.push({ ...base, status: outcome.status, evidence: outcome.evidence });
-    } catch (err) {
-      results.push({ ...base, status: "inconclusive", evidence: `catalog query failed: ${err instanceof Error ? err.message : String(err)}` });
+    results.push(await runCheck(base, async () => probe.interpret(await deps.catalogRun(probe)), "catalog query failed"));
+  }
+
+  // Behavioral RLS augmentation — deliberately a post-loop pass, NOT a planned check: it needs a live app
+  // session the pure planner can't know about, and routing it through planChecks would force every RLS ticket
+  // to needs_human whenever no app session is configured (penalising structural-only verification). Absent
+  // rlsProbe ⇒ simply skipped. For each RLS table the structural checks targeted, confirm RLS actually GATES
+  // reads (the catalog check only proves a policy exists). Read-only, residue-free.
+  const rlsProbe = deps.rlsProbe;
+  if (rlsProbe) {
+    const rlsTables = [...new Set(results.filter((r) => r.property === "rls" && r.target).map((r) => r.target!))];
+    for (const table of rlsTables) {
+      const base = { property: "rls" as const, target: table, mechanism: "session" as const,
+        assertion: `Unauthenticated reads of ${table} are denied; an authenticated user is permitted only what RLS allows.` };
+      results.push(await runCheck(base, () => rlsProbe(table), "behavioral RLS check failed"));
     }
   }
   return { ...row, ...rollupVerdict(results) };

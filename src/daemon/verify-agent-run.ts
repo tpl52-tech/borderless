@@ -6,21 +6,18 @@
  */
 
 import type { LinearIssue } from "../shared/types.ts";
-import { buildVerifyAgentSeed, parseAgentVerdict, type VerifyAgentSeedOpts } from "../shared/verify-agent.ts";
+import { buildVerifyAgentSeed, parseAgentVerdict } from "../shared/verify-agent.ts";
 import type { AgentFinding } from "../shared/verify-verdict.ts";
 
 export interface VerifyAgentDeps {
-  /** Run the agent with the given seed and return its raw verdict output (the contents it wrote). */
+  /** Run the agent on the given seed and return its raw verdict output (the live spawn owns where it's written
+   *  — $AO_SESSION_DIR/verdict.json — and reads it back post-spawn; see VERIFY_VERDICT_FILE). */
   spawn: (seed: string) => Promise<string>;
   /** Whether the agent may make throwaway writes (config.verifyAllowWrites); default false ⇒ read-only. */
   allowWrites?: boolean;
-  /** Where the agent writes its verdict (named in the seed so the live spawn knows where to read from). */
-  verdictPath: string;
 }
 
 /** Run the verification agent for one ticket → its grounded findings (a confused/empty agent ⇒ inconclusive). */
 export async function runVerifyAgent(issue: LinearIssue, deps: VerifyAgentDeps): Promise<AgentFinding[]> {
-  const opts: VerifyAgentSeedOpts = { verdictPath: deps.verdictPath, allowWrites: deps.allowWrites };
-  const raw = await deps.spawn(buildVerifyAgentSeed(issue, opts));
-  return parseAgentVerdict(raw);
+  return parseAgentVerdict(await deps.spawn(buildVerifyAgentSeed(issue, { allowWrites: deps.allowWrites })));
 }

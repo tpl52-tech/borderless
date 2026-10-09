@@ -12,35 +12,47 @@
 
 import type { AgentFinding } from "./verify-verdict.ts";
 
+/** The file the agent writes its JSON verdict to, under $AO_SESSION_DIR (the session manager injects that dir;
+ *  the live spawn reads it back from the sessionId-derived dir post-spawn, mirroring the sweep reviewer). The
+ *  seed and the V4c readback share this one name, so there is no path for the two to disagree on. */
+export const VERIFY_VERDICT_FILE = "verdict.json";
+
+/** How much acceptance-criteria text the seed embeds (long bodies are rare; a cut is marked so it can't masquerade as complete). */
+const MAX_AC_CHARS = 4000;
+
 /** Options for the verification-agent seed. */
 export interface VerifyAgentSeedOpts {
-  /** Absolute path the agent must write its JSON verdict to (read back + parsed after it exits). */
-  verdictPath: string;
-  /** When true (verifyAllowWrites), the agent may create throwaway test data (cleaning up after); else read-only. */
+  /** When true, the agent may make throwaway writes as a disposable test user (cleaning up); else read-only.
+   *  Resolved at the composition layer from config.verifyAllowWrites (added with V4c). Default: read-only. */
   allowWrites?: boolean;
 }
 
 /**
  * Build the verification agent's seed (PRD §13, phase V4 / COR-87). Pure. The agent runs in a worktree with the
  * merged code; it confirms the ticket's acceptance criteria actually hold in the backend (the invisible half),
- * grounding every finding in real evidence, and writes a JSON verdict to `verdictPath`. Read-only by default —
- * the write allowance is gated on `allowWrites` (config.verifyAllowWrites), never on by accident.
+ * grounding every finding in real evidence, and writes a JSON verdict to $AO_SESSION_DIR/verdict.json. Read-only
+ * by default — the write allowance is gated on `allowWrites`, never on by accident.
+ *
+ * NOTE: the read-only guarantee is enforced for real by the read-only CREDENTIALS the spawn is handed (V4c —
+ * the SELECT-only DB role + the anon/test-user app session), not by this prompt wording alone.
  */
 export function buildVerifyAgentSeed(
   issue: { identifier: string; title: string; description: string | null },
-  opts: VerifyAgentSeedOpts,
+  opts: VerifyAgentSeedOpts = {},
 ): string {
   const accessRule = opts.allowWrites
     ? `You MAY create throwaway test data AS A DISPOSABLE TEST USER to exercise behavior, but you MUST delete anything you create, MUST NOT touch real/production data, and MUST NOT run migrations or schema changes. Anything you cannot cleanly undo → mark the finding "inconclusive".`
     : `You have READ-ONLY access: do NOT create, modify, or delete any data, run any write, or run migrations. If verifying a criterion would require a write, mark that finding "inconclusive" and say why.`;
+  const acs = issue.description ?? "(none provided)";
+  const acsShown = acs.length > MAX_AC_CHARS ? `${acs.slice(0, MAX_AC_CHARS)}\n…[acceptance criteria truncated]` : acs;
   return [
     `You are a backend VERIFICATION agent for ticket ${issue.identifier}: "${issue.title}".`,
     `Your job: confirm the ticket's acceptance criteria actually HOLD in the merged implementation — focus on the INVISIBLE, backend behavior QA cannot see from the app screen: RLS / data isolation, DB triggers & side-effects, schema / constraints, Worker server-logic, data integrity, Storage. You are in a git worktree with the full codebase and the change is merged.`,
     accessRule,
     `Ground EVERY finding in concrete evidence — a query result, a command's output, or a file:line reference. Never guess, never assume from the code alone that runtime behavior is correct; if you cannot actually verify something, its status is "inconclusive".`,
     `Tools: read the code; use \`git log\` / \`git diff\` / \`gh pr view\` to see the change; and use the read-only verify-probe command (run it with \`--help\` for usage) to inspect the live database and app as an anonymous or test user.`,
-    `Acceptance criteria to verify:\n${(issue.description ?? "(none provided)").slice(0, 4000)}`,
-    `When you are done, write ONLY a JSON object to ${opts.verdictPath} — no prose, no markdown fences — of exactly this shape:`,
+    `Acceptance criteria to verify:\n${acsShown}`,
+    `When you are done, write ONLY a JSON object to $AO_SESSION_DIR/${VERIFY_VERDICT_FILE} — no prose, no markdown fences — of exactly this shape:`,
     `{ "findings": [ { "criterion": "<one acceptance criterion, in your own words>", "status": "pass" | "fail" | "inconclusive", "evidence": "<exactly what you observed that proves it>" } ] }`,
   ].join("\n\n");
 }

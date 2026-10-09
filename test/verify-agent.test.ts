@@ -4,25 +4,38 @@ import { parseAgentVerdict, buildVerifyAgentSeed } from "../src/shared/verify-ag
 describe("buildVerifyAgentSeed (verify sweep V4 — the agent's prompt)", () => {
   const issue = { identifier: "COR-27", title: "profiles: deny-all RLS", description: "a user cannot read another user's row" };
 
-  test("read-only by default: names the ticket, the ACs, the JSON contract, and forbids writes", () => {
-    const s = buildVerifyAgentSeed(issue, { verdictPath: "/tmp/verdict.json" });
+  test("read-only by default: names the ticket, the ACs, the verdict-file convention, the JSON contract, forbids writes", () => {
+    const s = buildVerifyAgentSeed(issue); // no opts ⇒ read-only
     expect(s).toContain("COR-27");
     expect(s).toContain("a user cannot read another user's row"); // the ACs are embedded
-    expect(s).toContain("/tmp/verdict.json"); // where to write
+    expect(s).toContain("$AO_SESSION_DIR/verdict.json"); // the fixed convention, not an absolute path
     expect(s).toContain('"status": "pass" | "fail" | "inconclusive"'); // the output contract
     expect(s).toContain("READ-ONLY");
-    expect(s).not.toContain("create throwaway test data");
+    expect(s).not.toContain("DISPOSABLE TEST USER");
   });
 
   test("allowWrites swaps in the throwaway-write rule (clean up, no real data)", () => {
-    const s = buildVerifyAgentSeed(issue, { verdictPath: "/tmp/v.json", allowWrites: true });
+    const s = buildVerifyAgentSeed(issue, { allowWrites: true });
     expect(s).toContain("DISPOSABLE TEST USER");
     expect(s).toContain("MUST delete anything you create");
     expect(s).not.toContain("You have READ-ONLY access");
   });
 
   test("a null description renders without crashing", () => {
-    expect(buildVerifyAgentSeed({ identifier: "COR-1", title: "x", description: null }, { verdictPath: "/v" })).toContain("(none provided)");
+    expect(buildVerifyAgentSeed({ identifier: "COR-1", title: "x", description: null })).toContain("(none provided)");
+  });
+
+  test("an over-long acceptance-criteria body is truncated with a visible marker (no silent drop)", () => {
+    const long = "x".repeat(5000);
+    const s = buildVerifyAgentSeed({ identifier: "COR-1", title: "x", description: long });
+    expect(s).toContain("[acceptance criteria truncated]");
+    expect(s).not.toContain("x".repeat(4100)); // the tail past the cap is gone
+  });
+
+  test("the seed's advertised JSON shape round-trips cleanly through parseAgentVerdict (the two halves agree)", () => {
+    // A sample exactly matching the shape the seed asks for → a clean finding, not the inconclusive fallback.
+    const sample = JSON.stringify({ findings: [{ criterion: "a user cannot read another user's row", status: "pass", evidence: "as user B, got 0 rows" }] });
+    expect(parseAgentVerdict(sample)).toEqual([{ criterion: "a user cannot read another user's row", status: "pass", evidence: "as user B, got 0 rows" }]);
   });
 });
 

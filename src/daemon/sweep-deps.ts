@@ -11,19 +11,17 @@
  * live repo, not here — like the base's github.ts runners; the logic it depends on is in the tested pieces.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { StatusTracker } from "./monitors/status.ts";
-import type { SweepJob, SessionStatus } from "../shared/types.ts";
+import type { SweepJob } from "../shared/types.ts";
 import type { CheckState, RequiredCheck } from "../shared/sweep-gate.ts";
 import { REQUIRED_CHECKS } from "../shared/sweep-gate.ts";
 import type { SweepEngineDeps, ReviewVerdict, WorkerResult, WorkerFeedback, PollResult } from "./sweep-engine.ts";
 import { territoryWarning, type Territory } from "../shared/collision.ts";
 import { fetchPr, listPrsForBranch, prFiles } from "./github.ts";
 import { branchName, prBranchCandidates } from "./worktree.ts";
-import { sessionDir } from "../shared/paths.ts";
+import { awaitCompletion, runEphemeralInspector, spawnClaudeAgent } from "./spawn-wait.ts";
 import { runWithDeadline } from "./ssh.ts";
 
 // --- pure mappers (unit-tested) --------------------------------------------
@@ -98,27 +96,9 @@ export function needsHydration(job: SweepJob): boolean {
 
 // --- live composition (live-only) ------------------------------------------
 
-const TERMINAL: ReadonlySet<SessionStatus> = new Set<SessionStatus>(["done", "exited", "error"]);
 const DEFAULT_CI_POLL_MS = 30_000;
 const DEFAULT_MAX_CI_WAITS = 40; // ~20 min at 30s
 const DEFAULT_SPAWN_DEADLINE_MS = 2 * 60 * 60 * 1000; // 2h: a backstop against a hung agent, not a tight bound
-
-/** Resolve when a session reaches a terminal status; reject if it hasn't within `deadlineMs`. Live-only. */
-export function awaitCompletion(tracker: StatusTracker, sessionId: string, deadlineMs = 0): Promise<SessionStatus> {
-  return new Promise((resolve, reject) => {
-    const current = tracker.status(sessionId);
-    if (TERMINAL.has(current)) return resolve(current);
-    let off = () => {};
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const done = () => { off(); if (timer) clearTimeout(timer); };
-    off = tracker.onChange(({ sessionId: id, status }) => {
-      if (id === sessionId && TERMINAL.has(status)) { done(); resolve(status); }
-    });
-    if (deadlineMs > 0) {
-      timer = setTimeout(() => { done(); reject(new Error(`session ${sessionId} did not finish within ${deadlineMs}ms`)); }, deadlineMs);
-    }
-  });
-}
 
 /** Read the oid of a fetched PR's latest commit, or null. */
 function headOf(pr: Record<string, any>): string | null {
@@ -177,11 +157,7 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
   const deadline = cfg.spawnDeadlineMs ?? DEFAULT_SPAWN_DEADLINE_MS;
 
   const spawnAndWait = async (seed: string, opts: { ignoreSeedTicket?: boolean } = {}): Promise<string> => {
-    const session = await cfg.manager.spawn({
-      taskId: cfg.taskId, tool: "claude", location: "local", cwd: cfg.cwd,
-      usesWorktree: true, permissions: "full-access", repo: cfg.repo, seed,
-      ignoreSeedTicket: opts.ignoreSeedTicket,
-    });
+    const session = await spawnClaudeAgent(cfg.manager, { taskId: cfg.taskId, cwd: cfg.cwd, repo: cfg.repo, seed, ignoreSeedTicket: opts.ignoreSeedTicket });
     await awaitCompletion(cfg.tracker, session.id, deadline);
     return session.id;
   };
@@ -211,14 +187,13 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
       return { checks: checkStates(pr.statusCheckRollup), changedPaths: await prFiles(cfg.repo, job.prNumber) };
     },
     async review(job): Promise<ReviewVerdict> {
-      // ignoreSeedTicket: the reviewer only reads the PR via gh — keep it off the worker's ticket-branch
-      // worktree (two worktrees can't share a branch), so it gets a throwaway branch instead.
-      const sessionId = await spawnAndWait(reviewerSeed(job), { ignoreSeedTicket: true });
-      let out = "";
-      try { out = readFileSync(join(sessionDir(sessionId, cfg.home), "verdict.txt"), "utf8"); } catch { /* missing → fails closed */ }
-      cfg.manager.kill(sessionId); // don't leak the reviewer PTY
-      cfg.manager.releaseWorktree(sessionId); // clean its throwaway worktree too
-      return parseReviewVerdict(out, sessionId);
+      // The reviewer is an ephemeral inspector: a throwaway worktree (it only reads the PR via gh), await,
+      // read its verdict.txt, then kill + reap — all in the shared helper (fails closed on a missing file).
+      const { sessionId, raw } = await runEphemeralInspector(
+        { manager: cfg.manager, tracker: cfg.tracker, repo: cfg.repo, taskId: cfg.taskId, cwd: cfg.cwd, home: cfg.home, deadlineMs: deadline },
+        reviewerSeed(job), "verdict.txt",
+      );
+      return parseReviewVerdict(raw, sessionId);
     },
     wait: (ms) => Bun.sleep(ms),
   };

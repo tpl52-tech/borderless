@@ -13,6 +13,7 @@ describe("runVerifyAgent (verify sweep V4 — spawn → grounded findings)", () 
   test("parses the agent's JSON verdict into findings, and passes the seed to the spawn", async () => {
     let seenSeed = "";
     const findings = await runVerifyAgent(issue(), {
+      probeCommand: "PROBE",
       spawn: async (seed) => {
         seenSeed = seed;
         return JSON.stringify({ findings: [{ criterion: "cross-user read is blocked", status: "pass", evidence: "queried as user B, got 0 rows" }] });
@@ -21,6 +22,7 @@ describe("runVerifyAgent (verify sweep V4 — spawn → grounded findings)", () 
     expect(findings).toEqual([{ criterion: "cross-user read is blocked", status: "pass", evidence: "queried as user B, got 0 rows" }]);
     expect(seenSeed).toContain("COR-27"); // the built seed reached the spawn
     expect(seenSeed).toContain("$AO_SESSION_DIR/verdict.json");
+    expect(seenSeed).toContain("PROBE <table>"); // the probeCommand was threaded through
   });
 
   test("a confused agent (unparseable output) degrades to an inconclusive finding, not a crash", async () => {

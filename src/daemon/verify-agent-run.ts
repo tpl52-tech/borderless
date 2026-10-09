@@ -15,9 +15,11 @@ export interface VerifyAgentDeps {
   spawn: (seed: string) => Promise<string>;
   /** Whether the agent may make throwaway writes (config.verifyAllowWrites); default false ⇒ read-only. */
   allowWrites?: boolean;
+  /** The read-only verify-probe CLI invocation the agent should use (the daemon's own path). */
+  probeCommand?: string;
 }
 
 /** Run the verification agent for one ticket → its grounded findings (a confused/empty agent ⇒ inconclusive). */
 export async function runVerifyAgent(issue: LinearIssue, deps: VerifyAgentDeps): Promise<AgentFinding[]> {
-  return parseAgentVerdict(await deps.spawn(buildVerifyAgentSeed(issue, { allowWrites: deps.allowWrites })));
+  return parseAgentVerdict(await deps.spawn(buildVerifyAgentSeed(issue, { allowWrites: deps.allowWrites, probeCommand: deps.probeCommand })));
 }

@@ -548,11 +548,17 @@
   const VERDICT_CLASS = { verified: "s-green", needs_human: "s-amber", ui: "s-dim" };
   const STATUS_CLASS = { pass: "s-green", fail: "s-pink", inconclusive: "s-amber", escalated: "s-dim" };
 
+  const vrCheck = (status, label, body) =>
+    `<div class="vr-check"><span class="st ${STATUS_CLASS[status] || "s-ink"}">${label}</span><span class="ev">${body}</span></div>`;
   const verifyCardHtml = (r) => {
     const pr = r.prNumber != null ? ` &middot; PR #${esc(r.prNumber)}` : "";
-    const checks = (r.results || []).map((c) =>
-      `<div class="vr-check"><span class="st ${STATUS_CLASS[c.status] || "s-ink"}">${esc(c.status)}</span><span class="ev">${esc(c.property)}${c.target ? ` (${esc(c.target)})` : ""} &mdash; ${esc(c.evidence)}</span></div>`).join("");
-    return `<div class="row-card"><div class="rc-top"><span class="vr-verd ${VERDICT_CLASS[r.verdict] || "s-ink"}">${esc(r.verdict)}</span> <b>${esc(r.ticketKey)}</b> <span class="muted">${esc(r.title)}${pr}</span></div>${checks ? `<div style="margin-top:.5rem">${checks}</div>` : ""}</div>`;
+    // deterministic bars, then the verification agent's grounded findings (◆) — both folded into the verdict.
+    const bars = (r.results || []).map((c) =>
+      vrCheck(c.status, esc(c.status), `${esc(c.property)}${c.target ? ` (${esc(c.target)})` : ""} &mdash; ${esc(c.evidence)}`)).join("");
+    const findings = (r.agentFindings || []).map((f) =>
+      vrCheck(f.status, `&#9670; ${esc(f.status)}`, `${esc(f.criterion)} &mdash; ${esc(f.evidence)}`)).join("");
+    const detail = bars + findings;
+    return `<div class="row-card"><div class="rc-top"><span class="vr-verd ${VERDICT_CLASS[r.verdict] || "s-ink"}">${esc(r.verdict)}</span> <b>${esc(r.ticketKey)}</b> <span class="muted">${esc(r.title)}${pr}</span></div>${detail ? `<div style="margin-top:.5rem">${detail}</div>` : ""}</div>`;
   };
 
   vRun.addEventListener("click", () => withBusy(vRun, "⟳ running…", async () => {

@@ -311,7 +311,7 @@ export function startDaemon(home = stateHome()): Daemon {
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: () => runVerifyRun(), port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

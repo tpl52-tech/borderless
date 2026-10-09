@@ -133,6 +133,16 @@ export function hasPublicReadPolicy(rows: CatalogRow[]): boolean {
   return num(rows[0]?.public_read_policies) > 0;
 }
 
+/**
+ * Resolve whether `table` declares itself anon-readable over a catalog runner (the engine's `catalogRun` or the
+ * probe CLI's `db.run`) — publicReadPolicyProbe + the parse, failing CLOSED: a lookup error ⇒ `false`, so the
+ * behavioral RLS check never blesses a table whose intent it couldn't confirm. The one home for that decision,
+ * shared by the engine and the standalone probe so the "fail → conservative false" policy can't drift.
+ */
+export function resolveIsPublic(run: (probe: CatalogProbe) => Promise<CatalogRow[]>, table: string): Promise<boolean> {
+  return run(publicReadPolicyProbe(table)).then(hasPublicReadPolicy).catch(() => false);
+}
+
 /** The public-schema table names (catalog-only) — the live runner uses these to target a check from the ticket
  *  text when a merged PR yielded no path. The query lives here (not in the thin daemon client) so all the
  *  catalog SQL stays in one place. */

@@ -10,7 +10,7 @@
  */
 
 import type { OperatorConfigLite } from "../shared/config.ts";
-import { catalogChecksForTable, catalogProbe, type CheckOutcome } from "../shared/verify-catalog.ts";
+import { catalogChecksForTable, catalogProbe, resolveIsPublic, type CheckOutcome } from "../shared/verify-catalog.ts";
 import { openCatalogDb } from "./verify-db.ts";
 import { openAppSession } from "./verify-session.ts";
 
@@ -19,6 +19,10 @@ export interface ProbeLine { label: string; status: CheckOutcome["status"]; evid
 /** Run every read-only check on one table: the structural catalog checks + the behavioral RLS check. */
 export async function probeTable(config: OperatorConfigLite, table: string): Promise<ProbeLine[]> {
   const lines: ProbeLine[] = [];
+  // Whether the schema DECLARES the table anon-readable (a permissive public SELECT policy) — the same intent
+  // signal the engine uses, so the behavioral RLS line below matches the verdict instead of flagging an
+  // intended public read. Resolved from the catalog; no catalog (or a lookup failure) ⇒ conservative false.
+  let isPublic = false;
   if (config.verifyDbUrl) {
     const db = openCatalogDb(config.verifyDbUrl);
     try {
@@ -28,13 +32,14 @@ export async function probeTable(config: OperatorConfigLite, table: string): Pro
         const o = probe.interpret(await db.run(probe));
         lines.push({ label: `${check.property} (catalog)`, status: o.status, evidence: o.evidence });
       }
+      isPublic = await resolveIsPublic(db.run, table);
     } finally {
       await db.close();
     }
   }
   if (config.verifyApp) {
     const app = await openAppSession(config.verifyApp);
-    const o = await app.rlsProbe(table);
+    const o = await app.rlsProbe(table, isPublic);
     lines.push({ label: "rls (behavioral)", status: o.status, evidence: o.evidence });
   }
   return lines;

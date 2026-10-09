@@ -9,7 +9,7 @@ import type { Store } from "./store.ts";
 import type { LinearIssue } from "../shared/types.ts";
 import { verifyRow, issueText } from "../shared/verify.ts";
 import { planChecks, tableFromText } from "../shared/verify-plan.ts";
-import { catalogProbe, publicReadPolicyProbe, hasPublicReadPolicy, type CatalogProbe, type CatalogRow, type CheckOutcome } from "../shared/verify-catalog.ts";
+import { catalogProbe, resolveIsPublic, type CatalogProbe, type CatalogRow, type CheckOutcome } from "../shared/verify-catalog.ts";
 import { rollupVerdict, type AgentFinding, type CheckResult, type VerifyRunRow } from "../shared/verify-verdict.ts";
 
 export interface VerifyRunDeps {
@@ -66,10 +66,7 @@ async function runBars(backendProperties: VerifyRunRow["backendProperties"], pat
       // Resolve the table's declared intent from the catalog first (an anon-reachable public SELECT policy), so
       // an anon read the schema deliberately allows passes instead of flagging. Reuses the catalogRun seam; a
       // lookup failure falls back to the conservative "no public policy" and never blocks the behavioral read.
-      results.push(await runCheck(base, async () => {
-        const isPublic = await deps.catalogRun(publicReadPolicyProbe(table)).then(hasPublicReadPolicy).catch(() => false);
-        return rlsProbe(table, isPublic);
-      }, "behavioral RLS check failed"));
+      results.push(await runCheck(base, async () => rlsProbe(table, await resolveIsPublic(deps.catalogRun, table)), "behavioral RLS check failed"));
     }
   }
   return results;

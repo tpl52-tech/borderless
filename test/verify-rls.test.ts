@@ -12,11 +12,19 @@ describe("rlsBehavioralOutcome (verify sweep V2b — behavioral RLS)", () => {
     expect(rlsBehavioralOutcome({ denied: false, count: 0 }, { denied: false, count: 4 }, "favorites").status).toBe("pass");
   });
 
-  test("anon reads rows ⇒ inconclusive — public table or RLS gap, a human decides", () => {
+  test("anon reads rows + no public-read policy ⇒ inconclusive — unexplained anon read, a human decides", () => {
     const o = rlsBehavioralOutcome({ denied: false, count: 5 }, { denied: false, count: 5 }, "profiles");
     expect(o.status).toBe("inconclusive");
     expect(o.evidence).toContain("5 row");
     expect(o.evidence).toContain("profiles");
+    expect(o.evidence).toContain("no public-read policy");
+  });
+
+  test("anon reads rows + a public-read policy exists ⇒ pass — the schema declares the table public", () => {
+    const o = rlsBehavioralOutcome({ denied: false, count: 5 }, { denied: false, count: 5 }, "profiles", true);
+    expect(o.status).toBe("pass");
+    expect(o.evidence).toContain("5 row");
+    expect(o.evidence).toContain("public SELECT policy");
   });
 
   test("anon blocked but signed-in ALSO denied ⇒ inconclusive — over-locked or no access", () => {

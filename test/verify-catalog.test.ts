@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { catalogProbe, catalogChecksForTable, publicReadPolicyProbe, hasPublicReadPolicy, type CheckOutcome } from "../src/shared/verify-catalog.ts";
+import { catalogProbe, catalogChecksForTable, publicReadPolicyProbe, hasPublicReadPolicy, resolveIsPublic, type CheckOutcome } from "../src/shared/verify-catalog.ts";
 import { planChecks } from "../src/shared/verify-plan.ts";
 import type { VerifyCheck } from "../src/shared/verify-plan.ts";
 
@@ -37,6 +37,12 @@ describe("publicReadPolicyProbe / hasPublicReadPolicy (declared-public intent si
     expect(publicReadPolicyProbe("profiles").interpret([{ public_read_policies: 1 }]).status).toBe("pass");
     // absence ⇒ inconclusive (can't tell "no public policy" from "table absent"), matching the module's bias
     expect(publicReadPolicyProbe("items").interpret([{ public_read_policies: 0 }]).status).toBe("inconclusive");
+  });
+
+  test("resolveIsPublic: policy present ⇒ true, absent ⇒ false, and a failing runner ⇒ false (fails closed)", async () => {
+    expect(await resolveIsPublic(async () => [{ public_read_policies: 1 }], "profiles")).toBe(true);
+    expect(await resolveIsPublic(async () => [{ public_read_policies: 0 }], "items")).toBe(false);
+    expect(await resolveIsPublic(async () => { throw new Error("db down"); }, "profiles")).toBe(false);
   });
 });
 

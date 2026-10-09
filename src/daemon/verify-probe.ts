@@ -10,7 +10,7 @@
  */
 
 import type { OperatorConfigLite } from "../shared/config.ts";
-import { catalogChecksForTable, catalogProbe, publicReadPolicyProbe, hasPublicReadPolicy, type CheckOutcome } from "../shared/verify-catalog.ts";
+import { catalogChecksForTable, catalogProbe, resolveIsPublic, type CheckOutcome } from "../shared/verify-catalog.ts";
 import { openCatalogDb } from "./verify-db.ts";
 import { openAppSession } from "./verify-session.ts";
 
@@ -32,7 +32,7 @@ export async function probeTable(config: OperatorConfigLite, table: string): Pro
         const o = probe.interpret(await db.run(probe));
         lines.push({ label: `${check.property} (catalog)`, status: o.status, evidence: o.evidence });
       }
-      isPublic = await db.run(publicReadPolicyProbe(table)).then(hasPublicReadPolicy).catch(() => false);
+      isPublic = await resolveIsPublic(db.run, table);
     } finally {
       await db.close();
     }

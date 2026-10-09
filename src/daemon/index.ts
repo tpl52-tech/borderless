@@ -180,6 +180,8 @@ export function startDaemon(home = stateHome()): Daemon {
   // V2b runner: runs the structural checks over the read-only DB role. Needs a repo (for the merged-PR lookup)
   // AND config.verifyDbUrl (the catalog role); absent either → a no-op. A DB connection is opened per run.
   let runVerifyRun: UdsServerDeps["verifyRun"] = async () => ({ rows: [], configured: false });
+  // The local working copy configured for a repo — the checkout a sweep/verify agent spawns its worktree from.
+  const localCwdFor = (r: string | undefined) => (r ? config.profiles.find((pr) => pr.repo === r && pr.localCwd)?.localCwd : undefined);
   if (config.repo && config.branchOwner) {
     const repo = config.repo;
     const mergedPrFor = liveMergedPrFor(repo, config.branchOwner);
@@ -189,8 +191,8 @@ export function startDaemon(home = stateHome()): Daemon {
       // Verification agent (PRD §13 V4): compose once when a local checkout of the app repo exists to spawn a
       // throwaway worktree from. Absent → deterministic-only (the bars still run). The agent calls back into
       // borderless's own `verify probe` CLI (read-only creds from config) to inspect the live DB/app.
-      const verifyCwd = config.profiles.find((pr) => pr.repo === repo && pr.localCwd)?.localCwd;
-      let runAgent: VerifyRunDeps["runAgent"] | undefined;
+      const verifyCwd = localCwdFor(repo);
+      let runAgent: VerifyRunDeps["runAgent"];
       if (verifyCwd) {
         const verifyTask = store.listTasks(true).find((t) => t.name === "Verify") ?? store.createTask({ name: "Verify" });
         const spawn = liveVerifyAgentSpawn({ manager, tracker, repo, taskId: verifyTask.id, cwd: verifyCwd, home });
@@ -221,14 +223,14 @@ export function startDaemon(home = stateHome()): Daemon {
       };
     }
   }
-  const sweepProfile = config.profiles.find((pr) => pr.repo === config.repo && pr.localCwd);
-  if (config.repo && config.branchOwner && sweepProfile?.localCwd) {
+  const sweepCwd = localCwdFor(config.repo);
+  if (config.repo && config.branchOwner && sweepCwd) {
     const repo = config.repo;
     const branchOwner = config.branchOwner;
     const sweepsTask = store.listTasks(true).find((t) => t.name === "Sweeps") ?? store.createTask({ name: "Sweeps" });
     const sweepDeps: SweepEngineDeps = {
       ...liveSweepDeps({
-        manager, tracker, repo, branchOwner, taskId: sweepsTask.id, cwd: sweepProfile.localCwd, home,
+        manager, tracker, repo, branchOwner, taskId: sweepsTask.id, cwd: sweepCwd, home,
         acceptanceFor: (ticketId) => store.getLinearIssue(ticketId)?.description ?? null,
       }),
       // Collision guard (PRD §4): the deliverables other assigned, non-terminal tickets own, from the board.

@@ -87,8 +87,20 @@ export async function verifyTicket(issue: LinearIssue, deps: VerifyRunDeps): Pro
   return { ...row, ...rollupVerdict(results, agentFindings) };
 }
 
+/** A ticket whose verify run threw (e.g. its agent hit the spawn deadline) → a visible needs_human row that
+ *  carries the error as evidence. Keeps the concurrent fan-out fail-soft: one ticket's failure never sinks the
+ *  rest of the run, matching runCheck/parseAgentVerdict and the per-job-isolating sweep supervisor. */
+function failedVerifyRow(issue: LinearIssue, err: unknown): VerifyRunRow {
+  const evidence = `the verify run failed for this ticket: ${err instanceof Error ? err.message : String(err)}`;
+  return { ...verifyRow(issue, [], null), ...rollupVerdict([], [{ criterion: "verify run", status: "inconclusive", evidence }]) };
+}
+
 /** Verify every Verifying ticket, concurrently — each verdict is independent and its agent runs in parallel
- *  (like the code-driving sweeps; the Verifying column is small, so no concurrency cap — mirrors PRD §12). */
+ *  (like the code-driving sweeps; the Verifying column is small, so no concurrency cap — mirrors PRD §12). A
+ *  ticket that throws degrades to a needs_human row (via failedVerifyRow), so it never fails the whole run. */
 export async function runVerify(store: Pick<Store, "listLinearIssues">, deps: VerifyRunDeps): Promise<VerifyRunRow[]> {
-  return Promise.all(store.listLinearIssues(deps.stateName ?? "Verifying").map((issue) => verifyTicket(issue, deps)));
+  return Promise.all(
+    store.listLinearIssues(deps.stateName ?? "Verifying").map((issue) =>
+      verifyTicket(issue, deps).catch((err) => failedVerifyRow(issue, err))),
+  );
 }

@@ -161,9 +161,11 @@ export interface OperatorConfigLite {
    *  actually gates reads (read-only, residue-free). All public-by-design except the test password; absent →
    *  the behavioral RLS check is skipped (the structural catalog check still runs). */
   verifyApp?: VerifyAppConfig;
-  /** Whether the verification agent (PRD §13 V4) may make throwaway writes as a disposable test user (it must
-   *  clean up after itself). Default false ⇒ read-only. Only safe while the target DB has no real data —
-   *  COR-86 blocks disabling this before real users arrive. */
+  /** Whether the verification agent (PRD §13 V4) may make throwaway writes as a disposable test user (cleaning
+   *  up after itself). Default false ⇒ read-only. ADVISORY: it only widens the agent's seed instructions — even
+   *  so the agent reaches the DB only as the RLS-bounded test user (never the SELECT-only catalog role, and
+   *  `service_role` is never in config), so it can't touch another user's data. The real safety is that the
+   *  target DB holds no real data yet; COR-86 requires turning this off + deleting the creds before real users. */
   verifyAllowWrites?: boolean;
 }
 

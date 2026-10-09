@@ -169,4 +169,20 @@ describe("runVerify", () => {
     expect(rows.map((r) => r.ticketKey).sort()).toEqual(["COR-27", "COR-28"]);
     expect(maxInFlight).toBe(2); // both agents were in flight at once — the fan-out is concurrent
   });
+
+  test("one ticket's agent rejecting degrades only that ticket (needs_human), never sinks the run", async () => {
+    const s = new Store(":memory:");
+    s.upsertLinearIssue({ id: "i1", identifier: "COR-27", title: "profiles RLS", description: "a user cannot read another user's row", stateName: "Verifying", stateType: "started" });
+    s.upsertLinearIssue({ id: "i2", identifier: "COR-28", title: "items RLS", description: "a user cannot edit another user's row", stateName: "Verifying", stateType: "started" });
+    const runAgent = async (iss: LinearIssue): Promise<AgentFinding[]> => {
+      if (iss.identifier === "COR-27") throw new Error("session COR-27 did not finish within 1800000ms");
+      return [{ criterion: "c", status: "pass", evidence: "e" }];
+    };
+    const rows = await runVerify(s, deps({ paths: ["supabase/policies/x.sql"], runAgent }));
+    const failed = rows.find((r) => r.ticketKey === "COR-27")!;
+    const ok = rows.find((r) => r.ticketKey === "COR-28")!;
+    expect(failed.verdict).toBe("needs_human"); // the reject became a visible row, not a thrown run
+    expect(failed.agentFindings[0]!.evidence).toContain("did not finish");
+    expect(ok.verdict).toBe("verified"); // the sibling's good verdict survived
+  });
 });

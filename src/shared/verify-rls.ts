@@ -19,17 +19,20 @@ export interface TableAccess {
 }
 
 /**
- * Turn an anonymous read and a signed-in read of one table into a behavioral RLS outcome. Pure.
- *  - anon denied, or anon reads 0 rows      ⇒ pass (RLS gates unauthenticated access)
- *  - anon reads ≥1 row                      ⇒ inconclusive — an intended public table, or an RLS gap? a human
- *                                             decides (we can't tell a public table from a leak from counts)
+ * Turn an anonymous read and a signed-in read of one table into a behavioral RLS outcome. Pure — it uses BOTH
+ * reads: anon tells us whether unauthenticated access is blocked; the signed-in read tells us whether an
+ * authenticated user is actually permitted (distinguishing "RLS gates by auth" from "locked to everyone").
+ *  - anon reads ≥1 row                            ⇒ inconclusive (a public table, or an RLS gap? a human decides —
+ *                                                   counts can't separate public-by-design from a leak)
+ *  - anon blocked (denied/0) + signed-in permitted ⇒ pass (RLS gates by auth: anon can't read, the owner can)
+ *  - anon blocked + signed-in ALSO denied          ⇒ inconclusive (over-locked, or the test user lacks access?)
  */
 export function rlsBehavioralOutcome(anon: TableAccess, authed: TableAccess, table: string): CheckOutcome {
-  if (anon.denied) {
-    return { status: "pass", evidence: `unauthenticated reads of ${table} are denied (RLS blocks anon); the signed-in user reads ${authed.count}` };
+  if (!anon.denied && anon.count > 0) {
+    return { status: "inconclusive", evidence: `anon can read ${anon.count} row(s) of ${table} without signing in — an intended public table, or an RLS gap? needs a human` };
   }
-  if (anon.count === 0) {
-    return { status: "pass", evidence: `anon reads 0 rows of ${table}; RLS gates access (the signed-in user reads ${authed.count})` };
+  if (authed.denied) {
+    return { status: "inconclusive", evidence: `anon is blocked on ${table}, but so is the signed-in user — over-locked, or does the test user legitimately lack access? needs a human` };
   }
-  return { status: "inconclusive", evidence: `anon can read ${anon.count} row(s) of ${table} without signing in — an intended public table, or an RLS gap? needs a human` };
+  return { status: "pass", evidence: `RLS gates ${table} by auth: unauthenticated reads are ${anon.denied ? "denied" : "empty"}, the signed-in user is permitted (reads ${authed.count})` };
 }

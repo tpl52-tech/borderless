@@ -185,8 +185,14 @@ export function startDaemon(home = stateHome()): Daemon {
     if (verifyDbUrl) {
       runVerifyRun = async (ticketKey) => {
         const db = openCatalogDb(verifyDbUrl);
-        // Behavioral RLS: sign in once per run (best-effort — a sign-in failure degrades to structural-only).
-        const app = config.verifyApp ? await openAppSession(config.verifyApp).catch(() => null) : null;
+        // Behavioral RLS: sign in once per run (best-effort — a sign-in failure degrades to structural-only,
+        // but is logged so a stale test password / bad key doesn't silently disable a configured check).
+        const app = config.verifyApp
+          ? await openAppSession(config.verifyApp).catch((err) => {
+              console.error(`behavioral RLS check disabled: ${err instanceof Error ? err.message : err}`);
+              return null;
+            })
+          : null;
         try {
           const knownTables = await db.tables().catch(() => [] as string[]); // best-effort text-targeting
           const deps = { mergedPrFor, catalogRun: db.run, knownTables, ...(app ? { rlsProbe: app.rlsProbe } : {}) };

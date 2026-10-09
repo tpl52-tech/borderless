@@ -105,8 +105,8 @@ export function publicTableNames(rows: CatalogRow[]): string[] {
   return rows.map((r) => String(r.name));
 }
 
-/** The four structural (db-read) checks for one named table — rls / schema / trigger / data-integrity, each
- *  targeted at it. For the verify-probe tool (V4c-1): run every catalog check on a table on demand. Pure. */
+/** The structural (db-read) checks for one named table — one per catalog-probeable property (derived from
+ *  PROBES), each targeted at it. For the verify-probe tool (V4c-1): run every catalog check on a table. Pure. */
 export function catalogChecksForTable(table: string): VerifyCheck[] {
   // Derived from PROBES (the single local source of truth for catalog-probeable properties), so a new probe is
   // picked up here for free — nothing to re-list and drift.

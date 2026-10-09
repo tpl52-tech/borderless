@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import { planQaSubIssues, qaRunsheetPrompt, buildQaSubIssueInput, QA_LABEL } from "../src/shared/verify-qa.ts";
-import { parseQaTargets } from "../src/shared/linear.ts";
+import { parseQaTargets, parseQaChildrenPage } from "../src/shared/linear.ts";
 import type { VerifyRow } from "../src/shared/verify.ts";
 
 const row = (ticketKey: string, hasUi: boolean, verifiability: VerifyRow["verifiability"], title = `${ticketKey} title`): VerifyRow =>
@@ -60,20 +60,27 @@ describe("buildQaSubIssueInput", () => {
 });
 
 describe("parseQaTargets", () => {
-  const ok = {
-    data: {
-      teams: { nodes: [{ id: "team-1" }] },
-      issueLabels: { nodes: [{ id: "label-1" }] },
-      issues: { nodes: [{ parent: { identifier: "COR-17" } }, { parent: { identifier: "COR-19" } }, { parent: null }] },
-    },
-  };
-
-  test("returns team id, label id, and the existing children's parent keys (nulls dropped)", () => {
-    expect(parseQaTargets(ok, "COR", "manual-qa")).toEqual({ teamId: "team-1", labelId: "label-1", existingParentKeys: ["COR-17", "COR-19"] });
+  test("returns the team id + label id", () => {
+    const json = { data: { teams: { nodes: [{ id: "team-1" }] }, issueLabels: { nodes: [{ id: "label-1" }] } } };
+    expect(parseQaTargets(json, "COR", "manual-qa")).toEqual({ teamId: "team-1", labelId: "label-1" });
   });
 
   test("throws a clear error when the team or the manual-qa label is missing", () => {
     expect(() => parseQaTargets({ data: { teams: { nodes: [] }, issueLabels: { nodes: [{ id: "l" }] } } }, "COR", "manual-qa")).toThrow(/no Linear team/i);
     expect(() => parseQaTargets({ data: { teams: { nodes: [{ id: "t" }] }, issueLabels: { nodes: [] } } }, "COR", "manual-qa")).toThrow(/no Linear label/i);
+  });
+});
+
+describe("parseQaChildrenPage", () => {
+  test("extracts parent keys (nulls dropped) and the next cursor when a page follows", () => {
+    const page = parseQaChildrenPage({ data: { issues: {
+      pageInfo: { hasNextPage: true, endCursor: "cur-1" },
+      nodes: [{ parent: { identifier: "COR-17" } }, { parent: { identifier: "COR-19" } }, { parent: null }],
+    } } });
+    expect(page).toEqual({ parentKeys: ["COR-17", "COR-19"], next: "cur-1" });
+  });
+
+  test("next is null on the last page (so the caller stops paginating)", () => {
+    expect(parseQaChildrenPage({ data: { issues: { pageInfo: { hasNextPage: false, endCursor: "x" }, nodes: [] } } }).next).toBeNull();
   });
 });

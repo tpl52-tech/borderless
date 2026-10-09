@@ -38,7 +38,8 @@ import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
 import { startWebServer, type WebServer } from "./web.ts";
 import { httpLinearClient, syncLinearIssues } from "./linear.ts";
-import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate } from "../shared/linear.ts";
+import { QA_TARGETS_QUERY, parseQaTargets, QA_CHILDREN_QUERY, parseQaChildrenPage, ISSUE_CREATE_MUTATION, parseIssueCreate } from "../shared/linear.ts";
+import { verifyRow } from "../shared/verify.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
 import { buildTerritory } from "../shared/collision.ts";
 import { liveSweepDeps, needsHydration, hydrateInReviewJob } from "./sweep-deps.ts";
@@ -228,16 +229,38 @@ export function startDaemon(home = stateHome()): Daemon {
         }
       };
     }
-    const qaTeamKey = (config.linearTeamKeys ?? [])[0];
+    const qaTeamKey = (config.linearTeamKeys ?? [])[0]; // single-team org: QA targets resolve on this team
     if (config.linearApiKey && qaTeamKey) {
       const linear = httpLinearClient(config.linearApiKey);
       const runsheetChat = claudeCliChat({ model: config.askModel }); // subscription ($0) — generates the tester run sheet
+      // The dev tickets that already have a manual-qa child — fully paginated (idempotency must never truncate).
+      const existingQaParents = async (): Promise<string[]> => {
+        const keys: string[] = [];
+        let after: string | null = null;
+        do {
+          const page = parseQaChildrenPage(await linear.query(QA_CHILDREN_QUERY, { teamKey: qaTeamKey, label: QA_LABEL, after }));
+          keys.push(...page.parentKeys);
+          after = page.next;
+        } while (after);
+        return keys;
+      };
       runVerifyQa = async (ticketKey, write = false) => {
-        const scanned = await verifyScan(store, { mergedPrFor });
-        const rows = ticketKey ? scanned.filter((r) => r.ticketKey === ticketKey) : scanned;
+        // Narrow to the one ticket before the (gh-heavy) scan, mirroring verify.run — `ao verify qa COR-17`
+        // shouldn't classify the whole board.
+        let rows;
+        if (ticketKey) {
+          const issue = store.getLinearIssueByIdentifier(ticketKey);
+          const pr = issue ? await mergedPrFor(issue) : null;
+          rows = issue ? [verifyRow(issue, pr?.paths ?? [], pr?.prNumber ?? null)] : [];
+        } else {
+          rows = await verifyScan(store, { mergedPrFor });
+        }
         const results = await runQaSubIssues({
           rows,
-          qaTargets: async () => parseQaTargets(await linear.query(QA_TARGETS_QUERY, { teamKey: qaTeamKey, label: QA_LABEL }), qaTeamKey, QA_LABEL),
+          qaTargets: async () => ({
+            ...parseQaTargets(await linear.query(QA_TARGETS_QUERY, { teamKey: qaTeamKey, label: QA_LABEL }), qaTeamKey, QA_LABEL),
+            existingParentKeys: await existingQaParents(),
+          }),
           issueByKey: (k) => store.getLinearIssueByIdentifier(k) ?? undefined,
           generateRunsheet: async (issue) => (await runsheetChat([{ role: "user" as const, content: qaRunsheetPrompt(issue) }], [])).text ?? "",
           createIssue: async (input) => parseIssueCreate(await linear.query(ISSUE_CREATE_MUTATION, { input })),

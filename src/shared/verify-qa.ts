@@ -41,7 +41,7 @@ export interface QaSubIssueResult {
 export interface VerifyQaResult {
   results: QaSubIssueResult[];
   configured: boolean;
-  /** false ⇒ this was a dry run (results are `would-create`); true ⇒ sub-issues were actually written. */
+  /** false ⇒ a dry run (results are `would-create`); true ⇒ a write run (per-ticket results say what happened). */
   wrote: boolean;
 }
 

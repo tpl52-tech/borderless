@@ -201,6 +201,7 @@ export async function main(argv: string[]): Promise<void> {
           const mark = r.verdict === "verified" ? "✓" : r.verdict === "ui" ? "·" : "⚠";
           console.log(`${mark} ${r.ticketKey}  [${r.verdict}]  ${r.title}`);
           for (const c of r.results) console.log(`    ${c.status.padEnd(12)} ${c.property}${c.target ? ` (${c.target})` : ""} — ${c.evidence}`);
+          for (const f of r.agentFindings) console.log(`    ◆ ${f.status.padEnd(10)} ${f.criterion} — ${f.evidence}`);
         }
       });
       return;

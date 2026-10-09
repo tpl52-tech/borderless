@@ -5,11 +5,13 @@
  * shared runEphemeralInspector (same path as the sweep reviewer). Live-only; the agent runs only when the engine
  * (V4c-3) invokes this.
  *
- * Safety: the agent's only path to the DB/app is the read-only verify-probe CLI (named in the seed), whose creds
- * are read-only by construction (the SELECT-only catalog role + the anon/test-user session; `service_role` is
- * never in config) — so the agent has **no DB write capability**. (Like every full-access spawn in the system,
- * it can still read local files and reach the network; the guarantee here is specifically the database-write
- * boundary, not blanket isolation.)
+ * Safety: the agent inspects the DB/app through the read-only verify-probe CLI (named in the seed); its creds
+ * carry no catalog-write power (the SELECT-only catalog role; `service_role` is never in config). The read-only
+ * posture is otherwise enforced by the seed + RLS, not a hard sandbox: a full-access agent can reach the public
+ * anon key that ships in the app repo, so under `verifyAllowWrites` it may make RLS-bounded throwaway writes as
+ * the test user (and only then — it still can never touch another user's or the catalog's data). The real
+ * guarantee while this runs against prod is that the DB holds no real data yet (COR-86). Like every full-access
+ * spawn it can also read local files and reach the network; the boundary here is RLS + no-real-data, not isolation.
  */
 
 import { runEphemeralInspector } from "./spawn-wait.ts";

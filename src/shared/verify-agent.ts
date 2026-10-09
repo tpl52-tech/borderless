@@ -37,8 +37,11 @@ export interface VerifyAgentSeedOpts {
  * grounding every finding in real evidence, and writes a JSON verdict to $AO_SESSION_DIR/verdict.json. Read-only
  * by default — the write allowance is gated on `allowWrites`, never on by accident.
  *
- * NOTE: the read-only guarantee is enforced for real by the read-only CREDENTIALS the spawn is handed (V4c —
- * the SELECT-only DB role + the anon/test-user app session), not by this prompt wording alone.
+ * NOTE: this access wording is advisory. The hard limit is the CREDENTIALS the agent can reach — the probe
+ * CLI's SELECT-only catalog role, and for the app only the RLS-bounded test-user session (`service_role` is
+ * never in config) — so it can never touch another user's or the catalog's data. But that test-user session IS
+ * writable within RLS, which is why `allowWrites` exists and why the real guarantee on prod is that the DB holds
+ * no real data yet (COR-86), not read-only credentials. See verify-agent-spawn.ts + config.verifyAllowWrites.
  */
 export function buildVerifyAgentSeed(
   issue: { identifier: string; title: string; description: string | null },

@@ -10,7 +10,7 @@ import type { LinearIssue } from "../shared/types.ts";
 import { verifyRow, issueText } from "../shared/verify.ts";
 import { planChecks, tableFromText } from "../shared/verify-plan.ts";
 import { catalogProbe, type CatalogProbe, type CatalogRow, type CheckOutcome } from "../shared/verify-catalog.ts";
-import { rollupVerdict, type CheckResult, type VerifyRunRow } from "../shared/verify-verdict.ts";
+import { rollupVerdict, type AgentFinding, type CheckResult, type VerifyRunRow } from "../shared/verify-verdict.ts";
 
 export interface VerifyRunDeps {
   /** The merged PR + its changed paths for a Verifying ticket (live gh); null when none is found. */
@@ -22,6 +22,9 @@ export interface VerifyRunDeps {
   /** Behavioral RLS probe (app session). When set, each RLS table also gets a "does RLS actually gate reads?"
    *  check on top of the structural "a policy exists" one. Absent → only the structural check runs. */
   rlsProbe?: (table: string) => Promise<CheckOutcome>;
+  /** Run the verification agent for a ticket → its grounded findings (PRD §13 V4). Absent → deterministic-only.
+   *  Invoked only for tickets with ≥1 backend property (a pure-UI ticket has nothing invisible to verify). */
+  runAgent?: (issue: LinearIssue) => Promise<AgentFinding[]>;
   /** Linear state treated as "Verifying" (default "Verifying"). */
   stateName?: string;
 }
@@ -36,16 +39,10 @@ async function runCheck(base: Omit<CheckResult, "status" | "evidence">, run: () 
   }
 }
 
-/** Run every structural check for one Verifying ticket and roll up its verdict. */
-export async function verifyTicket(issue: LinearIssue, deps: VerifyRunDeps): Promise<VerifyRunRow> {
-  const pr = await deps.mergedPrFor(issue);
-  const paths = pr?.paths ?? [];
-  const row = verifyRow(issue, paths, pr?.prNumber ?? null);
-  // When the merged PR had no path, let a catalog check target a table named in the ticket text (∩ real tables).
-  const fallbackTarget = deps.knownTables?.length ? tableFromText(issueText(issue), deps.knownTables) : null;
-
+/** Run the structural + behavioral RLS bars for one ticket's backend properties → the deterministic CheckResults. */
+async function runBars(backendProperties: VerifyRunRow["backendProperties"], paths: string[], fallbackTarget: string | null, deps: VerifyRunDeps): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
-  for (const check of planChecks(row.backendProperties, paths, fallbackTarget)) {
+  for (const check of planChecks(backendProperties, paths, fallbackTarget)) {
     const base = { property: check.property, target: check.target, mechanism: check.mechanism, assertion: check.assertion };
     const probe = catalogProbe(check);
     if (!probe) { // behavioral (session/http) or no target → a human / the staging env, not this run
@@ -69,12 +66,41 @@ export async function verifyTicket(issue: LinearIssue, deps: VerifyRunDeps): Pro
       results.push(await runCheck(base, () => rlsProbe(table), "behavioral RLS check failed"));
     }
   }
-  return { ...row, ...rollupVerdict(results) };
+  return results;
 }
 
-/** Run the verify checks across every Verifying ticket (a ticket whose merged PR can't be found still classifies). */
+/** Verify one Verifying ticket: run the deterministic bars AND the verification agent, then roll both up. */
+export async function verifyTicket(issue: LinearIssue, deps: VerifyRunDeps): Promise<VerifyRunRow> {
+  const pr = await deps.mergedPrFor(issue);
+  const paths = pr?.paths ?? [];
+  const row = verifyRow(issue, paths, pr?.prNumber ?? null);
+  // When the merged PR had no path, let a catalog check target a table named in the ticket text (∩ real tables).
+  const fallbackTarget = deps.knownTables?.length ? tableFromText(issueText(issue), deps.knownTables) : null;
+
+  // The bars (catalog DB) and the agent (a spawned worktree) probe independent resources, so run them
+  // concurrently. The agent runs only when there's an invisible property to verify: a pure-UI ticket stays
+  // "ui" (human QA owns it), and we don't spend a verification agent on nothing. The agent never overrides a
+  // bar — rollupVerdict treats both as a shared floor (every bar AND every finding must pass for "verified").
+  const agentRun: Promise<AgentFinding[]> =
+    deps.runAgent && row.backendProperties.length ? deps.runAgent(issue) : Promise.resolve([]);
+  const [results, agentFindings] = await Promise.all([runBars(row.backendProperties, paths, fallbackTarget, deps), agentRun]);
+  return { ...row, ...rollupVerdict(results, agentFindings) };
+}
+
+/** A ticket whose verify run threw (e.g. its agent hit the spawn deadline) → a visible needs_human row that
+ *  carries the error as evidence. Keeps the concurrent fan-out fail-soft: one ticket's failure never sinks the
+ *  rest of the run, matching runCheck/parseAgentVerdict and the per-job-isolating sweep supervisor. */
+function failedVerifyRow(issue: LinearIssue, err: unknown): VerifyRunRow {
+  const evidence = `the verify run failed for this ticket: ${err instanceof Error ? err.message : String(err)}`;
+  return { ...verifyRow(issue, [], null), ...rollupVerdict([], [{ criterion: "verify run", status: "inconclusive", evidence }]) };
+}
+
+/** Verify every Verifying ticket, concurrently — each verdict is independent and its agent runs in parallel
+ *  (like the code-driving sweeps; the Verifying column is small, so no concurrency cap — mirrors PRD §12). A
+ *  ticket that throws degrades to a needs_human row (via failedVerifyRow), so it never fails the whole run. */
 export async function runVerify(store: Pick<Store, "listLinearIssues">, deps: VerifyRunDeps): Promise<VerifyRunRow[]> {
-  const rows: VerifyRunRow[] = [];
-  for (const issue of store.listLinearIssues(deps.stateName ?? "Verifying")) rows.push(await verifyTicket(issue, deps));
-  return rows;
+  return Promise.all(
+    store.listLinearIssues(deps.stateName ?? "Verifying").map((issue) =>
+      verifyTicket(issue, deps).catch((err) => failedVerifyRow(issue, err))),
+  );
 }

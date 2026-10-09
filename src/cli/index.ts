@@ -26,6 +26,7 @@
  *   ao sync                                    pull the live Linear board into the store (no sweeps)
  *   ao verify                                  classify the Verifying tickets (ui / backend / mixed)
  *   ao verify run [TICKET]                     run the structural checks over the DB → verdict + evidence
+ *   ao verify probe <table> | read <table>     read-only probe of a table (the verification agent's tool)
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
@@ -162,6 +163,32 @@ export async function main(argv: string[]): Promise<void> {
   // `ao verify` — classify the Verifying tickets (PRD §13): what human QA can see on screen vs the invisible
   // backend properties (RLS/trigger/schema/server-logic/data-integrity/storage) the verify sweep checks.
   if (sub === "verify") {
+    // `ao verify probe <table>` / `ao verify probe read <table> [--anon]` — the verification agent's read-only
+    // probe tool. Connects DIRECTLY from config (the agent is a separate process), using the read-only creds.
+    if (rest[0] === "probe") {
+      const usage = "usage:\n  ao verify probe <table>                structural + behavioral RLS checks for a table\n  ao verify probe read <table> [--anon]  read a sample of rows as the test user (or anon)";
+      if (!rest[1] || rest[1] === "--help") { console.log(usage); return; }
+      const { loadOperatorConfig } = await import("../shared/config.ts");
+      const config = loadOperatorConfig();
+      if (rest[1] === "read") {
+        const table = rest[2];
+        if (!table) { console.log(usage); return; }
+        const anon = rest.includes("--anon");
+        const { readTable } = await import("../daemon/verify-probe.ts");
+        const r = await readTable(config, table, { anon });
+        if (!r.configured) { console.log("verify probe: set `verifyApp` in ~/.borderless/config.json"); return; }
+        if (r.denied) { console.log(`${table}: read denied${anon ? " (anon)" : " (test user)"} — RLS blocks it`); return; }
+        console.log(`${table}: ${r.rows!.length} row(s)${anon ? " (anon)" : " (test user)"}`);
+        console.log(JSON.stringify(r.rows, null, 2));
+        return;
+      }
+      const table = rest[1];
+      const { probeTable } = await import("../daemon/verify-probe.ts");
+      const lines = await probeTable(config, table);
+      if (lines.length === 0) { console.log("verify probe: set `verifyDbUrl` / `verifyApp` in ~/.borderless/config.json"); return; }
+      for (const l of lines) console.log(`  ${l.status.padEnd(12)} ${l.label} — ${l.evidence}`);
+      return;
+    }
     // `ao verify run [TICKET]` — execute the structural checks over the read-only DB role → a verdict per
     // ticket with evidence (behavioral checks escalate). Needs repo + branchOwner + verifyDbUrl configured.
     if (rest[0] === "run") {

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { catalogProbe, type CheckOutcome } from "../src/shared/verify-catalog.ts";
+import { catalogProbe, catalogChecksForTable, type CheckOutcome } from "../src/shared/verify-catalog.ts";
 import { planChecks } from "../src/shared/verify-plan.ts";
 import type { VerifyCheck } from "../src/shared/verify-plan.ts";
 
@@ -19,6 +19,13 @@ describe("catalogProbe (verify sweep V2b — structural checks over pg_catalog)"
     expect(catalogProbe(check("data-integrity"))).not.toBeNull();
     expect(catalogProbe(check("server-logic", "pay"))).toBeNull(); // http → no catalog proxy
     expect(catalogProbe(check("storage"))).toBeNull(); // session → no catalog proxy
+  });
+
+  test("catalogChecksForTable builds the four structural checks, each db-read + targeted at the table (probeable)", () => {
+    const checks = catalogChecksForTable("profiles");
+    expect(checks.map((c) => c.property).sort()).toEqual(["data-integrity", "rls", "schema", "trigger"]);
+    expect(checks.every((c) => c.mechanism === "db-read" && c.target === "profiles")).toBe(true);
+    expect(checks.every((c) => catalogProbe(c) != null)).toBe(true); // every one yields a runnable probe
   });
 
   test("a db-read check with no derivable target table has no probe (→ escalate)", () => {

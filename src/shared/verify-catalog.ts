@@ -105,6 +105,15 @@ export function publicTableNames(rows: CatalogRow[]): string[] {
   return rows.map((r) => String(r.name));
 }
 
+/** The four structural (db-read) checks for one named table — rls / schema / trigger / data-integrity, each
+ *  targeted at it. For the verify-probe tool (V4c-1): run every catalog check on a table on demand. Pure. */
+export function catalogChecksForTable(table: string): VerifyCheck[] {
+  return (["rls", "schema", "trigger", "data-integrity"] as const).map((property) => ({
+    property, target: table, mechanism: "db-read", safetyTier: "read-only",
+    assertion: `structural ${property} check on ${table}`,
+  }));
+}
+
 /**
  * The catalog probe for a `db-read` check, or null when it isn't catalog-derivable — a non-db-read mechanism
  * (session/http → behavioral) or no target table the migration file yielded. The runner escalates a null.

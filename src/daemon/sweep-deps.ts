@@ -21,7 +21,7 @@ import type { SweepEngineDeps, ReviewVerdict, WorkerResult, WorkerFeedback, Poll
 import { territoryWarning, type Territory } from "../shared/collision.ts";
 import { fetchPr, listPrsForBranch, prFiles } from "./github.ts";
 import { branchName, prBranchCandidates } from "./worktree.ts";
-import { awaitCompletion, runEphemeralInspector } from "./spawn-wait.ts";
+import { awaitCompletion, runEphemeralInspector, spawnClaudeAgent } from "./spawn-wait.ts";
 import { runWithDeadline } from "./ssh.ts";
 
 // --- pure mappers (unit-tested) --------------------------------------------
@@ -157,11 +157,7 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
   const deadline = cfg.spawnDeadlineMs ?? DEFAULT_SPAWN_DEADLINE_MS;
 
   const spawnAndWait = async (seed: string, opts: { ignoreSeedTicket?: boolean } = {}): Promise<string> => {
-    const session = await cfg.manager.spawn({
-      taskId: cfg.taskId, tool: "claude", location: "local", cwd: cfg.cwd,
-      usesWorktree: true, permissions: "full-access", repo: cfg.repo, seed,
-      ignoreSeedTicket: opts.ignoreSeedTicket,
-    });
+    const session = await spawnClaudeAgent(cfg.manager, { taskId: cfg.taskId, cwd: cfg.cwd, repo: cfg.repo, seed, ignoreSeedTicket: opts.ignoreSeedTicket });
     await awaitCompletion(cfg.tracker, session.id, deadline);
     return session.id;
   };

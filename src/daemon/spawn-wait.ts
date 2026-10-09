@@ -11,9 +11,31 @@ import { join } from "node:path";
 import { sessionDir } from "../shared/paths.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { StatusTracker } from "./monitors/status.ts";
-import type { SessionStatus } from "../shared/types.ts";
+import type { Session, SessionStatus } from "../shared/types.ts";
 
 const TERMINAL: ReadonlySet<SessionStatus> = new Set<SessionStatus>(["done", "exited", "error"]);
+
+export interface ClaudeAgentSpawn {
+  taskId: string;
+  cwd: string;
+  repo: string;
+  seed: string;
+  /** Give the spawn a throwaway branch instead of deriving one from a ticket in the seed (see SpawnParams). */
+  ignoreSeedTicket?: boolean;
+}
+
+/**
+ * Spawn a full-access `claude` session in its own worktree — the single definition of "what a sweep/verify
+ * agent is". The caller owns the lifecycle after this (await, read a verdict, kill + reap): a sweep worker
+ * keeps its PTY and releases the worktree only once a PR exists; an inspector always kills + reaps.
+ */
+export function spawnClaudeAgent(manager: SessionManager, p: ClaudeAgentSpawn): Promise<Session> {
+  return manager.spawn({
+    taskId: p.taskId, tool: "claude", location: "local", cwd: p.cwd,
+    usesWorktree: true, permissions: "full-access", repo: p.repo, seed: p.seed,
+    ignoreSeedTicket: p.ignoreSeedTicket,
+  });
+}
 
 /** Resolve when `sessionId` reaches a terminal status; reject if `deadlineMs` (> 0) elapses first. */
 export function awaitCompletion(tracker: StatusTracker, sessionId: string, deadlineMs = 0): Promise<SessionStatus> {
@@ -49,10 +71,7 @@ export interface EphemeralInspectorConfig {
  * the raw file contents, or "" when missing — callers fail closed on "". Shared by the sweep reviewer + verify.
  */
 export async function runEphemeralInspector(cfg: EphemeralInspectorConfig, seed: string, verdictFile: string): Promise<{ sessionId: string; raw: string }> {
-  const session = await cfg.manager.spawn({
-    taskId: cfg.taskId, tool: "claude", location: "local", cwd: cfg.cwd,
-    usesWorktree: true, permissions: "full-access", repo: cfg.repo, seed, ignoreSeedTicket: true,
-  });
+  const session = await spawnClaudeAgent(cfg.manager, { taskId: cfg.taskId, cwd: cfg.cwd, repo: cfg.repo, seed, ignoreSeedTicket: true });
   try {
     await awaitCompletion(cfg.tracker, session.id, cfg.deadlineMs ?? 0);
     let raw = "";

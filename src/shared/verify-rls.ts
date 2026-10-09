@@ -23,7 +23,7 @@ export interface TableAccess {
  * reads: anon tells us whether unauthenticated access is blocked; the signed-in read tells us whether an
  * authenticated user is actually permitted (distinguishing "RLS gates by auth" from "locked to everyone").
  *  - anon reads ≥1 row + a public-read policy      ⇒ pass (the schema DECLARES the table public — anon reading it
- *                                                   is the policy working, not a leak; `hasPublicReadPolicy`)
+ *                                                   is the policy working, not a leak; `isPublic`)
  *  - anon reads ≥1 row + no public-read policy      ⇒ inconclusive (nothing explains the anon read — an RLS gap? a
  *                                                   human decides; counts alone can't prove intent)
  *  - anon blocked (denied/0) + signed-in permitted  ⇒ pass (RLS gates by auth: anon can't read, the owner can)

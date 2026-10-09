@@ -19,6 +19,11 @@ describe("publicReadPolicyProbe / hasPublicReadPolicy (declared-public intent si
     expect(p.sql).toContain("polcmd in ('r', '*')"); // SELECT or ALL
     expect(p.sql).toContain("polpermissive");
     expect(p.sql).toContain("pg_get_expr"); // renders the USING qual to compare against 'true'
+    // safety-critical: the policy must REACH anon (PUBLIC or the anon role) — a TO authenticated policy must not
+    // count, else a real anon leak behind one could be blessed as public. And no coalesce (a null qual stays out).
+    expect(p.sql).toContain("0 = any(p.polroles)"); // PUBLIC (no TO clause)
+    expect(p.sql).toContain("rolname = 'anon'"); // or an explicit TO anon
+    expect(p.sql).not.toContain("coalesce"); // a null qual must NOT be treated as public
   });
 
   test("hasPublicReadPolicy is true only when the count is > 0", () => {

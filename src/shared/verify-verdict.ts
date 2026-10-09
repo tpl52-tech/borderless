@@ -20,12 +20,25 @@ export interface CheckResult {
   evidence: string;
 }
 
+/**
+ * One grounded finding from the verification agent (V4, COR-87): did a specific acceptance criterion hold, with
+ * evidence. The agent adds depth on top of the deterministic bars; it reports pass/fail/inconclusive (never
+ * "escalated" — it either verified, found a problem, or couldn't determine), and it can never override a bar.
+ */
+export interface AgentFinding {
+  criterion: string;
+  status: "pass" | "fail" | "inconclusive";
+  evidence: string;
+}
+
 /** A ticket's overall verdict. "ui" ⇒ no invisible properties (human QA covers it); the sweep did nothing. */
 export type Verdict = "verified" | "needs_human" | "ui";
 
 export interface TicketVerdict {
   verdict: Verdict;
   results: CheckResult[];
+  /** The agent's grounded findings (V4); empty on a deterministic-only run. */
+  agentFindings: AgentFinding[];
   summary: Record<CheckStatus, number>;
 }
 
@@ -39,15 +52,18 @@ export interface VerifyRunResult {
 }
 
 /**
- * Roll per-check results into a ticket verdict. Pure.
- *  - no checks        ⇒ "ui"          (nothing invisible to verify; human QA owns it)
- *  - every check pass ⇒ "verified"
- *  - anything else    ⇒ "needs_human" (a fail, an inconclusive, or an escalated behavioral check)
+ * Roll the deterministic bars AND the agent's grounded findings into one ticket verdict. Pure.
+ *  - nothing checked    ⇒ "ui"          (no invisible properties; human QA owns it)
+ *  - EVERY check passes  ⇒ "verified"    (every deterministic bar AND every agent finding passed)
+ *  - anything else      ⇒ "needs_human" (a failing/inconclusive/escalated bar, or a failing/inconclusive agent
+ *                                        finding) — bars and agent are a shared floor: neither overrides the
+ *                                        other, so a verified ticket cleared both.
  */
-export function rollupVerdict(results: CheckResult[]): TicketVerdict {
+export function rollupVerdict(results: CheckResult[], agentFindings: AgentFinding[] = []): TicketVerdict {
   const summary: Record<CheckStatus, number> = { pass: 0, fail: 0, inconclusive: 0, escalated: 0 };
   for (const r of results) summary[r.status]++;
-  const verdict: Verdict =
-    results.length === 0 ? "ui" : summary.pass === results.length ? "verified" : "needs_human";
-  return { verdict, results, summary };
+  const checked = results.length + agentFindings.length;
+  const allPass = results.every((r) => r.status === "pass") && agentFindings.every((f) => f.status === "pass");
+  const verdict: Verdict = checked === 0 ? "ui" : allPass ? "verified" : "needs_human";
+  return { verdict, results, agentFindings, summary };
 }

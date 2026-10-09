@@ -28,9 +28,10 @@ describe("publicReadPolicyProbe / hasPublicReadPolicy (declared-public intent si
     expect(hasPublicReadPolicy([])).toBe(false);
   });
 
-  test("the probe's own interpret mirrors the parser (pass when a public policy exists)", () => {
+  test("the probe's own interpret mirrors the parser (pass when a public policy exists, else inconclusive)", () => {
     expect(publicReadPolicyProbe("profiles").interpret([{ public_read_policies: 1 }]).status).toBe("pass");
-    expect(publicReadPolicyProbe("items").interpret([{ public_read_policies: 0 }]).status).toBe("fail");
+    // absence ⇒ inconclusive (can't tell "no public policy" from "table absent"), matching the module's bias
+    expect(publicReadPolicyProbe("items").interpret([{ public_read_policies: 0 }]).status).toBe("inconclusive");
   });
 });
 

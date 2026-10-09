@@ -9,7 +9,7 @@ import type { Store } from "./store.ts";
 import type { LinearIssue } from "../shared/types.ts";
 import { verifyRow, issueText } from "../shared/verify.ts";
 import { planChecks, tableFromText } from "../shared/verify-plan.ts";
-import { catalogProbe, type CatalogProbe, type CatalogRow, type CheckOutcome } from "../shared/verify-catalog.ts";
+import { catalogProbe, publicReadPolicyProbe, hasPublicReadPolicy, type CatalogProbe, type CatalogRow, type CheckOutcome } from "../shared/verify-catalog.ts";
 import { rollupVerdict, type AgentFinding, type CheckResult, type VerifyRunRow } from "../shared/verify-verdict.ts";
 
 export interface VerifyRunDeps {
@@ -21,10 +21,7 @@ export interface VerifyRunDeps {
   knownTables?: readonly string[];
   /** Behavioral RLS probe (app session). When set, each RLS table also gets a "does RLS actually gate reads?"
    *  check on top of the structural "a policy exists" one. Absent → only the structural check runs. */
-  rlsProbe?: (table: string, hasPublicReadPolicy?: boolean) => Promise<CheckOutcome>;
-  /** Whether a table declares an unconditional public SELECT policy (catalog). Lets the behavioral check pass an
-   *  anon read the schema deliberately allows, instead of flagging it. Absent → treated as no public policy. */
-  publicReadPolicy?: (table: string) => Promise<boolean>;
+  rlsProbe?: (table: string, isPublic?: boolean) => Promise<CheckOutcome>;
   /** Run the verification agent for a ticket → its grounded findings (PRD §13 V4). Absent → deterministic-only.
    *  Invoked only for tickets with ≥1 backend property (a pure-UI ticket has nothing invisible to verify). */
   runAgent?: (issue: LinearIssue) => Promise<AgentFinding[]>;
@@ -66,11 +63,11 @@ async function runBars(backendProperties: VerifyRunRow["backendProperties"], pat
     for (const table of rlsTables) {
       const base = { property: "rls" as const, target: table, mechanism: "session" as const,
         assertion: `Unauthenticated reads of ${table} are denied unless the schema declares it public; an authenticated user is permitted only what RLS allows.` };
-      // Resolve the table's declared intent from the catalog first (a permissive public SELECT policy), so an
-      // anon read the schema deliberately allows passes instead of flagging. A lookup failure falls back to the
-      // conservative "no public policy" — never blocks the behavioral read.
+      // Resolve the table's declared intent from the catalog first (an anon-reachable public SELECT policy), so
+      // an anon read the schema deliberately allows passes instead of flagging. Reuses the catalogRun seam; a
+      // lookup failure falls back to the conservative "no public policy" and never blocks the behavioral read.
       results.push(await runCheck(base, async () => {
-        const isPublic = deps.publicReadPolicy ? await deps.publicReadPolicy(table).catch(() => false) : false;
+        const isPublic = await deps.catalogRun(publicReadPolicyProbe(table)).then(hasPublicReadPolicy).catch(() => false);
         return rlsProbe(table, isPublic);
       }, "behavioral RLS check failed"));
     }

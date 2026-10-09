@@ -94,10 +94,18 @@ const PROBES: Partial<Record<BackendProperty, (target: string) => CatalogProbe>>
 };
 
 /**
- * Catalog probe: does `table` declare itself PUBLICLY READABLE — a permissive SELECT (or ALL) policy whose
- * USING qualifier is literally `true`? That policy is the schema's own statement of intent, so the behavioral
- * RLS check can treat an anon read as expected (pass) rather than a possible leak (inconclusive). Catalog-only.
- * `pg_get_expr` renders the stored qual; a SELECT policy written `USING (true)` renders as `true`.
+ * Catalog probe: does `table` declare itself readable BY ANONYMOUS CLIENTS — a permissive SELECT (or ALL)
+ * policy, applying to PUBLIC or the `anon` role, whose USING qualifier is literally `true`? That policy is the
+ * schema's own statement that anon reads are intended, so the behavioral RLS check can treat an anon read as
+ * expected (pass) rather than a possible leak (inconclusive). Catalog-only.
+ *
+ * The role scope is load-bearing for safety: a `TO authenticated USING (true)` policy lets *logged-in* users
+ * read all rows but says nothing about anon — counting it would let a real anon leak masquerade as intended.
+ * So we require PUBLIC (`polroles` contains oid 0 — the default when a policy has no TO clause) or a role named
+ * `anon`. The qual must render as exactly `true` (a null qual — e.g. an ALL policy with only WITH CHECK — does
+ * NOT match and so is never blessed as public). At runtime the authoritative reader is `hasPublicReadPolicy`;
+ * `interpret` only serves the CatalogProbe shape + a direct `verify probe`, and follows the module's
+ * precision-bias (absence ⇒ inconclusive, never a hard fail).
  */
 export function publicReadPolicyProbe(table: string): CatalogProbe {
   return {
@@ -108,16 +116,19 @@ export function publicReadPolicyProbe(table: string): CatalogProbe {
           where c.relname = $1 and n.nspname = 'public'
             and p.polcmd in ('r', '*')       -- SELECT or ALL
             and p.polpermissive              -- permissive, not restrictive
-            and coalesce(pg_catalog.pg_get_expr(p.polqual, p.polrelid), 'true') = 'true'`,
+            and pg_catalog.pg_get_expr(p.polqual, p.polrelid) = 'true'  -- unconditional (null qual → no match)
+            and ( 0 = any(p.polroles)        -- PUBLIC (no TO clause) — reaches anon
+               or exists (select 1 from pg_catalog.pg_roles r
+                            where r.oid = any(p.polroles) and r.rolname = 'anon') )`,
     params: [table],
     interpret: (rows) =>
       hasPublicReadPolicy(rows)
-        ? { status: "pass", evidence: `${table} has a permissive public SELECT policy (USING true)` }
-        : { status: "fail", evidence: `${table} has no unconditional public SELECT policy` },
+        ? { status: "pass", evidence: `${table} has a permissive anon/PUBLIC SELECT policy (USING true)` }
+        : { status: "inconclusive", evidence: `no unconditional anon/PUBLIC SELECT policy on ${table} (or the table is absent)` },
   };
 }
 
-/** Parse publicReadPolicyProbe's rows → whether an unconditional public SELECT policy exists on the table. Pure. */
+/** Parse publicReadPolicyProbe's rows → whether an anon-reachable unconditional SELECT policy exists. Pure. */
 export function hasPublicReadPolicy(rows: CatalogRow[]): boolean {
   return num(rows[0]?.public_read_policies) > 0;
 }

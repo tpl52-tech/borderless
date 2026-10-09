@@ -15,7 +15,6 @@ function deps(over: Partial<VerifyRunDeps> & { paths?: string[]; rows?: CatalogR
     catalogRun: over.catalogRun ?? (async () => over.rows ?? [PASS_ROW]),
     ...(over.knownTables ? { knownTables: over.knownTables } : {}),
     ...(over.rlsProbe ? { rlsProbe: over.rlsProbe } : {}),
-    ...(over.publicReadPolicy ? { publicReadPolicy: over.publicReadPolicy } : {}),
     ...(over.runAgent ? { runAgent: over.runAgent } : {}),
     ...(over.stateName ? { stateName: over.stateName } : {}),
   };
@@ -106,34 +105,43 @@ describe("verifyTicket — behavioral RLS pass", () => {
     expect(r.results.filter((c) => c.property === "rls").map((c) => c.mechanism)).toEqual(["db-read"]);
   });
 
-  test("a declared public-read policy flows through, so an anon read passes instead of flagging", async () => {
+  // The public-read-policy flag is resolved through the catalogRun seam (publicReadPolicyProbe → its SQL names
+  // `public_read_policies`), so these fakes branch on that to feed the policy lookup vs the structural probes.
+  const policyAware = (policyRows: CatalogRow[] | "throw") =>
+    async (probe: CatalogProbe): Promise<CatalogRow[]> => {
+      if (!probe.sql.includes("public_read_policies")) return [PASS_ROW]; // structural probes pass
+      if (policyRows === "throw") throw new Error("catalog down");
+      return policyRows;
+    };
+
+  test("a declared anon-readable policy flows through, so an anon read passes instead of flagging", async () => {
     const i = issue("COR-27", "profiles table: deny-all RLS baseline", "a user cannot read another user's row");
     const r = await verifyTicket(i, deps({
       paths: [], knownTables: ["profiles"],
-      publicReadPolicy: async () => true,
-      rlsProbe: async (table, hasPublic) => hasPublic
+      catalogRun: policyAware([{ public_read_policies: 1 }]),
+      rlsProbe: async (table, isPublic) => isPublic
         ? { status: "pass", evidence: `anon read of ${table} expected — public policy` }
         : { status: "inconclusive", evidence: `anon can read ${table}` },
     }));
     expect(r.results.find((c) => c.property === "rls" && c.mechanism === "session")!.status).toBe("pass");
   });
 
-  test("no public-read policy ⇒ the flag stays false and the probe can still flag the anon read", async () => {
+  test("no anon-readable policy ⇒ the flag stays false and the probe can still flag the anon read", async () => {
     const i = issue("COR-27", "profiles table: deny-all RLS baseline", "a user cannot read another user's row");
     const r = await verifyTicket(i, deps({
       paths: [], knownTables: ["profiles"],
-      publicReadPolicy: async () => false,
-      rlsProbe: async (table, hasPublic) => ({ status: hasPublic ? "pass" : "inconclusive", evidence: `anon can read ${table}` }),
+      catalogRun: policyAware([{ public_read_policies: 0 }]),
+      rlsProbe: async (table, isPublic) => ({ status: isPublic ? "pass" : "inconclusive", evidence: `anon can read ${table}` }),
     }));
     expect(r.results.find((c) => c.property === "rls" && c.mechanism === "session")!.status).toBe("inconclusive");
   });
 
-  test("a throwing publicReadPolicy falls back to false — the behavioral read still runs, never crashes", async () => {
+  test("a failing public-policy lookup falls back to false — the behavioral read still runs, never crashes", async () => {
     const i = issue("COR-27", "profiles: deny-all RLS", "a user cannot read another user's row");
     const r = await verifyTicket(i, deps({
       paths: [], knownTables: ["profiles"],
-      publicReadPolicy: async () => { throw new Error("catalog down"); },
-      rlsProbe: async (_table, hasPublic) => ({ status: hasPublic ? "pass" : "inconclusive", evidence: "x" }),
+      catalogRun: policyAware("throw"),
+      rlsProbe: async (_table, isPublic) => ({ status: isPublic ? "pass" : "inconclusive", evidence: "x" }),
     }));
     expect(r.results.find((c) => c.property === "rls" && c.mechanism === "session")!.status).toBe("inconclusive");
   });

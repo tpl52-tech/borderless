@@ -29,13 +29,13 @@ export interface TableAccess {
  *  - anon blocked (denied/0) + signed-in permitted  ⇒ pass (RLS gates by auth: anon can't read, the owner can)
  *  - anon blocked + signed-in ALSO denied           ⇒ inconclusive (over-locked, or the test user lacks access?)
  *
- * `hasPublicReadPolicy` is the authoritative intent signal: a permissive `SELECT USING (true)` policy on the
- * table (from the catalog). It's the fix for crying wolf on tables the migration deliberately made public — we
- * resolve intent from the policy, never by blanket-trusting an anon read.
+ * `isPublic` is the authoritative intent signal: an anon-reachable permissive `SELECT USING (true)` policy on
+ * the table (from the catalog — see publicReadPolicyProbe). It's the fix for crying wolf on tables the migration
+ * deliberately made public — we resolve intent from the policy, never by blanket-trusting an anon read.
  */
-export function rlsBehavioralOutcome(anon: TableAccess, authed: TableAccess, table: string, hasPublicReadPolicy = false): CheckOutcome {
+export function rlsBehavioralOutcome(anon: TableAccess, authed: TableAccess, table: string, isPublic = false): CheckOutcome {
   if (!anon.denied && anon.count > 0) {
-    return hasPublicReadPolicy
+    return isPublic
       ? { status: "pass", evidence: `anon can read ${anon.count} row(s) of ${table} — expected: a permissive public SELECT policy (USING true) declares it publicly readable` }
       : { status: "inconclusive", evidence: `anon can read ${anon.count} row(s) of ${table} without signing in, and no public-read policy explains it — an RLS gap? needs a human` };
   }

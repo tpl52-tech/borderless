@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { catalogProbe, catalogChecksForTable, type CheckOutcome } from "../src/shared/verify-catalog.ts";
+import { catalogProbe, catalogChecksForTable, publicReadPolicyProbe, hasPublicReadPolicy, type CheckOutcome } from "../src/shared/verify-catalog.ts";
 import { planChecks } from "../src/shared/verify-plan.ts";
 import type { VerifyCheck } from "../src/shared/verify-plan.ts";
 
@@ -10,6 +10,29 @@ function check(property: VerifyCheck["property"], target = "profiles"): VerifyCh
   return planChecks([property], [`supabase/policies/${target}.sql`])[0]!;
 }
 const run = (c: VerifyCheck, rows: Record<string, unknown>[]): CheckOutcome => catalogProbe(c)!.interpret(rows);
+
+describe("publicReadPolicyProbe / hasPublicReadPolicy (declared-public intent signal)", () => {
+  test("the SQL targets a permissive, true-qual SELECT/ALL policy on the public table", () => {
+    const p = publicReadPolicyProbe("profiles");
+    expect(p.params).toEqual(["profiles"]);
+    expect(p.sql).toContain("pg_catalog.pg_policy");
+    expect(p.sql).toContain("polcmd in ('r', '*')"); // SELECT or ALL
+    expect(p.sql).toContain("polpermissive");
+    expect(p.sql).toContain("pg_get_expr"); // renders the USING qual to compare against 'true'
+  });
+
+  test("hasPublicReadPolicy is true only when the count is > 0", () => {
+    expect(hasPublicReadPolicy([{ public_read_policies: 1 }])).toBe(true);
+    expect(hasPublicReadPolicy([{ public_read_policies: "2" }])).toBe(true); // bigint-as-string
+    expect(hasPublicReadPolicy([{ public_read_policies: 0 }])).toBe(false);
+    expect(hasPublicReadPolicy([])).toBe(false);
+  });
+
+  test("the probe's own interpret mirrors the parser (pass when a public policy exists)", () => {
+    expect(publicReadPolicyProbe("profiles").interpret([{ public_read_policies: 1 }]).status).toBe("pass");
+    expect(publicReadPolicyProbe("items").interpret([{ public_read_policies: 0 }]).status).toBe("fail");
+  });
+});
 
 describe("catalogProbe (verify sweep V2b — structural checks over pg_catalog)", () => {
   test("only db-read checks get a probe; behavioral (session/http) ones escalate (null)", () => {

@@ -22,14 +22,22 @@ export interface TableAccess {
  * Turn an anonymous read and a signed-in read of one table into a behavioral RLS outcome. Pure — it uses BOTH
  * reads: anon tells us whether unauthenticated access is blocked; the signed-in read tells us whether an
  * authenticated user is actually permitted (distinguishing "RLS gates by auth" from "locked to everyone").
- *  - anon reads ≥1 row                            ⇒ inconclusive (a public table, or an RLS gap? a human decides —
- *                                                   counts can't separate public-by-design from a leak)
- *  - anon blocked (denied/0) + signed-in permitted ⇒ pass (RLS gates by auth: anon can't read, the owner can)
- *  - anon blocked + signed-in ALSO denied          ⇒ inconclusive (over-locked, or the test user lacks access?)
+ *  - anon reads ≥1 row + a public-read policy      ⇒ pass (the schema DECLARES the table public — anon reading it
+ *                                                   is the policy working, not a leak; `hasPublicReadPolicy`)
+ *  - anon reads ≥1 row + no public-read policy      ⇒ inconclusive (nothing explains the anon read — an RLS gap? a
+ *                                                   human decides; counts alone can't prove intent)
+ *  - anon blocked (denied/0) + signed-in permitted  ⇒ pass (RLS gates by auth: anon can't read, the owner can)
+ *  - anon blocked + signed-in ALSO denied           ⇒ inconclusive (over-locked, or the test user lacks access?)
+ *
+ * `hasPublicReadPolicy` is the authoritative intent signal: a permissive `SELECT USING (true)` policy on the
+ * table (from the catalog). It's the fix for crying wolf on tables the migration deliberately made public — we
+ * resolve intent from the policy, never by blanket-trusting an anon read.
  */
-export function rlsBehavioralOutcome(anon: TableAccess, authed: TableAccess, table: string): CheckOutcome {
+export function rlsBehavioralOutcome(anon: TableAccess, authed: TableAccess, table: string, hasPublicReadPolicy = false): CheckOutcome {
   if (!anon.denied && anon.count > 0) {
-    return { status: "inconclusive", evidence: `anon can read ${anon.count} row(s) of ${table} without signing in — an intended public table, or an RLS gap? needs a human` };
+    return hasPublicReadPolicy
+      ? { status: "pass", evidence: `anon can read ${anon.count} row(s) of ${table} — expected: a permissive public SELECT policy (USING true) declares it publicly readable` }
+      : { status: "inconclusive", evidence: `anon can read ${anon.count} row(s) of ${table} without signing in, and no public-read policy explains it — an RLS gap? needs a human` };
   }
   if (authed.denied) {
     return { status: "inconclusive", evidence: `anon is blocked on ${table}, but so is the signed-in user — over-locked, or does the test user legitimately lack access? needs a human` };

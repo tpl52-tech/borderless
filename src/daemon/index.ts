@@ -30,6 +30,7 @@ import { runVerify, verifyTicket, type VerifyRunDeps } from "./verify-run.ts";
 import { runVerifyAgent } from "./verify-agent-run.ts";
 import { liveVerifyAgentSpawn } from "./verify-agent-spawn.ts";
 import { openCatalogDb } from "./verify-db.ts";
+import { publicReadPolicyProbe, hasPublicReadPolicy } from "../shared/verify-catalog.ts";
 import { openAppSession } from "./verify-session.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
@@ -211,7 +212,8 @@ export function startDaemon(home = stateHome()): Daemon {
           : null;
         try {
           const knownTables = await db.tables().catch(() => [] as string[]); // best-effort text-targeting
-          const deps: VerifyRunDeps = { mergedPrFor, catalogRun: db.run, knownTables, ...(app ? { rlsProbe: app.rlsProbe } : {}), ...(runAgent ? { runAgent } : {}) };
+          const publicReadPolicy = async (t: string) => hasPublicReadPolicy(await db.run(publicReadPolicyProbe(t)));
+          const deps: VerifyRunDeps = { mergedPrFor, catalogRun: db.run, knownTables, publicReadPolicy, ...(app ? { rlsProbe: app.rlsProbe } : {}), ...(runAgent ? { runAgent } : {}) };
           if (ticketKey) {
             const issue = store.getLinearIssueByIdentifier(ticketKey);
             return { rows: issue ? [await verifyTicket(issue, deps)] : [], configured: true };

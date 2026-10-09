@@ -31,7 +31,9 @@ const BACKEND_SIGNALS: ReadonlyArray<readonly [BackendProperty, { text: RegExp; 
   // DB trigger, not the verb "triggers" — needs a DB-noun nearby, an explicit "db/sql trigger", or a migration path.
   ["trigger", { text: /\btrigger(?:s|ed|ing)?\b[^.\n]{0,40}\b(?:insert|inserts|row|rows|record|notification|table|function|on (?:approv|sold|insert|update|delete))|\b(?:insert|inserts|row|notification|record)[^.\n]{0,40}\btrigger|\b(?:db|database|sql)[- ]?trigger/, path: /(?:^|\/)migrations?\/|\.sql$/ }],
   ["schema", { text: /\b(?:migration|schema|constraint)\b/, path: /(?:^|\/)migrations?\/|\.sql$/ }],
-  ["server-logic", { text: /server[- ]side|\bjwt\b|webhook|signature|\bworker\b|server[- ]authoritative/, path: /(?:^|\/)functions?\// }],
+  // server-side code (a Worker/edge function), NOT the Postgres RLS idiom `auth.jwt()->>'sub'` (that's the `rls`
+  // property) — the negative lookbehind keeps "verify the jwt" / "jwt signature" while excluding `auth.jwt(`.
+  ["server-logic", { text: /server[- ]side|(?<!auth\.)\bjwt\b|webhook|signature|\bworker\b|server[- ]authoritative/, path: /(?:^|\/)functions?\// }],
   ["data-integrity", { text: /idempoten|duplicate|dedup|\bupsert\b/ }],
   // Supabase Storage — the negative lookbehinds keep bare "to Storage" recall while excluding the
   // device-local "local storage" / "async storage" senses, which are screen-observable (COR-35).

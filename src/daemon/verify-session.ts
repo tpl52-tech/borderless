@@ -12,8 +12,9 @@ import { rlsBehavioralOutcome, type TableAccess } from "../shared/verify-rls.ts"
 import type { CheckOutcome } from "../shared/verify-catalog.ts";
 
 export interface AppSession {
-  /** Behavioral RLS probe for one table: anon vs. signed-in read access → an outcome. */
-  rlsProbe: (table: string) => Promise<CheckOutcome>;
+  /** Behavioral RLS probe for one table: anon vs. signed-in read access → an outcome. `hasPublicReadPolicy`
+   *  (from the catalog) lets an anon read resolve to pass when the schema declares the table public. */
+  rlsProbe: (table: string, hasPublicReadPolicy?: boolean) => Promise<CheckOutcome>;
   /** Read a small sample of rows from a table — as the signed-in test user (RLS-bounded) or anonymously.
    *  Read-only (GET, capped limit); `denied` when the role may not read the table at all. */
   read: (table: string, opts?: { anon?: boolean; limit?: number }) => Promise<{ denied: boolean; rows: unknown[] }>;
@@ -48,9 +49,9 @@ async function tableAccess(c: VerifyAppConfig, table: string, token?: string): P
 export async function openAppSession(c: VerifyAppConfig): Promise<AppSession> {
   const token = await firebaseIdToken(c);
   return {
-    async rlsProbe(table) {
+    async rlsProbe(table, hasPublicReadPolicy = false) {
       const [anon, authed] = await Promise.all([tableAccess(c, table), tableAccess(c, table, token)]);
-      return rlsBehavioralOutcome(anon, authed, table);
+      return rlsBehavioralOutcome(anon, authed, table, hasPublicReadPolicy);
     },
     async read(table, opts) {
       const limit = Math.max(1, Math.min(opts?.limit ?? 5, 50)); // bounded sample

@@ -93,6 +93,35 @@ const PROBES: Partial<Record<BackendProperty, (target: string) => CatalogProbe>>
   }),
 };
 
+/**
+ * Catalog probe: does `table` declare itself PUBLICLY READABLE — a permissive SELECT (or ALL) policy whose
+ * USING qualifier is literally `true`? That policy is the schema's own statement of intent, so the behavioral
+ * RLS check can treat an anon read as expected (pass) rather than a possible leak (inconclusive). Catalog-only.
+ * `pg_get_expr` renders the stored qual; a SELECT policy written `USING (true)` renders as `true`.
+ */
+export function publicReadPolicyProbe(table: string): CatalogProbe {
+  return {
+    sql: `select count(*) as public_read_policies
+            from pg_catalog.pg_policy p
+            join pg_catalog.pg_class c on c.oid = p.polrelid
+            join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+          where c.relname = $1 and n.nspname = 'public'
+            and p.polcmd in ('r', '*')       -- SELECT or ALL
+            and p.polpermissive              -- permissive, not restrictive
+            and coalesce(pg_catalog.pg_get_expr(p.polqual, p.polrelid), 'true') = 'true'`,
+    params: [table],
+    interpret: (rows) =>
+      hasPublicReadPolicy(rows)
+        ? { status: "pass", evidence: `${table} has a permissive public SELECT policy (USING true)` }
+        : { status: "fail", evidence: `${table} has no unconditional public SELECT policy` },
+  };
+}
+
+/** Parse publicReadPolicyProbe's rows → whether an unconditional public SELECT policy exists on the table. Pure. */
+export function hasPublicReadPolicy(rows: CatalogRow[]): boolean {
+  return num(rows[0]?.public_read_policies) > 0;
+}
+
 /** The public-schema table names (catalog-only) — the live runner uses these to target a check from the ticket
  *  text when a merged PR yielded no path. The query lives here (not in the thin daemon client) so all the
  *  catalog SQL stays in one place. */

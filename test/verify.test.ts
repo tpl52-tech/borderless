@@ -34,6 +34,16 @@ describe("classifyVerification (verify sweep, PRD §13)", () => {
     expect(c.backendProperties).toEqual(["server-logic"]);
   });
 
+  test("the Postgres RLS idiom `auth.jwt()->>'sub'` does NOT tag server-logic (it's rls, not a Worker)", () => {
+    const c = classifyVerification("profiles: deny-all RLS baseline, self-write via auth.jwt()->>'sub'", ["supabase/migrations/0001_profiles.sql"]);
+    expect(c.backendProperties).toContain("rls");
+    expect(c.backendProperties).not.toContain("server-logic"); // auth.jwt( is excluded by the lookbehind
+  });
+
+  test("a genuine JWT-verifying server still tags server-logic (the lookbehind only excludes auth.jwt)", () => {
+    expect(classifyVerification("the worker must verify the jwt signature before pricing").backendProperties).toContain("server-logic");
+  });
+
   test("a mixed ticket — visible form + an invisible RLS property", () => {
     const c = classifyVerification(
       "Donate form: tap submit inserts an item and shows a success screen; RLS so only staff see pending items",

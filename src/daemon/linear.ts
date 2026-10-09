@@ -7,7 +7,7 @@
  */
 
 import type { Store } from "./store.ts";
-import { ISSUES_QUERY, issuesVariables, parseIssuesResponse } from "../shared/linear.ts";
+import { ISSUES_QUERY, issuesVariables, parseIssuesResponse, QA_CHILDREN_QUERY, parseQaChildrenPage } from "../shared/linear.ts";
 
 /** Minimal GraphQL client — the real one POSTs to Linear; tests inject a fake. */
 export interface LinearClient {
@@ -55,4 +55,19 @@ export async function syncLinearIssues(
     } while (after);
   }
   return { synced };
+}
+
+/**
+ * The dev tickets that already have a `manual-qa` child — the verify-qa idempotency set. Fully paginated: this
+ * is the sole basis of "don't re-create", so it must never truncate. Loops the cursor like syncLinearIssues.
+ */
+export async function fetchQaChildParentKeys(client: LinearClient, teamKey: string, label: string): Promise<string[]> {
+  const keys: string[] = [];
+  let after: string | null = null;
+  do {
+    const page = parseQaChildrenPage(await client.query(QA_CHILDREN_QUERY, { teamKey, label, after }));
+    keys.push(...page.parentKeys);
+    after = page.next;
+  } while (after);
+  return keys;
 }

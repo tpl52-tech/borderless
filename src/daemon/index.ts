@@ -28,6 +28,7 @@ import { reapWorktrees } from "./worktree.ts";
 import { verifyScan, liveMergedPrFor } from "./verify-scan.ts";
 import { runVerify, verifyTicket } from "./verify-run.ts";
 import { openCatalogDb } from "./verify-db.ts";
+import { openAppSession } from "./verify-session.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
@@ -184,9 +185,11 @@ export function startDaemon(home = stateHome()): Daemon {
     if (verifyDbUrl) {
       runVerifyRun = async (ticketKey) => {
         const db = openCatalogDb(verifyDbUrl);
+        // Behavioral RLS: sign in once per run (best-effort — a sign-in failure degrades to structural-only).
+        const app = config.verifyApp ? await openAppSession(config.verifyApp).catch(() => null) : null;
         try {
           const knownTables = await db.tables().catch(() => [] as string[]); // best-effort text-targeting
-          const deps = { mergedPrFor, catalogRun: db.run, knownTables };
+          const deps = { mergedPrFor, catalogRun: db.run, knownTables, ...(app ? { rlsProbe: app.rlsProbe } : {}) };
           if (ticketKey) {
             const issue = store.getLinearIssueByIdentifier(ticketKey);
             return { rows: issue ? [await verifyTicket(issue, deps)] : [], configured: true };

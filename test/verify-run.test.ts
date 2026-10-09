@@ -13,6 +13,7 @@ function deps(over: Partial<VerifyRunDeps> & { paths?: string[]; rows?: CatalogR
     mergedPrFor: async () => ({ prNumber: 7, paths: over.paths ?? [] }),
     catalogRun: over.catalogRun ?? (async () => over.rows ?? [PASS_ROW]),
     ...(over.knownTables ? { knownTables: over.knownTables } : {}),
+    ...(over.rlsProbe ? { rlsProbe: over.rlsProbe } : {}),
     ...(over.stateName ? { stateName: over.stateName } : {}),
   };
 }
@@ -70,6 +71,36 @@ describe("verifyTicket (verify sweep V2b — execute structural checks → verdi
     expect(r.verdict).toBe("needs_human");
     expect(r.results.find((c) => c.property === "rls")!.status).toBe("inconclusive");
     expect(r.results.find((c) => c.property === "rls")!.evidence).toContain("connection reset");
+  });
+});
+
+describe("verifyTicket — behavioral RLS pass", () => {
+  test("when an rlsProbe is injected, each RLS table gets a second (session) check on top of the catalog one", async () => {
+    const i = issue("COR-27", "profiles table: deny-all RLS baseline", "a user cannot read another user's row");
+    const r = await verifyTicket(i, deps({
+      paths: [], knownTables: ["profiles"],
+      rlsProbe: async (table) => ({ status: "inconclusive", evidence: `anon can read 5 rows of ${table}` }),
+    }));
+    const rls = r.results.filter((c) => c.property === "rls");
+    expect(rls.map((c) => c.mechanism).sort()).toEqual(["db-read", "session"]); // structural + behavioral
+    const behavioral = rls.find((c) => c.mechanism === "session")!;
+    expect(behavioral.target).toBe("profiles");
+    expect(behavioral.status).toBe("inconclusive");
+    expect(r.verdict).toBe("needs_human"); // the behavioral inconclusive pulls it off "verified"
+  });
+
+  test("a throwing rlsProbe degrades that check to inconclusive, never crashes the ticket", async () => {
+    const i = issue("COR-27", "profiles table: deny-all RLS", "a user cannot read another user's row");
+    const r = await verifyTicket(i, deps({ paths: [], knownTables: ["profiles"], rlsProbe: async () => { throw new Error("sign-in expired"); } }));
+    const behavioral = r.results.find((c) => c.property === "rls" && c.mechanism === "session")!;
+    expect(behavioral.status).toBe("inconclusive");
+    expect(behavioral.evidence).toContain("sign-in expired");
+  });
+
+  test("no rlsProbe ⇒ only the structural RLS check (behavioral pass skipped)", async () => {
+    const i = issue("COR-27", "profiles table: deny-all RLS", "a user cannot read another user's row");
+    const r = await verifyTicket(i, deps({ paths: [], knownTables: ["profiles"] }));
+    expect(r.results.filter((c) => c.property === "rls").map((c) => c.mechanism)).toEqual(["db-read"]);
   });
 });
 

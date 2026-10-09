@@ -9,7 +9,7 @@ import type { Store } from "./store.ts";
 import type { LinearIssue } from "../shared/types.ts";
 import { verifyRow, issueText } from "../shared/verify.ts";
 import { planChecks, tableFromText } from "../shared/verify-plan.ts";
-import { catalogProbe, type CatalogProbe, type CatalogRow } from "../shared/verify-catalog.ts";
+import { catalogProbe, type CatalogProbe, type CatalogRow, type CheckOutcome } from "../shared/verify-catalog.ts";
 import { rollupVerdict, type CheckResult, type VerifyRunRow } from "../shared/verify-verdict.ts";
 
 export interface VerifyRunDeps {
@@ -19,6 +19,9 @@ export interface VerifyRunDeps {
   catalogRun: (probe: CatalogProbe) => Promise<CatalogRow[]>;
   /** The real public-schema tables — used to target a catalog check from the ticket text when no PR path did. */
   knownTables?: readonly string[];
+  /** Behavioral RLS probe (app session). When set, each RLS table also gets a "does RLS actually gate reads?"
+   *  check on top of the structural "a policy exists" one. Absent → only the structural check runs. */
+  rlsProbe?: (table: string) => Promise<CheckOutcome>;
   /** Linear state treated as "Verifying" (default "Verifying"). */
   stateName?: string;
 }
@@ -44,6 +47,22 @@ export async function verifyTicket(issue: LinearIssue, deps: VerifyRunDeps): Pro
       results.push({ ...base, status: outcome.status, evidence: outcome.evidence });
     } catch (err) {
       results.push({ ...base, status: "inconclusive", evidence: `catalog query failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+
+  // Behavioral RLS pass (when an app session is configured): for each RLS table the structural checks targeted,
+  // confirm RLS actually GATES reads — the catalog check only proves a policy exists. Read-only, residue-free.
+  if (deps.rlsProbe) {
+    const rlsTables = [...new Set(results.filter((r) => r.property === "rls" && r.target).map((r) => r.target!))];
+    for (const table of rlsTables) {
+      const base = { property: "rls" as const, target: table, mechanism: "session" as const,
+        assertion: `Unauthenticated reads of ${table} are denied; the signed-in user reads only what RLS permits.` };
+      try {
+        const o = await deps.rlsProbe(table);
+        results.push({ ...base, status: o.status, evidence: o.evidence });
+      } catch (err) {
+        results.push({ ...base, status: "inconclusive", evidence: `behavioral RLS check failed: ${err instanceof Error ? err.message : String(err)}` });
+      }
     }
   }
   return { ...row, ...rollupVerdict(results) };

@@ -157,6 +157,19 @@ export interface OperatorConfigLite {
   /** Postgres connection string for the verify sweep's structural checks (PRD §13 V2b) — a SELECT-only /
    *  catalog-only role (secret; 0600 operator config only). Absent → `ao verify run` is a no-op. */
   verifyDbUrl?: string;
+  /** App session for the behavioral RLS check (PRD §13 V2b): sign in as a throwaway/test user and confirm RLS
+   *  actually gates reads (read-only, residue-free). All public-by-design except the test password; absent →
+   *  the behavioral RLS check is skipped (the structural catalog check still runs). */
+  verifyApp?: VerifyAppConfig;
+}
+
+/** The app-session config for the behavioral RLS check. The URL + keys are public (they ship in the app). */
+export interface VerifyAppConfig {
+  supabaseUrl: string;
+  anonKey: string;
+  firebaseApiKey: string;
+  testEmail: string;
+  testPassword: string;
 }
 
 /** Default Ask Borderless model (overridable via `openRouterModel`). */
@@ -206,7 +219,19 @@ export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
     webPort: Number.isInteger(raw.webPort) && raw.webPort >= 1 && raw.webPort <= 65535 ? raw.webPort : undefined,
     projectLabel: typeof raw.projectLabel === "string" && raw.projectLabel.trim() ? raw.projectLabel.trim() : undefined,
     verifyDbUrl: typeof raw.verifyDbUrl === "string" && raw.verifyDbUrl.trim() ? raw.verifyDbUrl.trim() : undefined,
+    verifyApp: parseVerifyApp(raw.verifyApp),
   };
+}
+
+/** Parse the verifyApp block — all five string fields must be present + non-empty, else the block is inactive. */
+function parseVerifyApp(raw: unknown): VerifyAppConfig | undefined {
+  if (raw == null || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const supabaseUrl = str(r.supabaseUrl), anonKey = str(r.anonKey), firebaseApiKey = str(r.firebaseApiKey);
+  const testEmail = str(r.testEmail), testPassword = str(r.testPassword);
+  if (!supabaseUrl || !anonKey || !firebaseApiKey || !testEmail || !testPassword) return undefined;
+  return { supabaseUrl, anonKey, firebaseApiKey, testEmail, testPassword };
 }
 
 /** The default lite config (no config file present). */

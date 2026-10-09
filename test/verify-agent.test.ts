@@ -25,6 +25,13 @@ describe("buildVerifyAgentSeed (verify sweep V4 — the agent's prompt)", () => 
     expect(buildVerifyAgentSeed({ identifier: "COR-1", title: "x", description: null })).toContain("(none provided)");
   });
 
+  test("probeCommand is spliced into the tools line when provided (else a generic reference)", () => {
+    const s = buildVerifyAgentSeed(issue, { probeCommand: "bun run /b/cli.ts verify probe" });
+    expect(s).toContain("bun run /b/cli.ts verify probe <table>");
+    expect(s).toContain("bun run /b/cli.ts verify probe read <table>");
+    expect(buildVerifyAgentSeed(issue)).toContain("the read-only verify-probe command"); // generic fallback
+  });
+
   test("an over-long acceptance-criteria body is truncated with a visible marker (no silent drop)", () => {
     const long = "x".repeat(5000);
     const s = buildVerifyAgentSeed({ identifier: "COR-1", title: "x", description: long });

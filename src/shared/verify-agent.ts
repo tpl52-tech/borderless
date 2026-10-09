@@ -25,6 +25,10 @@ export interface VerifyAgentSeedOpts {
   /** When true, the agent may make throwaway writes as a disposable test user (cleaning up); else read-only.
    *  Resolved at the composition layer from config.verifyAllowWrites (added with V4c). Default: read-only. */
   allowWrites?: boolean;
+  /** The exact invocation of the read-only verify-probe CLI, e.g. `bun run <borderless>/src/cli/index.ts verify
+   *  probe` — the engine passes the daemon's own path so the agent (running in the app repo's worktree) can call
+   *  it. Absent (tests) → a generic reference. */
+  probeCommand?: string;
 }
 
 /**
@@ -45,12 +49,13 @@ export function buildVerifyAgentSeed(
     : `You have READ-ONLY access: do NOT create, modify, or delete any data, run any write, or run migrations. If verifying a criterion would require a write, mark that finding "inconclusive" and say why.`;
   const acs = issue.description ?? "(none provided)";
   const acsShown = acs.length > MAX_AC_CHARS ? `${acs.slice(0, MAX_AC_CHARS)}\n…[acceptance criteria truncated]` : acs;
+  const probe = opts.probeCommand ?? "the read-only verify-probe command";
   return [
     `You are a backend VERIFICATION agent for ticket ${issue.identifier}: "${issue.title}".`,
     `Your job: confirm the ticket's acceptance criteria actually HOLD in the merged implementation — focus on the INVISIBLE, backend behavior QA cannot see from the app screen: RLS / data isolation, DB triggers & side-effects, schema / constraints, Worker server-logic, data integrity, Storage. You are in a git worktree with the full codebase and the change is merged.`,
     accessRule,
     `Ground EVERY finding in concrete evidence — a query result, a command's output, or a file:line reference. Never guess, never assume from the code alone that runtime behavior is correct; if you cannot actually verify something, its status is "inconclusive".`,
-    `Tools: read the code; use \`git log\` / \`git diff\` / \`gh pr view\` to see the change; and use the read-only verify-probe command (run it with \`--help\` for usage) to inspect the live database and app as an anonymous or test user.`,
+    `Tools: read the code; use \`git log\` / \`git diff\` / \`gh pr view\` to see the change; and use ${probe} to inspect the live database and app — \`${probe} <table>\` for a table's structural + RLS facts, \`${probe} read <table> [--anon]\` to read rows as the test user or anonymously. Run \`${probe} --help\`.`,
     `Acceptance criteria to verify:\n${acsShown}`,
     `When you are done, write ONLY a JSON object to $AO_SESSION_DIR/${VERIFY_VERDICT_FILE} — no prose, no markdown fences — of exactly this shape:`,
     `{ "findings": [ { "criterion": "<one acceptance criterion, in your own words>", "status": "pass" | "fail" | "inconclusive", "evidence": "<exactly what you observed that proves it>" } ] }`,

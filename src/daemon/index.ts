@@ -29,6 +29,8 @@ import { verifyScan, liveMergedPrFor } from "./verify-scan.ts";
 import { runVerify, verifyTicket, type VerifyRunDeps } from "./verify-run.ts";
 import { runVerifyAgent } from "./verify-agent-run.ts";
 import { liveVerifyAgentSpawn } from "./verify-agent-spawn.ts";
+import { runQaSubIssues } from "./verify-qa-run.ts";
+import { QA_LABEL, qaRunsheetPrompt } from "../shared/verify-qa.ts";
 import { openCatalogDb } from "./verify-db.ts";
 import { openAppSession } from "./verify-session.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
@@ -36,6 +38,7 @@ import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
 import { startWebServer, type WebServer } from "./web.ts";
 import { httpLinearClient, syncLinearIssues } from "./linear.ts";
+import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate } from "../shared/linear.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
 import { buildTerritory } from "../shared/collision.ts";
 import { liveSweepDeps, needsHydration, hydrateInReviewJob } from "./sweep-deps.ts";
@@ -180,6 +183,9 @@ export function startDaemon(home = stateHome()): Daemon {
   // V2b runner: runs the structural checks over the read-only DB role. Needs a repo (for the merged-PR lookup)
   // AND config.verifyDbUrl (the catalog role); absent either → a no-op. A DB connection is opened per run.
   let runVerifyRun: UdsServerDeps["verifyRun"] = async () => ({ rows: [], configured: false });
+  // PRD §13: author manual-QA sub-issues for the screen-observable Verifying tickets. Needs a repo (the scan) +
+  // linearApiKey (the write) + a team key; absent any → a no-op. Dry run by default; `write` gates creation.
+  let runVerifyQa: UdsServerDeps["verifyQa"] = async () => ({ results: [], configured: false, wrote: false });
   // The local working copy configured for a repo — the checkout a sweep/verify agent spawns its worktree from.
   const localCwdFor = (r: string | undefined) => (r ? config.profiles.find((pr) => pr.repo === r && pr.localCwd)?.localCwd : undefined);
   if (config.repo && config.branchOwner) {
@@ -220,6 +226,24 @@ export function startDaemon(home = stateHome()): Daemon {
         } finally {
           await db.close();
         }
+      };
+    }
+    const qaTeamKey = (config.linearTeamKeys ?? [])[0];
+    if (config.linearApiKey && qaTeamKey) {
+      const linear = httpLinearClient(config.linearApiKey);
+      const runsheetChat = claudeCliChat({ model: config.askModel }); // subscription ($0) — generates the tester run sheet
+      runVerifyQa = async (ticketKey, write = false) => {
+        const scanned = await verifyScan(store, { mergedPrFor });
+        const rows = ticketKey ? scanned.filter((r) => r.ticketKey === ticketKey) : scanned;
+        const results = await runQaSubIssues({
+          rows,
+          qaTargets: async () => parseQaTargets(await linear.query(QA_TARGETS_QUERY, { teamKey: qaTeamKey, label: QA_LABEL }), qaTeamKey, QA_LABEL),
+          issueByKey: (k) => store.getLinearIssueByIdentifier(k) ?? undefined,
+          generateRunsheet: async (issue) => (await runsheetChat([{ role: "user" as const, content: qaRunsheetPrompt(issue) }], [])).text ?? "",
+          createIssue: async (input) => parseIssueCreate(await linear.query(ISSUE_CREATE_MUTATION, { input })),
+          write,
+        });
+        return { results, configured: true, wrote: write };
       };
     }
   }
@@ -330,7 +354,7 @@ export function startDaemon(home = stateHome()): Daemon {
     return { synced, created, started };
   };
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun });
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, verifyQa: runVerifyQa });
 
   // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only. It is
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.

@@ -138,6 +138,43 @@ export function parseLeadOpsTargets(json: unknown, teamKey: string, project: str
   return { teamId, projectId };
 }
 
+// --- Manual-QA sub-issue targets (PRD §13) -----------------------------------------------------------------
+
+/**
+ * Resolve, in one round-trip, what creating manual-QA sub-issues needs: the team id, the `manual-qa` label id,
+ * and the dev tickets that ALREADY have a `manual-qa` child (so the plan stays idempotent). `$label` is the
+ * label name; the issues page is the existing children with their parent identifiers.
+ */
+export const QA_TARGETS_QUERY = `
+query BorderlessQaTargets($teamKey: String!, $label: String!) {
+  teams(filter: { key: { eq: $teamKey } }, first: 1) { nodes { id } }
+  issueLabels(filter: { name: { eq: $label } }, first: 1) { nodes { id } }
+  issues(filter: { team: { key: { eq: $teamKey } }, labels: { name: { eq: $label } } }, first: 250) {
+    nodes { parent { identifier } }
+  }
+}`;
+
+export interface QaTargets { teamId: string; labelId: string; existingParentKeys: string[] }
+
+/** Parse {@link QA_TARGETS_QUERY}; throws if the team or the `manual-qa` label is missing (fails loud). */
+export function parseQaTargets(json: unknown, teamKey: string, label: string): QaTargets {
+  const data = (json as {
+    data?: {
+      teams?: { nodes?: Array<{ id?: string }> };
+      issueLabels?: { nodes?: Array<{ id?: string }> };
+      issues?: { nodes?: Array<{ parent?: { identifier?: string } | null }> };
+    };
+  } | null)?.data;
+  const teamId = data?.teams?.nodes?.[0]?.id;
+  const labelId = data?.issueLabels?.nodes?.[0]?.id;
+  if (!teamId) throw new Error(`verify-qa: no Linear team with key "${teamKey}"`);
+  if (!labelId) throw new Error(`verify-qa: no Linear label named "${label}" — create it once in the workspace`);
+  const existingParentKeys = (data?.issues?.nodes ?? [])
+    .map((n) => n.parent?.identifier)
+    .filter((k): k is string => typeof k === "string");
+  return { teamId, labelId, existingParentKeys };
+}
+
 /** Create one Linear issue (used for lead-desk delegation, PRD §9). */
 export const ISSUE_CREATE_MUTATION = `
 mutation BorderlessIssueCreate($input: IssueCreateInput!) {
@@ -154,6 +191,10 @@ export interface IssueCreateInput {
   title: string;
   description: string;
   assigneeId: string | null;
+  /** Optional: make this a sub-issue of the given issue UUID (manual-QA children hang under the dev ticket). */
+  parentId?: string;
+  /** Optional: label UUIDs to attach on create (the manual-QA child gets the `manual-qa` label). */
+  labelIds?: string[];
 }
 
 export interface CreatedIssue { ticketKey: string; url: string | null; }

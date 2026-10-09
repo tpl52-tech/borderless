@@ -27,12 +27,14 @@
  *   ao verify                                  classify the Verifying tickets (ui / backend / mixed)
  *   ao verify run [TICKET]                     run the structural checks over the DB → verdict + evidence
  *   ao verify probe <table> | read <table>     read-only probe of a table (the verification agent's tool)
+ *   ao verify qa [TICKET] [--write]            author manual-QA sub-issues for the screen-observable tickets
  */
 
 import type { DaemonClient } from "../client/daemon-client.ts";
 import type { DelegateResult } from "../shared/lead-desk.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
+import type { VerifyQaResult } from "../shared/verify-qa.ts";
 
 const SUBCOMMANDS = [
   "setup", "daemon", "autonomy", "monitor", "history", "worktree", "pr", "issue", "awake",
@@ -203,6 +205,25 @@ export async function main(argv: string[]): Promise<void> {
           for (const c of r.results) console.log(`    ${c.status.padEnd(12)} ${c.property}${c.target ? ` (${c.target})` : ""} — ${c.evidence}`);
           for (const f of r.agentFindings) console.log(`    ◆ ${f.status.padEnd(10)} ${f.criterion} — ${f.evidence}`);
         }
+      });
+      return;
+    }
+    // `ao verify qa [TICKET] [--write]` — author a manual-QA sub-issue for each screen-observable Verifying
+    // ticket that lacks one (idempotent). Dry run by default; --write actually creates them in Linear.
+    if (rest[0] === "qa") {
+      const args = rest.slice(1);
+      const write = args.includes("--write");
+      const ticketKey = args.find((a) => !a.startsWith("--"));
+      await withDaemon("verify", async (client) => {
+        const { results, configured, wrote } = await client.request<VerifyQaResult>("verify.qa", { ...(ticketKey ? { ticketKey } : {}), write });
+        if (!configured) { console.log("verify qa: set `repo` + `branchOwner` + `linearApiKey` + `linearTeamKeys` in ~/.borderless/config.json"); return; }
+        if (results.length === 0) { console.log("verify qa: nothing to do — every screen-observable Verifying ticket already has a manual-qa sub-issue"); return; }
+        for (const r of results) {
+          const mark = r.action === "created" ? "✓ created" : r.action === "would-create" ? "• would create" : r.action === "error" ? "✗ error" : "· skipped";
+          const tail = r.ticketKey ? `→ ${r.ticketKey}${r.url ? ` ${r.url}` : ""}` : r.detail ? `(${r.detail})` : "";
+          console.log(`  ${mark}  ${r.parentKey}  ${r.title}  ${tail}`);
+        }
+        if (!wrote) console.log("\n(dry run — re-run with --write to create these in Linear)");
       });
       return;
     }

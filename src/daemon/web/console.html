@@ -155,6 +155,12 @@
   .load li:last-child { border-bottom: none; }
   .load .cnt { color: var(--dim); } .load .cnt.free { color: var(--green); }
 
+  /* verify results (V2b verdicts + per-check evidence) */
+  .vr-verd { font-size: .7rem; font-weight: 700; letter-spacing: .05em; padding: .1em .45em; border: 1px solid var(--line-2); border-radius: 3px; }
+  .vr-check { font-size: .74rem; display: flex; gap: .55rem; padding: .1rem 0; }
+  .vr-check .st { width: 5.5rem; flex: none; font-weight: 700; letter-spacing: .02em; }
+  .vr-check .ev { color: var(--ink-2); min-width: 0; }
+
   :focus-visible { outline: 1px solid var(--pink); outline-offset: 2px; }
 
   /* ask ao — plain chat (deliberately NOT the terminal panels; PRD §10) */
@@ -330,6 +336,12 @@
             </table>
           </div></div>
         </div>
+
+        <div class="panel p" style="margin-top:1rem">
+          <div class="ph pink"><span>VERIFY_RESULTS <span class="ph-meta" id="vr-meta">&mdash;</span></span>
+            <button class="btn xs o-pink" id="v-run" title="Run the structural backend checks over the read-only DB role (live)">&#9654; Run checks</button></div>
+          <div class="pb" id="vr-cards"><p class="note">press Run checks to verify the invisible backend properties against the database &mdash; each ticket gets <b style="color:var(--green)">verified</b> / <b style="color:var(--amber)">needs_human</b> + evidence.</p></div>
+        </div>
       </section>
 
       <!-- ============ ASK AO (plain chat, not the TUI) ============ -->
@@ -496,6 +508,15 @@
     setTimeout(() => { refreshBtn.innerHTML = orig; refreshBtn.disabled = false; }, 2500);
   });
 
+  // ---- shared: run an async action with a button's busy state (disable + spinner, restore after) ----
+  async function withBusy(btn, label, fn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const orig = btn.innerHTML;
+    btn.textContent = label;
+    try { await fn(); } finally { btn.innerHTML = orig; btn.disabled = false; }
+  }
+
   // ---- VERIFY: an on-demand live scan (gh), isolated from the /api/console poll ----
   const vScan = $("v-scan"), vRows = $("v-rows"), vMeta = $("v-meta");
   const CHECK_CLASS = { ui: "s-green", backend: "s-pink", mixed: "s-amber" };
@@ -506,11 +527,7 @@
     return `<tr><td>${esc(r.ticketKey)}</td><td class="${CHECK_CLASS[r.verifiability] || "s-ink"}">${esc(r.verifiability)}</td><td class="s-dim">${esc(needs)}</td><td class="s-dim">${pr}</td><td>${esc(r.title)}</td></tr>`;
   };
 
-  vScan.addEventListener("click", async () => {
-    if (vScan.disabled) return;
-    vScan.disabled = true;
-    const orig = vScan.innerHTML;
-    vScan.textContent = "⟳ scanning…";
+  vScan.addEventListener("click", () => withBusy(vScan, "⟳ scanning…", async () => {
     vRows.innerHTML = `<tr><td colspan="5" class="s-dim">scanning merged PRs…</td></tr>`;
     try {
       const res = await fetch("/api/verify", { method: "POST" });
@@ -524,6 +541,31 @@
           ? `<tr><td colspan="5" class="s-dim">no repo configured &mdash; set repo + branchOwner in ~/.borderless/config.json</td></tr>`
           : `<tr><td colspan="5" class="s-dim">nothing in Verifying</td></tr>`;
     } catch { vRows.innerHTML = `<tr><td colspan="5" class="s-pink">scan failed &mdash; is the daemon configured with a repo?</td></tr>`; }
-    finally { vScan.innerHTML = orig; vScan.disabled = false; }
-  });
+  }));
+
+  // ---- VERIFY: run the structural checks over the DB (verdict + per-check evidence) ----
+  const vRun = $("v-run"), vrCards = $("vr-cards"), vrMeta = $("vr-meta");
+  const VERDICT_CLASS = { verified: "s-green", needs_human: "s-amber", ui: "s-dim" };
+  const STATUS_CLASS = { pass: "s-green", fail: "s-pink", inconclusive: "s-amber", escalated: "s-dim" };
+
+  const verifyCardHtml = (r) => {
+    const pr = r.prNumber != null ? ` &middot; PR #${esc(r.prNumber)}` : "";
+    const checks = (r.results || []).map((c) =>
+      `<div class="vr-check"><span class="st ${STATUS_CLASS[c.status] || "s-ink"}">${esc(c.status)}</span><span class="ev">${esc(c.property)}${c.target ? ` (${esc(c.target)})` : ""} &mdash; ${esc(c.evidence)}</span></div>`).join("");
+    return `<div class="row-card"><div class="rc-top"><span class="vr-verd ${VERDICT_CLASS[r.verdict] || "s-ink"}">${esc(r.verdict)}</span> <b>${esc(r.ticketKey)}</b> <span class="muted">${esc(r.title)}${pr}</span></div>${checks ? `<div style="margin-top:.5rem">${checks}</div>` : ""}</div>`;
+  };
+
+  vRun.addEventListener("click", () => withBusy(vRun, "⟳ running…", async () => {
+    vrCards.innerHTML = `<p class="note">running the backend checks against the database…</p>`;
+    try {
+      const res = await fetch("/api/verify/run", { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      const rows = data.rows || [];
+      vrMeta.textContent = data.configured === false ? "NO DB" : `${rows.filter((r) => r.verdict === "verified").length}/${rows.length} VERIFIED`;
+      vrCards.innerHTML = data.configured === false
+        ? `<p class="note">no verify DB configured &mdash; set <b>verifyDbUrl</b> (a read-only Postgres role) in ~/.borderless/config.json</p>`
+        : rows.length ? rows.map(verifyCardHtml).join("") : `<p class="note">nothing in Verifying</p>`;
+    } catch { vrCards.innerHTML = `<p class="note s-pink">run failed &mdash; is the daemon configured (repo + verifyDbUrl)?</p>`; }
+  }));
 </script>

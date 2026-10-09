@@ -10,12 +10,11 @@
  */
 
 import type { OperatorConfigLite } from "../shared/config.ts";
-import { catalogChecksForTable, catalogProbe } from "../shared/verify-catalog.ts";
-import type { CheckStatus } from "../shared/verify-verdict.ts";
+import { catalogChecksForTable, catalogProbe, type CheckOutcome } from "../shared/verify-catalog.ts";
 import { openCatalogDb } from "./verify-db.ts";
 import { openAppSession } from "./verify-session.ts";
 
-export interface ProbeLine { label: string; status: CheckStatus; evidence: string }
+export interface ProbeLine { label: string; status: CheckOutcome["status"]; evidence: string }
 
 /** Run every read-only check on one table: the structural catalog checks + the behavioral RLS check. */
 export async function probeTable(config: OperatorConfigLite, table: string): Promise<ProbeLine[]> {
@@ -41,11 +40,11 @@ export async function probeTable(config: OperatorConfigLite, table: string): Pro
   return lines;
 }
 
-export interface ReadResult { configured: boolean; denied?: boolean; rows?: unknown[] }
+export interface ReadResult { configured: boolean; denied: boolean; rows: unknown[] }
 
 /** Read a sample of rows from a table as the test user (default) or anonymously — the agent inspecting data. */
 export async function readTable(config: OperatorConfigLite, table: string, opts?: { anon?: boolean }): Promise<ReadResult> {
-  if (!config.verifyApp) return { configured: false };
+  if (!config.verifyApp) return { configured: false, denied: false, rows: [] };
   const app = await openAppSession(config.verifyApp);
   const r = await app.read(table, { anon: opts?.anon });
   return { configured: true, denied: r.denied, rows: r.rows };

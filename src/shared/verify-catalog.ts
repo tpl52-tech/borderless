@@ -64,7 +64,7 @@ const PROBES: Partial<Record<BackendProperty, (target: string) => CatalogProbe>>
       const enabled = bool(rows[0]!.rls_enabled), policies = num(rows[0]!.policies);
       return enabled && policies > 0
         ? { status: "pass", evidence: `RLS enabled on ${t} with ${policies} polic${policies === 1 ? "y" : "ies"}` }
-        : { status: "fail", evidence: `${t}: RLS enabled=${enabled}, policies=${policies} — the access guard the ticket claims is not fully in place` };
+        : { status: "fail", evidence: `${t}: RLS enabled=${enabled}, policies=${policies} — no full deny-all / owner-scoped guard in place` };
     },
   }),
   trigger: (t) => ({
@@ -76,7 +76,7 @@ const PROBES: Partial<Record<BackendProperty, (target: string) => CatalogProbe>>
       const triggers = num(rows[0]!.triggers);
       return triggers > 0
         ? { status: "pass", evidence: `${triggers} trigger(s) attached to ${t}` }
-        : { status: "fail", evidence: `no non-internal trigger attached to ${t} — the ticket claims one fires` };
+        : { status: "fail", evidence: `no non-internal trigger is attached to ${t}` };
     },
   }),
   "data-integrity": (t) => ({
@@ -108,7 +108,9 @@ export function publicTableNames(rows: CatalogRow[]): string[] {
 /** The four structural (db-read) checks for one named table — rls / schema / trigger / data-integrity, each
  *  targeted at it. For the verify-probe tool (V4c-1): run every catalog check on a table on demand. Pure. */
 export function catalogChecksForTable(table: string): VerifyCheck[] {
-  return (["rls", "schema", "trigger", "data-integrity"] as const).map((property) => ({
+  // Derived from PROBES (the single local source of truth for catalog-probeable properties), so a new probe is
+  // picked up here for free — nothing to re-list and drift.
+  return (Object.keys(PROBES) as BackendProperty[]).map((property) => ({
     property, target: table, mechanism: "db-read", safetyTier: "read-only",
     assertion: `structural ${property} check on ${table}`,
   }));

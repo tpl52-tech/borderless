@@ -178,7 +178,7 @@ export async function main(argv: string[]): Promise<void> {
         const r = await readTable(config, table, { anon });
         if (!r.configured) { console.log("verify probe: set `verifyApp` in ~/.borderless/config.json"); return; }
         if (r.denied) { console.log(`${table}: read denied${anon ? " (anon)" : " (test user)"} — RLS blocks it`); return; }
-        console.log(`${table}: ${r.rows!.length} row(s)${anon ? " (anon)" : " (test user)"}`);
+        console.log(`${table}: ${r.rows.length} row(s)${anon ? " (anon)" : " (test user)"}`);
         console.log(JSON.stringify(r.rows, null, 2));
         return;
       }

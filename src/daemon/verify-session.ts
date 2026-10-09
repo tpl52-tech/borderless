@@ -14,6 +14,9 @@ import type { CheckOutcome } from "../shared/verify-catalog.ts";
 export interface AppSession {
   /** Behavioral RLS probe for one table: anon vs. signed-in read access → an outcome. */
   rlsProbe: (table: string) => Promise<CheckOutcome>;
+  /** Read a small sample of rows from a table — as the signed-in test user (RLS-bounded) or anonymously.
+   *  Read-only (GET, capped limit); `denied` when the role may not read the table at all. */
+  read: (table: string, opts?: { anon?: boolean; limit?: number }) => Promise<{ denied: boolean; rows: unknown[] }>;
 }
 
 /** Firebase email/password sign-in → the ID token the app sends to Supabase as the bearer. */
@@ -48,6 +51,15 @@ export async function openAppSession(c: VerifyAppConfig): Promise<AppSession> {
     async rlsProbe(table) {
       const [anon, authed] = await Promise.all([tableAccess(c, table), tableAccess(c, table, token)]);
       return rlsBehavioralOutcome(anon, authed, table);
+    },
+    async read(table, opts) {
+      const limit = Math.max(1, Math.min(opts?.limit ?? 5, 50)); // bounded sample
+      const res = await fetch(`${c.supabaseUrl}/rest/v1/${encodeURIComponent(table)}?select=*&limit=${limit}`, {
+        headers: { apikey: c.anonKey, ...(opts?.anon ? {} : { Authorization: `Bearer ${token}` }) },
+      });
+      if (res.status === 401 || res.status === 403) return { denied: true, rows: [] };
+      const body = await res.json().catch(() => []);
+      return { denied: false, rows: Array.isArray(body) ? body : [] };
     },
   };
 }

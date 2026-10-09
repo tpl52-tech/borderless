@@ -20,8 +20,19 @@ describe("parseAgentVerdict (verify sweep V4 — agent output → grounded findi
     expect(parseAgentVerdict(raw)).toEqual([{ criterion: "c", status: "pass", evidence: "e" }]);
   });
 
-  test("an unknown status becomes inconclusive (never a silent pass)", () => {
+  test("pulls JSON out of surrounding prose with no fence (greedy bracket-span path)", () => {
+    expect(parseAgentVerdict('Here is my verdict: {"findings":[{"criterion":"c","status":"pass","evidence":"e"}]} done.'))
+      .toEqual([{ criterion: "c", status: "pass", evidence: "e" }]);
+  });
+
+  test("an unknown status becomes inconclusive (never a silent pass); an explicit inconclusive is preserved", () => {
     expect(parseAgentVerdict('[{"criterion":"c","status":"probably fine","evidence":"vibes"}]')[0]!.status).toBe("inconclusive");
+    expect(parseAgentVerdict('[{"criterion":"c","status":"inconclusive","evidence":"couldn\'t tell"}]')[0]!.status).toBe("inconclusive");
+  });
+
+  test("a valid finding alongside a criterion-less one keeps the valid one (no collapse to the fallback)", () => {
+    const out = parseAgentVerdict('{"findings":[{"criterion":"ok","status":"pass","evidence":"e"},{"status":"pass","evidence":"no criterion"}]}');
+    expect(out).toEqual([{ criterion: "ok", status: "pass", evidence: "e" }]);
   });
 
   test("unparseable output ⇒ a single inconclusive finding", () => {

@@ -39,6 +39,8 @@ export interface TicketVerdict {
   results: CheckResult[];
   /** The agent's grounded findings (V4); empty on a deterministic-only run. */
   agentFindings: AgentFinding[];
+  /** Status counts of the deterministic bars ONLY — agentFindings are counted separately, so an all-pass
+   *  `summary` does NOT imply `verdict === "verified"` when an agent finding failed. */
   summary: Record<CheckStatus, number>;
 }
 

@@ -57,7 +57,9 @@ const VERDICTS = new Set(["pass", "fail", "blocked"]);
 
 /**
  * The idempotency ref embedded in every writeback comment and matched to decide "already synced". Keyed by
- * `verdictAt`, so re-recording a verdict (a new `verdictAt`) posts a fresh comment rather than being swallowed.
+ * `verdictAt`, which Cue QA sets to `Date.now()` ONLY when a verdict is (re-)recorded — never on a note/step
+ * edit (verified in greenlight/app.js: the verdict handler is the sole writer of `verdictAt`). So one marker ⇔
+ * one distinct verdict event: the same event never double-posts, and a genuinely new verdict posts afresh.
  */
 export function verdictMarker(verdictAt: number): string {
   return `ao-qa-verdict:${verdictAt}`;

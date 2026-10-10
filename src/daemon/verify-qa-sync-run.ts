@@ -50,17 +50,23 @@ export async function runQaWriteback(deps: QaWritebackDeps): Promise<QaWriteback
         continue;
       }
       if (!deps.write) {
+        // Dry run reflects INTENT (comment + the pass-move), not feasibility — it doesn't resolve the Done
+        // state, so a real run may still find none and comment only.
         results.push({ ticketKey: row.ticketKey, verdict: row.verdict, action: "would-sync", movedToDone: decision.moveToDone });
         continue;
       }
-      const url = await deps.postComment(issue.id, buildVerdictComment(row));
+      // Order matters: move to Done FIRST, post the (marker-carrying) comment LAST. The marker is what makes a
+      // verdict "already synced", so it must only land once the whole writeback succeeded — a failed move then
+      // leaves no marker and the next run retries both (the →Done move is idempotent). Comment-then-move would
+      // strand a failed move forever (marker present ⇒ skipped next run).
       let movedToDone = false;
       let detail: string | undefined;
       if (decision.moveToDone) {
         const stateId = await deps.doneStateId();
         if (stateId) { await deps.setState(issue.id, stateId); movedToDone = true; }
-        else detail = "commented; no Done workflow state found to move to";
+        else detail = "no Done workflow state found to move to — commented only";
       }
+      const url = await deps.postComment(issue.id, buildVerdictComment(row));
       results.push({ ticketKey: row.ticketKey, verdict: row.verdict, action: "synced", movedToDone, url, ...(detail ? { detail } : {}) });
     } catch (err) {
       results.push({ ticketKey: row.ticketKey, verdict: row.verdict, action: "error", detail: err instanceof Error ? err.message : String(err) });

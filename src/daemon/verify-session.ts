@@ -26,12 +26,21 @@ export interface AppSession {
  * needed; only `supabaseUrl` + `anonKey` (both public by design) are used. Returns the raw JSON array for the
  * pure parser (shared/verify-qa-sync.ts); `qa_runs` holds one row per sub-issue so the default page cap is ample.
  */
+const QA_RUNS_READ_LIMIT = 1000; // one row per sub-issue — far beyond any real project; the cap is only a guard
+
 export async function readQaRuns(c: Pick<VerifyAppConfig, "supabaseUrl" | "anonKey">): Promise<unknown> {
-  const res = await fetch(`${c.supabaseUrl}/rest/v1/qa_runs?select=ticket_id,run,updated_at`, {
-    headers: { apikey: c.anonKey },
-  });
+  // Bounded + ordered so the read never silently truncates below PostgREST's default page cap (mirrors the
+  // paginated Linear reads). If the cap is ever actually hit, warn loudly rather than drop verdicts in silence.
+  const res = await fetch(
+    `${c.supabaseUrl}/rest/v1/qa_runs?select=ticket_id,run,updated_at&order=updated_at.desc&limit=${QA_RUNS_READ_LIMIT}`,
+    { headers: { apikey: c.anonKey } },
+  );
   if (!res.ok) throw new Error(`qa_runs read failed (${res.status})`);
-  return res.json();
+  const body = await res.json();
+  if (Array.isArray(body) && body.length >= QA_RUNS_READ_LIMIT) {
+    console.warn(`qa_runs: read hit the ${QA_RUNS_READ_LIMIT}-row cap — some verdicts may not have synced; paginate the read if the table has grown this large.`);
+  }
+  return body;
 }
 
 /** Firebase email/password sign-in → the ID token the app sends to Supabase as the bearer. */

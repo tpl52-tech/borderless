@@ -78,6 +78,13 @@ describe("runQaWriteback", () => {
     expect(h.states).toHaveLength(0);
   });
 
+  test("a failed Done-move posts NO marker comment, so a re-run retries both (atomicity)", async () => {
+    const h = deps({ setState: async () => { throw new Error("state 500"); } });
+    const [r] = await runQaWriteback(h.deps);
+    expect(r).toMatchObject({ action: "error", detail: "state 500" });
+    expect(h.comments).toHaveLength(0); // marker not written → next run is not short-circuited as already-synced
+  });
+
   test("a failing write degrades to an error result (never throws the run)", async () => {
     const h = deps({ raw: [rawRow("COR-96", "pass"), rawRow("COR-96", "fail", { verdictAt: AT + 1 })], postComment: async () => { throw new Error("Linear 500"); } });
     const results = await runQaWriteback(h.deps);

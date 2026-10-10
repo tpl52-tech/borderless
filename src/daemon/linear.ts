@@ -7,7 +7,10 @@
  */
 
 import type { Store } from "./store.ts";
-import { ISSUES_QUERY, issuesVariables, parseIssuesResponse, QA_CHILDREN_QUERY, parseQaChildrenPage } from "../shared/linear.ts";
+import {
+  ISSUES_QUERY, issuesVariables, parseIssuesResponse, QA_CHILDREN_QUERY, parseQaChildrenPage,
+  ISSUE_COMMENTS_QUERY, parseIssueCommentsPage, WORKFLOW_STATES_QUERY, parseWorkflowStates, pickDoneState,
+} from "../shared/linear.ts";
 
 /** Minimal GraphQL client — the real one POSTs to Linear; tests inject a fake. */
 export interface LinearClient {
@@ -70,4 +73,26 @@ export async function fetchQaChildParentKeys(client: LinearClient, teamKey: stri
     after = page.next;
   } while (after);
   return keys;
+}
+
+/**
+ * All of one issue's comment bodies — the verdict-writeback idempotency source. Fully paginated: a verdict is
+ * "already synced" iff a comment already carries its ref marker, so a missed page would double-post; loops the
+ * cursor like {@link fetchQaChildParentKeys}.
+ */
+export async function fetchIssueCommentBodies(client: LinearClient, issueId: string): Promise<string[]> {
+  const bodies: string[] = [];
+  let after: string | null = null;
+  do {
+    const page = parseIssueCommentsPage(await client.query(ISSUE_COMMENTS_QUERY, { id: issueId, after }));
+    bodies.push(...page.bodies);
+    after = page.next;
+  } while (after);
+  return bodies;
+}
+
+/** Resolve the team's "Done" workflow-state id (the target for a passing QA sub-issue), or null if none exists. */
+export async function resolveDoneStateId(client: LinearClient, teamKey: string): Promise<string | null> {
+  const states = parseWorkflowStates(await client.query(WORKFLOW_STATES_QUERY, { teamKey }));
+  return pickDoneState(states)?.id ?? null;
 }

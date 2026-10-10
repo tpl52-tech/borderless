@@ -23,6 +23,7 @@ import { sweepRow, rosterRow, boardRow, assignRow } from "../shared/console-rows
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 import type { VerifyQaResult } from "../shared/verify-qa.ts";
+import type { VerifyQaSyncResult } from "../shared/verify-qa-sync.ts";
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { WorkItemMonitor } from "./monitors/work-item.ts";
@@ -62,6 +63,8 @@ export interface UdsServerDeps {
   verifyRun: (ticketKey?: string) => Promise<VerifyRunResult>;
   /** PRD §13: author manual-QA sub-issues for the screen-observable Verifying tickets. `write=false` ⇒ dry run. */
   verifyQa: (ticketKey?: string, write?: boolean) => Promise<VerifyQaResult>;
+  /** PRD §13: carry Cue QA tester verdicts (from Supabase) back to the Linear sub-issues. `write=false` ⇒ dry run. */
+  verifyQaSync: (write?: boolean) => Promise<VerifyQaSyncResult>;
 }
 
 export interface UdsServer {
@@ -260,6 +263,8 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
         return deps.verifyRun(typeof p.ticketKey === "string" && p.ticketKey ? p.ticketKey : undefined);
       case "verify.qa":
         return deps.verifyQa(typeof p.ticketKey === "string" && p.ticketKey ? p.ticketKey : undefined, p.write === true);
+      case "verify.qa-sync":
+        return deps.verifyQaSync(p.write === true);
 
       // --- console reads (PRD §11): the SWEEPS + ROSTER screens share the row shapes with the web console --
       case "sweep.list":

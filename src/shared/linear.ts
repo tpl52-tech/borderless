@@ -241,3 +241,56 @@ export function parseCommentCreate(json: unknown): { url: string | null } {
   if (!r?.success) throw new Error("ask: Linear commentCreate did not succeed");
   return { url: r.comment?.url ?? null };
 }
+
+// --- Manual-QA verdict writeback (PRD §13): carry a tester's Cue QA verdict back to the sub-issue -----------
+
+/**
+ * A team's "Done" (completed) workflow states — resolved so a passing QA sub-issue can be moved to Done. Linear
+ * can have several `completed`-type states; the caller prefers the one literally named "Done" (see
+ * {@link pickDoneState}), else the first completed state. Filtering by type keeps non-completed states out.
+ */
+export const WORKFLOW_STATES_QUERY = `
+query BorderlessWorkflowStates($teamKey: String!) {
+  workflowStates(filter: { team: { key: { eq: $teamKey } }, type: { eq: "completed" } }, first: 20) {
+    nodes { id name type }
+  }
+}`;
+
+/** One workflow state (id + display name) from {@link WORKFLOW_STATES_QUERY}. */
+export interface WorkflowState { id: string; name: string }
+
+/** Parse {@link WORKFLOW_STATES_QUERY} → the team's completed states (may be empty if none/misconfigured). */
+export function parseWorkflowStates(json: unknown): WorkflowState[] {
+  const nodes = (json as { data?: { workflowStates?: { nodes?: Array<{ id?: string; name?: string }> } } } | null)?.data?.workflowStates?.nodes ?? [];
+  return nodes
+    .filter((n): n is { id: string; name?: string } => typeof n.id === "string")
+    .map((n) => ({ id: n.id, name: typeof n.name === "string" ? n.name : "" }));
+}
+
+/** Pick the state to mark a passing sub-issue Done: the one named "Done" (case-insensitive), else the first. Pure. */
+export function pickDoneState(states: readonly WorkflowState[]): WorkflowState | null {
+  return states.find((s) => s.name.trim().toLowerCase() === "done") ?? states[0] ?? null;
+}
+
+/**
+ * One issue's comment bodies — the idempotency source for the verdict writeback (a verdict is "already synced"
+ * iff a comment already carries its ref marker). PAGINATED (`$after`) so the dedupe set never silently truncates,
+ * exactly like {@link QA_CHILDREN_QUERY}; the live caller loops until `next` is null.
+ */
+export const ISSUE_COMMENTS_QUERY = `
+query BorderlessIssueComments($id: String!, $after: String) {
+  issue(id: $id) {
+    comments(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { body }
+    }
+  }
+}`;
+
+/** Parse one page of {@link ISSUE_COMMENTS_QUERY}: the comment bodies on this page + the next cursor (null at end). */
+export function parseIssueCommentsPage(json: unknown): { bodies: string[]; next: string | null } {
+  const conn = (json as { data?: { issue?: { comments?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }; nodes?: Array<{ body?: string | null }> } } } } | null)?.data?.issue?.comments;
+  const bodies = (conn?.nodes ?? []).map((n) => n.body).filter((b): b is string => typeof b === "string");
+  const next = conn?.pageInfo?.hasNextPage ? (conn.pageInfo.endCursor ?? null) : null;
+  return { bodies, next };
+}

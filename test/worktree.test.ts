@@ -4,19 +4,8 @@ import { mkdtempSync, rmSync, existsSync, writeFileSync, realpathSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  provisionWorktree, removeWorktree, repoTopOfWorktree, gitToplevel, slug, branchName, prBranchCandidates, isThrowawayBranch,
+  provisionWorktree, removeWorktree, repoTopOfWorktree, gitToplevel, slug, branchName, prBranchCandidates,
 } from "../src/daemon/worktree.ts";
-
-describe("isThrowawayBranch (reap-on-shutdown signal)", () => {
-  test("ao/* inspector branches are throwaway; owner/TICKET worker branches are not", () => {
-    expect(isThrowawayBranch("ao/session-20528aa8")).toBe(true); // what branchName mints with no ticket
-    expect(isThrowawayBranch(branchName({ title: "x", id8: "abc12345" }))).toBe(true);
-    expect(isThrowawayBranch("tpl52/COR-27")).toBe(false); // a sweep worker's ticket branch — may hold un-pushed work
-    expect(isThrowawayBranch(branchName({ ticket: "COR-27", branchOwner: "tpl52", id8: "abc12345" }))).toBe(false);
-    expect(isThrowawayBranch(null)).toBe(false);
-    expect(isThrowawayBranch(undefined)).toBe(false);
-  });
-});
 
 describe("prBranchCandidates (PR discovery branches, shake-out fix)", () => {
   test("Linear's branch first, then canonical; deduped when equal; null → canonical only", () => {

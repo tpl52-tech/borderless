@@ -58,15 +58,6 @@ export function branchName(opts: {
 }
 
 /**
- * Is `branch` a throwaway inspector branch (an `ao/…` branch, as {@link branchName} mints when there's no
- * ticket), as opposed to a sweep worker's real ticket branch (`<owner>/<KEY>`)? Worker branches may hold
- * un-pushed commits, so only throwaway ones are safe to reap on daemon shutdown. Pure.
- */
-export function isThrowawayBranch(branch: string | null | undefined): boolean {
-  return typeof branch === "string" && branch.startsWith("ao/");
-}
-
-/**
  * Branches to try when matching a ticket's PR (shake-out finding): Linear's suggested branch first — the
  * team's actual convention, e.g. `tpl52/cor-24-sign-up-…`, which Linear's GitHub integration auto-links —
  * then the canonical `<owner>/<TICKET>`. Deduped so an equal pair collapses to one.

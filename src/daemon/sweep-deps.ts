@@ -164,27 +164,51 @@ export async function hydrateInReviewJob(store: Store, job: SweepJob, cfg: { rep
   return store.transitionSweepJob(job.id, { prNumber: number, headSha });
 }
 
+/** The live reader reReviewAdvancedPrs fetches a PR's current head with: `headOf(await fetchPr(repo, n))`,
+ *  injected so the re-review decision (below) is unit-testable without gh — mirrors SweepEngineDeps' I/O seams. */
+export function liveHeadReader(repo: string): (prNumber: number) => Promise<string | null> {
+  return (prNumber) => fetchPr(repo, prNumber).then(headOf);
+}
+
 /**
  * Re-review PRs that advanced after resting. The in-review sweep drives a PR to `ready`/`needs_human` and then
  * waits on a human; when the human pushes a fix, that resting job's reviewed head goes stale — yet the enqueue
  * dedup (it treats any non-merged/failed job as active) would never re-review the new code. So before each
  * sweep, re-open every resting in-review job whose PR head has moved past what it reviewed: back to `queued`
- * with the new head (cycles/gate/reason cleared), for the supervisor to drive and review afresh. Bounded by
- * uq_sweep_review(ticket_id, head_sha) — one review per head, so an unchanged PR is left resting, never looped.
- * Live-only (gh), like hydrateInReviewJob. Returns the jobs re-opened.
+ * with the new head (a fresh attempt — cycles/gate/reason/session cleared), for the supervisor to drive and
+ * review afresh. Bounded by uq_sweep_review(ticket_id, head_sha) — one review per head, so an unchanged PR is
+ * left resting, never looped. Returns the jobs re-opened.
+ *
+ * Fail-soft per job: this runs ahead of enqueue + pickup in scanInReview, so a single gh hiccup, closed PR, or
+ * UNIQUE collision must never throw out and starve the rest of the sweep. Heads are fetched concurrently.
  */
 export async function reReviewAdvancedPrs(
-  store: Pick<Store, "listSweepJobs" | "transitionSweepJob" | "recordSweepEvent">,
-  cfg: { repo: string },
+  store: Pick<Store, "listSweepJobs" | "getLinearIssue" | "transitionSweepJob" | "recordSweepEvent">,
+  stateName: string,
+  headFor: (prNumber: number) => Promise<string | null>,
 ): Promise<SweepJob[]> {
+  // Only tickets STILL in the swept column: a human who moved the ticket out (e.g. back to In Progress) and
+  // keeps pushing it themselves has reclaimed it — the sweep must not yank it back. (syncBoard ran first, so
+  // the ticket's column is fresh.)
+  const resting = store.listSweepJobs({ kind: "in_review" })
+    .filter((j) => isRestingWithPr(j) && store.getLinearIssue(j.ticketId)?.stateName === stateName);
+  const heads = await Promise.allSettled(resting.map((j) => headFor(j.prNumber!)));
   const reopened: SweepJob[] = [];
-  for (const job of store.listSweepJobs({ kind: "in_review" })) {
-    if (!isRestingWithPr(job)) continue;
-    const head = headOf(await fetchPr(cfg.repo, job.prNumber!));
-    if (head == null || head === job.headSha) continue; // unchanged (or unknown) → still resting on the human
-    store.recordSweepEvent(job.id, "state_change", { from: job.state, to: "queued", reason: "head-advance re-review", headSha: head });
-    reopened.push(store.transitionSweepJob(job.id, { state: "queued", headSha: head, cycles: 0, gate: null, reason: null }));
-  }
+  resting.forEach((job, i) => {
+    const res = heads[i]!;
+    // A rejected fetch (transient gh/network, or a closed/deleted PR) leaves the job resting, to retry next
+    // sweep; an unchanged or unknown head means the human hasn't pushed → still resting on them.
+    if (res.status !== "fulfilled" || res.value == null || res.value === job.headSha) return;
+    try {
+      reopened.push(store.transitionSweepJob(job.id, { state: "queued", headSha: res.value, cycles: 0, gate: null, reason: null, sessionId: null }));
+      store.recordSweepEvent(job.id, "state_change", { from: job.state, to: "queued", reason: "head-advance re-review", headSha: res.value });
+    } catch (err) {
+      // uq_sweep_review spans ALL in_review states for a ticket (not just active ones, unlike
+      // uq_sweep_rescue_active), so the head_sha UPDATE could collide with a historical sibling row if a human
+      // force-pushed back to an already-recorded sha. Pathological, but kept fail-soft so it never aborts.
+      console.error(`re-review ${job.ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+  });
   return reopened;
 }
 

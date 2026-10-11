@@ -46,7 +46,7 @@ import { verifyRow, type VerifyRow } from "../shared/verify.ts";
 import { singleFlight } from "../shared/single-flight.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
 import { buildTerritory } from "../shared/collision.ts";
-import { liveSweepDeps, needsHydration, hydrateInReviewJob, reReviewAdvancedPrs } from "./sweep-deps.ts";
+import { liveSweepDeps, needsHydration, hydrateInReviewJob, reReviewAdvancedPrs, liveHeadReader } from "./sweep-deps.ts";
 import { createSweepSupervisor, type SweepSupervisor } from "./sweep-supervisor.ts";
 import { scanRescues, authorizeRescue, liveProgressCheck } from "./rescue-scan.ts";
 import { delegate, liveCreateIssue, type DelegateResult } from "./lead-delegate.ts";
@@ -428,7 +428,7 @@ export function startDaemon(home = stateHome()): Daemon {
     // A human may have pushed a fix to a resting PR since we last reviewed it; re-open those for a fresh review
     // before enqueuing brand-new In-Review tickets (both get driven by the one pickup below).
     const reopened = sweepSupervisor && config.repo
-      ? (await reReviewAdvancedPrs(store, { repo: config.repo })).length : 0;
+      ? (await reReviewAdvancedPrs(store, stateName, liveHeadReader(config.repo))).length : 0;
     const created = store.enqueueInReviewSweeps(stateName, config.leadOpsProject).length;
     const started = sweepSupervisor?.pickup().length ?? 0; // kick the engine on the newly-queued jobs
     return { synced, reopened, created, started };

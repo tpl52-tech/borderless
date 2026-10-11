@@ -35,6 +35,7 @@ import type { DelegateResult } from "../shared/lead-desk.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 import type { VerifyQaResult } from "../shared/verify-qa.ts";
+import type { VerifyQaSyncResult } from "../shared/verify-qa-sync.ts";
 
 const SUBCOMMANDS = [
   "setup", "daemon", "autonomy", "monitor", "history", "worktree", "pr", "issue", "awake",
@@ -224,6 +225,25 @@ export async function main(argv: string[]): Promise<void> {
           console.log(`  ${mark}  ${r.parentKey}  ${r.title}  ${tail}`);
         }
         if (!wrote) console.log("\n(dry run — re-run with --write to create these in Linear)");
+      });
+      return;
+    }
+    // `ao verify qa-sync [--write]` — carry each Cue QA tester verdict (saved to Supabase) back to its Linear
+    // manual-qa sub-issue: a comment recording the verdict, and move to Done on a pass. Dry run by default.
+    if (rest[0] === "qa-sync") {
+      const write = rest.includes("--write");
+      await withDaemon("verify", async (client) => {
+        const { results, configured, wrote } = await client.request<VerifyQaSyncResult>("verify.qa-sync", { write });
+        if (!configured) { console.log("verify qa-sync: set `linearApiKey` + `linearTeamKeys` + `verifyApp` in ~/.borderless/config.json"); return; }
+        if (results.length === 0) { console.log("verify qa-sync: no tester verdicts recorded yet in Cue QA"); return; }
+        for (const r of results) {
+          const mark = r.action === "synced" ? "✓ synced" : r.action === "would-sync" ? "• would sync" : r.action === "error" ? "✗ error"
+            : r.action === "skipped-synced" ? "· already synced" : "· skipped";
+          const done = r.movedToDone ? (r.action === "would-sync" ? " + would move to Done" : " + moved to Done") : "";
+          const tail = r.detail ? `(${r.detail})` : r.url ? r.url : "";
+          console.log(`  ${mark}  ${r.ticketKey}  [${r.verdict}]${done}  ${tail}`);
+        }
+        if (!wrote) console.log("\n(dry run — re-run with --write to post these to Linear)");
       });
       return;
     }

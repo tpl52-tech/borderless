@@ -30,14 +30,15 @@ import { runVerify, verifyTicket, type VerifyRunDeps } from "./verify-run.ts";
 import { runVerifyAgent } from "./verify-agent-run.ts";
 import { liveVerifyAgentSpawn } from "./verify-agent-spawn.ts";
 import { runQaSubIssues } from "./verify-qa-run.ts";
+import { runQaWriteback } from "./verify-qa-sync-run.ts";
 import { QA_LABEL, qaRunsheetPrompt } from "../shared/verify-qa.ts";
 import { openCatalogDb } from "./verify-db.ts";
-import { openAppSession } from "./verify-session.ts";
+import { openAppSession, readQaRuns } from "./verify-session.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
 import { startWebServer, type WebServer } from "./web.ts";
-import { httpLinearClient, syncLinearIssues, fetchQaChildParentKeys } from "./linear.ts";
+import { httpLinearClient, syncLinearIssues, fetchQaChildParentKeys, fetchIssueCommentBodies, resolveDoneStateId } from "./linear.ts";
 import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate } from "../shared/linear.ts";
 import { verifyRow, type VerifyRow } from "../shared/verify.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
@@ -187,6 +188,10 @@ export function startDaemon(home = stateHome()): Daemon {
   // PRD §13: author manual-QA sub-issues for the screen-observable Verifying tickets. Needs a repo (the scan) +
   // linearApiKey (the write) + a team key; absent any → a no-op. Dry run by default; `write` gates creation.
   let runVerifyQa: UdsServerDeps["verifyQa"] = async () => ({ results: [], configured: false, wrote: false });
+  // PRD §13: carry a tester's Cue QA verdict (saved to Supabase) back to its Linear manual-qa sub-issue. Needs
+  // linearApiKey + a team key (the writes + the Done-state lookup) AND verifyApp (the Supabase read); absent any →
+  // a no-op. Independent of the dev repo — wired below, outside the repo guard. Dry run by default.
+  let runVerifyQaSync: UdsServerDeps["verifyQaSync"] = async () => ({ results: [], configured: false, wrote: false });
   // The local working copy configured for a repo — the checkout a sweep/verify agent spawns its worktree from.
   const localCwdFor = (r: string | undefined) => (r ? config.profiles.find((pr) => pr.repo === r && pr.localCwd)?.localCwd : undefined);
   if (config.repo && config.branchOwner) {
@@ -258,6 +263,30 @@ export function startDaemon(home = stateHome()): Daemon {
         return { results, configured: true, wrote: write };
       };
     }
+  }
+  // Verdict writeback (PRD §13): Supabase (Cue QA's shared results) → the Linear manual-qa sub-issues. Independent
+  // of the dev repo — needs a Linear key + team (to comment / move to Done / resolve the sub-issue UUID from the
+  // store) AND verifyApp (the Supabase url + anon key). The Done-state id is resolved once per run, lazily.
+  const qaSyncTeamKey = (config.linearTeamKeys ?? [])[0];
+  if (config.linearApiKey && qaSyncTeamKey && config.verifyApp) {
+    const linear = httpLinearClient(config.linearApiKey);
+    const verifyApp = config.verifyApp;
+    runVerifyQaSync = async (write = false) => {
+      let doneStateIdOnce: Promise<string | null> | null = null; // resolve the Done state at most once per run
+      const results = await runQaWriteback({
+        readVerdicts: () => readQaRuns(verifyApp),
+        issueByKey: (k) => {
+          const i = store.getLinearIssueByIdentifier(k);
+          return i ? { id: i.id, stateType: i.stateType } : undefined;
+        },
+        commentBodies: (issueId) => fetchIssueCommentBodies(linear, issueId),
+        doneStateId: () => (doneStateIdOnce ??= resolveDoneStateId(linear, qaSyncTeamKey)),
+        postComment: async (issueId, body) => parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId, body } })).url,
+        setState: async (issueId, stateId) => { parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id: issueId, input: { stateId } })); },
+        write,
+      });
+      return { results, configured: true, wrote: write };
+    };
   }
   const sweepCwd = localCwdFor(config.repo);
   if (config.repo && config.branchOwner && sweepCwd) {
@@ -366,7 +395,7 @@ export function startDaemon(home = stateHome()): Daemon {
     return { synced, created, started };
   };
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, verifyQa: runVerifyQa });
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, verifyQa: runVerifyQa, verifyQaSync: runVerifyQaSync });
 
   // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only. It is
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.

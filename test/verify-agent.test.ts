@@ -14,6 +14,14 @@ describe("buildVerifyAgentSeed (verify sweep V4 — the agent's prompt)", () => 
     expect(s).not.toContain("DISPOSABLE TEST USER");
   });
 
+  test("scopes the agent to THIS ticket — findings must map to its criteria, not adjacent tables/tickets", () => {
+    const s = buildVerifyAgentSeed(issue);
+    expect(s).toContain("SCOPE");
+    expect(s).toContain("OUT OF SCOPE");
+    expect(s).toContain("COR-27's acceptance criteria"); // the ticket id is interpolated into the scope rule
+    expect(s).toContain("OTHER tickets");
+  });
+
   test("allowWrites swaps in the throwaway-write rule (clean up, no real data)", () => {
     const s = buildVerifyAgentSeed(issue, { allowWrites: true });
     expect(s).toContain("DISPOSABLE TEST USER");

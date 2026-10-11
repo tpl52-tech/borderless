@@ -569,9 +569,11 @@
       const data = await res.json();
       const rows = data.rows || [];
       vrMeta.textContent = data.configured === false ? "NO DB" : `${rows.filter((r) => r.verdict === "verified").length}/${rows.length} VERIFIED`;
+      const advanced = data.advanced || [];
+      const advNote = advanced.length ? `<p class="note s-green">&rarr; auto-advanced to Done: ${advanced.map(esc).join(", ")}</p>` : "";
       vrCards.innerHTML = data.configured === false
         ? `<p class="note">no verify DB configured &mdash; set <b>verifyDbUrl</b> (a read-only Postgres role) in ~/.borderless/config.json</p>`
-        : rows.length ? rows.map(verifyCardHtml).join("") : `<p class="note">nothing in Verifying</p>`;
+        : rows.length ? advNote + rows.map(verifyCardHtml).join("") : `<p class="note">nothing in Verifying</p>`;
     } catch { vrCards.innerHTML = `<p class="note s-pink">run failed &mdash; is the daemon configured (repo + verifyDbUrl)?</p>`; }
   }));
 </script>

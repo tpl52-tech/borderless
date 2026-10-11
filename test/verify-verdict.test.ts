@@ -1,5 +1,21 @@
 import { test, expect, describe } from "bun:test";
-import { rollupVerdict, type CheckResult } from "../src/shared/verify-verdict.ts";
+import { rollupVerdict, advanceableTickets, type CheckResult, type VerifyRunRow } from "../src/shared/verify-verdict.ts";
+
+const vrow = (ticketKey: string, verdict: VerifyRunRow["verdict"], verifiability: VerifyRunRow["verifiability"]): VerifyRunRow =>
+  ({ ticketKey, title: ticketKey, prNumber: null, verifiability, backendProperties: [], hasUi: verifiability !== "backend",
+     verdict, results: [], agentFindings: [], summary: { pass: 0, fail: 0, inconclusive: 0, escalated: 0 } });
+
+describe("advanceableTickets (auto-advance to Done)", () => {
+  test("only PURE-BACKEND verified tickets are advanceable", () => {
+    const rows = [
+      vrow("COR-27", "verified", "backend"),   // ✓ advance — no screen half
+      vrow("COR-35", "verified", "mixed"),      // ✗ has a UI half → waits for the Cue QA tester sign-off
+      vrow("COR-40", "needs_human", "backend"), // ✗ not verified
+      vrow("COR-17", "ui", "ui"),               // ✗ sweep never verified it
+    ];
+    expect(advanceableTickets(rows).map((r) => r.ticketKey)).toEqual(["COR-27"]);
+  });
+});
 
 const r = (status: CheckResult["status"]): CheckResult =>
   ({ property: "schema", target: "t", mechanism: "db-read", status, assertion: "a", evidence: "e" });

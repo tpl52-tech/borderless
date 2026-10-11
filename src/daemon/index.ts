@@ -29,6 +29,8 @@ import { verifyScan, liveMergedPrFor } from "./verify-scan.ts";
 import { runVerify, verifyTicket, type VerifyRunDeps } from "./verify-run.ts";
 import { runVerifyAgent } from "./verify-agent-run.ts";
 import { liveVerifyAgentSpawn } from "./verify-agent-spawn.ts";
+import { runAutoAdvance } from "./verify-advance-run.ts";
+import type { VerifyRunRow } from "../shared/verify-verdict.ts";
 import { runQaSubIssues } from "./verify-qa-run.ts";
 import { runQaWriteback } from "./verify-qa-sync-run.ts";
 import { QA_LABEL, qaRunsheetPrompt } from "../shared/verify-qa.ts";
@@ -195,6 +197,7 @@ export function startDaemon(home = stateHome()): Daemon {
   let runVerifyQaSync: UdsServerDeps["verifyQaSync"] = async () => ({ results: [], configured: false, wrote: false });
   // The local working copy configured for a repo — the checkout a sweep/verify agent spawns its worktree from.
   const localCwdFor = (r: string | undefined) => (r ? config.profiles.find((pr) => pr.repo === r && pr.localCwd)?.localCwd : undefined);
+  const teamKey = (config.linearTeamKeys ?? [])[0]; // single-team org: Linear targets/writes resolve on this team
   if (config.repo && config.branchOwner) {
     const repo = config.repo;
     const mergedPrFor = liveMergedPrFor(repo, config.branchOwner);
@@ -212,6 +215,32 @@ export function startDaemon(home = stateHome()): Daemon {
         const probeCommand = `${process.execPath} run ${new URL("../cli/index.ts", import.meta.url).pathname} verify probe`;
         runAgent = (issue) => runVerifyAgent(issue, { spawn, allowWrites: config.verifyAllowWrites, probeCommand });
       }
+      // Auto-advance (config.verifyAutoAdvance): a verified PURE-BACKEND ticket is moved to Done + an audit
+      // comment. Composed once when enabled + a Linear key/team exist; mixed/ui tickets are never advanced here.
+      let autoAdvance: ((rows: VerifyRunRow[]) => Promise<string[]>) | undefined;
+      if (config.verifyAutoAdvance && config.linearApiKey && teamKey) {
+        const linear = httpLinearClient(config.linearApiKey);
+        // Resolve the Done state once and cache the VALUE — a transient failure or a not-yet-created Done state
+        // leaves it null and is re-resolved next call (caching the promise would pin a null/rejection for the
+        // daemon's life).
+        let doneStateId: string | null = null;
+        const moveToDone = async (issueId: string, ticketKey: string) => {
+          const stateId = doneStateId ?? (doneStateId = await resolveDoneStateId(linear, teamKey));
+          if (!stateId) throw new Error("no Done workflow state to move to");
+          parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id: issueId, input: { stateId } }));
+          try { // audit comment is non-essential; the move is the point
+            parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId,
+              body: `✅ Backend verified by Borderless — auto-advanced to Done. Every deterministic check + the verification agent passed, and ${ticketKey} has no screen-testable half.` } }));
+          } catch { /* keep the move even if the comment fails */ }
+        };
+        autoAdvance = (rows) => runAutoAdvance(rows, {
+          issueByKey: (k) => store.getLinearIssueByIdentifier(k),
+          moveToDone,
+          // Reflect the move locally so a re-run (the store still lists it "Verifying" until the next `ao sync`)
+          // doesn't re-select → re-verify → re-comment it.
+          onAdvanced: (issue) => store.upsertLinearIssue({ ...issue, stateName: "Done", stateType: "completed" }),
+        });
+      }
       // single-flight: a second concurrent run (e.g. a second Run-checks) joins the in-flight one instead of
       // spawning a parallel fleet of agents. Keyed by ticketKey so a single-ticket run and a full run don't block.
       const runVerifyImpl = async (ticketKey?: string) => {
@@ -227,19 +256,22 @@ export function startDaemon(home = stateHome()): Daemon {
         try {
           const knownTables = await db.tables().catch(() => [] as string[]); // best-effort text-targeting
           const deps: VerifyRunDeps = { mergedPrFor, catalogRun: db.run, knownTables, ...(app ? { rlsProbe: app.rlsProbe } : {}), ...(runAgent ? { runAgent } : {}) };
+          let rows: VerifyRunRow[];
           if (ticketKey) {
             const issue = store.getLinearIssueByIdentifier(ticketKey);
-            return { rows: issue ? [await verifyTicket(issue, deps)] : [], configured: true };
+            rows = issue ? [await verifyTicket(issue, deps)] : [];
+          } else {
+            rows = await runVerify(store, deps);
           }
-          return { rows: await runVerify(store, deps), configured: true };
+          const advanced = autoAdvance ? await autoAdvance(rows) : [];
+          return { rows, configured: true, advanced };
         } finally {
           await db.close();
         }
       };
       runVerifyRun = singleFlight(runVerifyImpl, (ticketKey) => ticketKey ?? "__all__");
     }
-    const qaTeamKey = (config.linearTeamKeys ?? [])[0]; // single-team org: QA targets resolve on this team
-    if (config.linearApiKey && qaTeamKey) {
+    if (config.linearApiKey && teamKey) {
       const linear = httpLinearClient(config.linearApiKey);
       const runsheetChat = claudeCliChat({ model: config.askModel }); // subscription ($0) — generates the tester run sheet
       runVerifyQa = async (ticketKey, write = false) => {
@@ -256,8 +288,8 @@ export function startDaemon(home = stateHome()): Daemon {
         const results = await runQaSubIssues({
           rows,
           qaTargets: async () => ({
-            ...parseQaTargets(await linear.query(QA_TARGETS_QUERY, { teamKey: qaTeamKey, label: QA_LABEL }), qaTeamKey, QA_LABEL),
-            existingParentKeys: await fetchQaChildParentKeys(linear, qaTeamKey, QA_LABEL),
+            ...parseQaTargets(await linear.query(QA_TARGETS_QUERY, { teamKey: teamKey, label: QA_LABEL }), teamKey, QA_LABEL),
+            existingParentKeys: await fetchQaChildParentKeys(linear, teamKey, QA_LABEL),
           }),
           issueByKey: (k) => store.getLinearIssueByIdentifier(k) ?? undefined,
           generateRunsheet: async (issue) => (await runsheetChat([{ role: "user" as const, content: qaRunsheetPrompt(issue) }], [])).text ?? "",
@@ -271,8 +303,7 @@ export function startDaemon(home = stateHome()): Daemon {
   // Verdict writeback (PRD §13): Supabase (Cue QA's shared results) → the Linear manual-qa sub-issues. Independent
   // of the dev repo — needs a Linear key + team (to comment / move to Done / resolve the sub-issue UUID from the
   // store) AND verifyApp (the Supabase url + anon key). The Done-state id is resolved once per run, lazily.
-  const qaSyncTeamKey = (config.linearTeamKeys ?? [])[0];
-  if (config.linearApiKey && qaSyncTeamKey && config.verifyApp) {
+  if (config.linearApiKey && teamKey && config.verifyApp) {
     const linear = httpLinearClient(config.linearApiKey);
     const verifyApp = config.verifyApp;
     runVerifyQaSync = async (write = false) => {
@@ -284,7 +315,7 @@ export function startDaemon(home = stateHome()): Daemon {
           return i ? { id: i.id, stateType: i.stateType } : undefined;
         },
         commentBodies: (issueId) => fetchIssueCommentBodies(linear, issueId),
-        doneStateId: () => (doneStateIdOnce ??= resolveDoneStateId(linear, qaSyncTeamKey)),
+        doneStateId: () => (doneStateIdOnce ??= resolveDoneStateId(linear, teamKey)),
         postComment: async (issueId, body) => parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId, body } })).url,
         setState: async (issueId, stateId) => { parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id: issueId, input: { stateId } })); },
         write,

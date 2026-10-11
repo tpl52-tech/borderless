@@ -84,14 +84,16 @@ describe("reReviewAdvancedPrs (re-open resting jobs whose PR head advanced)", ()
     gate: { grade: "A-" }, reason: "a blocker", createdAt: 0, updatedAt: 0, ...over,
   });
 
-  /** A fake store that records transitions + events, scoped to the four methods reReviewAdvancedPrs reads. */
-  const fakeStore = (jobs: SweepJob[], columns: Record<string, string | undefined>) => {
+  /** A fake store that records transitions + events, scoped to the four methods reReviewAdvancedPrs reads.
+   *  `throwTransitionFor` makes transitionSweepJob throw for that job id — e.g. a uq_sweep_review collision. */
+  const fakeStore = (jobs: SweepJob[], columns: Record<string, string | undefined>, throwTransitionFor?: string) => {
     const byId = new Map(jobs.map((j) => [j.id, { ...j }]));
     const events: Array<{ jobId: string; detail: Record<string, unknown> }> = [];
     const store = {
       listSweepJobs: ({ kind }: { kind?: string } = {}) => [...byId.values()].filter((j) => !kind || j.kind === kind),
       getLinearIssue: (id: string) => (columns[id] ? { stateName: columns[id] } : null),
       transitionSweepJob: (id: string, patch: Partial<SweepJob>) => {
+        if (id === throwTransitionFor) throw new Error("SQLITE_CONSTRAINT: uq_sweep_review");
         const next = { ...byId.get(id)!, ...patch, updatedAt: byId.get(id)!.updatedAt + 1 };
         byId.set(id, next);
         return next;
@@ -146,6 +148,17 @@ describe("reReviewAdvancedPrs (re-open resting jobs whose PR head advanced)", ()
     const reopened = await reReviewAdvancedPrs(store, "In Review", headFor);
     expect(reopened.map((j) => j.id)).toEqual(["ok"]); // the healthy one still re-opened
     expect(byId.get("boom")!.state).toBe("needs_human"); // the failed one left resting, retried next sweep
+  });
+
+  test("fail-soft on the reopen UPDATE itself: a uq_sweep_review collision on one job doesn't block the others", async () => {
+    const { store, byId } = fakeStore(
+      [mk({ id: "collide", ticketId: "t1", prNumber: 31 }), mk({ id: "ok", ticketId: "t2", prNumber: 32 })],
+      { t1: "In Review", t2: "In Review" },
+      "collide", // transitionSweepJob throws for this one (a force-push back to an already-recorded sha)
+    );
+    const reopened = await reReviewAdvancedPrs(store, "In Review", headAdvanced);
+    expect(reopened.map((j) => j.id)).toEqual(["ok"]); // the collision was swallowed; the other still re-opened
+    expect(byId.get("collide")!.state).toBe("needs_human"); // left resting (the throwing UPDATE never applied)
   });
 });
 

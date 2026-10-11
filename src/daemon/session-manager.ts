@@ -117,6 +117,10 @@ export function createSessionManager(
   remote?: RemoteAgents,
 ): SessionManager {
   const live = new Map<string, PtySession>();
+  // Sessions spawned as ephemeral inspectors (ignoreSeedTicket: a verify agent or sweep reviewer, which own a
+  // kill+reap `finally`). ONLY these are safe to reap on shutdown — a sweep worker's ticket branch, and a
+  // human's ticket-less `ao/*` worktree, may hold un-pushed work, so shutdown leaves those alone.
+  const ephemeral = new Set<string>();
   const exitCbs = new Set<(e: { sessionId: string; exit: PtyExit }) => void>();
 
   const startPty = (
@@ -132,6 +136,7 @@ export function createSessionManager(
       sessionId: session.id, argv, cwd: agentExit ? session.cwd : home, cols: size?.cols, rows: size?.rows, env,
       onExit: (exit) => {
         live.delete(session.id);
+        ephemeral.delete(session.id); // its own finally reaped it; drop the marker (no-op for non-inspectors)
         if (agentExit) {
           // Local agent: the process dying IS the agent dying.
           tracker.onExit(session.id, exit.status);
@@ -271,10 +276,11 @@ export function createSessionManager(
   return {
     async spawn(params) {
       const c = prepare(params);
-      // `return await` (not a bare return) so a devbox rejection is handled within this async frame
+      // `await` the devbox branch (not a bare return) so a rejection is handled within this async frame
       // rather than adopted across a microtask gap, which Bun flags as an unhandled rejection.
-      if (c.location === "devbox") return await spawnDevbox(params, c);
-      return spawnLocal(params, c);
+      const session = c.location === "devbox" ? await spawnDevbox(params, c) : spawnLocal(params, c);
+      if (params.ignoreSeedTicket) ephemeral.add(session.id); // inspector → reap its worktree on shutdown
+      return session;
     },
 
     resume(sessionId, size) {
@@ -340,8 +346,20 @@ export function createSessionManager(
     },
     onExit(cb) { exitCbs.add(cb); return () => exitCbs.delete(cb); },
     shutdown() {
-      for (const pty of live.values()) pty.kill();
+      // SIGKILL, not the default SIGTERM: the daemon calls process.exit right after this, and a SIGTERM'd
+      // `claude` agent doesn't die instantly — it would reparent to init and linger as an orphan (the pile-up
+      // we saw). Force-kill so nothing survives. Reap the worktree ONLY for ephemeral inspectors (whose own
+      // kill+reap `finally` never ran because the daemon is dying); worker / human worktrees are left intact.
+      for (const [id, pty] of live) {
+        pty.kill("SIGKILL");
+        if (!ephemeral.has(id)) continue;
+        const s = store.getSession(id);
+        if (s?.worktreePath && s.worktreeBranch) {
+          try { removeWorktree({ repoTop: repoTopOfWorktree(s.worktreePath), path: s.worktreePath, branch: s.worktreeBranch }); } catch { /* best-effort on exit */ }
+        }
+      }
       live.clear();
+      ephemeral.clear();
       remote?.shutdown();
     },
   };

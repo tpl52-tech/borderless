@@ -26,7 +26,10 @@ export async function runAutoAdvance(rows: readonly VerifyRunRow[], deps: Advanc
   const advanced: string[] = [];
   for (const row of advanceableTickets(rows)) {
     const issue = deps.issueByKey(row.ticketKey);
-    if (!issue) continue;
+    // Skip a missing ticket, or one already advanced (stateType completed — the signal onAdvanced wrote). This
+    // guards BOTH run paths at the one choke point: the full run already drops it from the Verifying filter, and
+    // a repeated single-ticket run (`ao verify run <key>`, which selects by identifier, ignoring state) is caught here.
+    if (!issue || issue.stateType === "completed") continue;
     try {
       await deps.moveToDone(issue.id, row.ticketKey);
       deps.onAdvanced(issue); // reflect locally so a re-run doesn't re-advance / re-comment it

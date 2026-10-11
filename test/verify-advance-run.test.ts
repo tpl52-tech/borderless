@@ -41,6 +41,13 @@ describe("runAutoAdvance", () => {
     expect(h.reflected).toHaveLength(0);
   });
 
+  test("an already-advanced ticket (store state completed) is skipped — no re-advance / re-comment on a repeat single-ticket run", async () => {
+    const done: LinearIssue = { ...issue("u27", "COR-27"), stateType: "completed", stateName: "Done" };
+    const h = harness({ store: { "COR-27": done } });
+    expect(await runAutoAdvance([vrow("COR-27", "verified", "backend")], h.deps)).toEqual([]);
+    expect(h.moved).toHaveLength(0);
+  });
+
   test("a failed move is best-effort: skipped, NOT reflected, run continues for the others", async () => {
     const h = harness({ moveToDone: async (_id, key) => { if (key === "COR-27") throw new Error("Linear 500"); } });
     const rows = [vrow("COR-27", "verified", "backend"), vrow("COR-28", "verified", "backend")];

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { checkStates, parseReviewVerdict, needsHydration, workerSeed } from "../src/daemon/sweep-deps.ts";
+import { checkStates, parseReviewVerdict, needsHydration, isRestingWithPr, workerSeed } from "../src/daemon/sweep-deps.ts";
 import type { SweepJob } from "../src/shared/types.ts";
 import type { WorkerFeedback } from "../src/daemon/sweep-engine.ts";
 import type { Territory } from "../src/shared/collision.ts";
@@ -40,6 +40,39 @@ describe("needsHydration", () => {
     expect(needsHydration({ kind: "in_review", prNumber: null } as SweepJob)).toBe(true);
     expect(needsHydration({ kind: "in_review", prNumber: 5 } as SweepJob)).toBe(false);
     expect(needsHydration({ kind: "rescue", prNumber: null } as SweepJob)).toBe(false);
+  });
+});
+
+describe("isRestingWithPr (head-advance re-review candidate)", () => {
+  const job = (over: Partial<SweepJob>): SweepJob => ({
+    id: "j", kind: "in_review", ticketId: "t", ticketKey: "COR-20", assignee: null,
+    prNumber: 31, headSha: "sha-a", sessionId: null, state: "needs_human", cycles: 0,
+    gate: null, reason: null, createdAt: 0, updatedAt: 0, ...over,
+  });
+
+  test("true for a resting in-review job with a PR + reviewed head", () => {
+    expect(isRestingWithPr(job({ state: "needs_human" }))).toBe(true);
+    expect(isRestingWithPr(job({ state: "ready" }))).toBe(true);
+  });
+
+  test("false while the job is still being driven (not resting)", () => {
+    for (const state of ["queued", "fixing", "ci", "reviewing"] as const) {
+      expect(isRestingWithPr(job({ state }))).toBe(false);
+    }
+  });
+
+  test("false once terminal — a merged/failed job is done, not awaiting a new push", () => {
+    expect(isRestingWithPr(job({ state: "merged" }))).toBe(false);
+    expect(isRestingWithPr(job({ state: "failed" }))).toBe(false);
+  });
+
+  test("false without a PR or a reviewed head (nothing to compare a new head against)", () => {
+    expect(isRestingWithPr(job({ prNumber: null }))).toBe(false);
+    expect(isRestingWithPr(job({ headSha: null }))).toBe(false);
+  });
+
+  test("false for a rescue job (re-review is in-review-only)", () => {
+    expect(isRestingWithPr(job({ kind: "rescue", state: "needs_human" }))).toBe(false);
   });
 });
 

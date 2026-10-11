@@ -72,10 +72,10 @@ export async function main(argv: string[]): Promise<void> {
   if (sub === "sweep") {
     await withDaemon("sweep", async (client) => {
       const stateName = rest[0];
-      const r = await client.request<{ synced: number; created: number; started: number }>(
+      const r = await client.request<{ synced: number; reopened: number; created: number; started: number }>(
         "sweep.scanInReview", stateName ? { stateName } : {},
       );
-      console.log(`sweep: synced ${r.synced} issue(s), enqueued ${r.created} job(s), started ${r.started} run(s)`);
+      console.log(`sweep: synced ${r.synced} issue(s), re-opened ${r.reopened} advanced, enqueued ${r.created} job(s), started ${r.started} run(s)`);
     });
     return;
   }

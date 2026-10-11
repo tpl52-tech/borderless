@@ -11,39 +11,40 @@ const issue = (id: string, identifier: string): LinearIssue =>
   ({ id, identifier, title: identifier, description: null, url: null, stateName: "Verifying", stateType: "started",
      assignee: null, projectId: null, projectName: null, teamKey: "COR", priority: null, dueDate: null, labels: [], blockedBy: [] } as unknown as LinearIssue);
 
-function deps(over: { store?: Record<string, LinearIssue>; moveToDone?: (id: string, k: string) => Promise<void> } = {}) {
+function harness(over: { store?: Record<string, LinearIssue>; moveToDone?: (id: string, k: string) => Promise<void> } = {}) {
   const moved: Array<{ id: string; key: string }> = [];
-  const store = over.store ?? { "COR-27": issue("u27", "COR-27"), "COR-35": issue("u35", "COR-35") };
+  const reflected: string[] = [];
+  const store = over.store ?? { "COR-27": issue("u27", "COR-27"), "COR-28": issue("u28", "COR-28") };
   return {
-    moved,
+    moved, reflected,
     deps: {
-      issueByKey: (k: string) => store[k],
+      issueByKey: (k: string) => store[k] ?? null,
       moveToDone: over.moveToDone ?? (async (id: string, key: string) => { moved.push({ id, key }); }),
+      onAdvanced: (i: LinearIssue) => { reflected.push(i.identifier); },
     },
   };
 }
 
 describe("runAutoAdvance", () => {
-  test("moves only the pure-backend verified tickets to Done, by UUID, and returns the keys moved", async () => {
-    const h = deps();
+  test("moves only pure-backend verified tickets (by UUID), reflects locally, returns the keys moved", async () => {
+    const h = harness();
     const rows = [vrow("COR-27", "verified", "backend"), vrow("COR-35", "verified", "mixed"), vrow("COR-40", "needs_human", "backend")];
     expect(await runAutoAdvance(rows, h.deps)).toEqual(["COR-27"]);
     expect(h.moved).toEqual([{ id: "u27", key: "COR-27" }]); // COR-35 (mixed) + COR-40 (needs_human) untouched
+    expect(h.reflected).toEqual(["COR-27"]); // reflected in the store so a re-run won't re-advance it
   });
 
-  test("a ticket missing from the store is skipped (not moved, not returned)", async () => {
-    const h = deps({ store: {} }); // COR-27 not synced
+  test("a ticket missing from the store is skipped (not moved, not reflected, not returned)", async () => {
+    const h = harness({ store: {} });
     expect(await runAutoAdvance([vrow("COR-27", "verified", "backend")], h.deps)).toEqual([]);
     expect(h.moved).toHaveLength(0);
+    expect(h.reflected).toHaveLength(0);
   });
 
-  test("a failed move is best-effort: skipped, run continues, the key is NOT reported as advanced", async () => {
-    const store = { "COR-27": issue("u27", "COR-27"), "COR-28": issue("u28", "COR-28") };
-    const d = {
-      issueByKey: (k: string) => store[k as keyof typeof store],
-      moveToDone: async (_id: string, key: string) => { if (key === "COR-27") throw new Error("Linear 500"); },
-    };
+  test("a failed move is best-effort: skipped, NOT reflected, run continues for the others", async () => {
+    const h = harness({ moveToDone: async (_id, key) => { if (key === "COR-27") throw new Error("Linear 500"); } });
     const rows = [vrow("COR-27", "verified", "backend"), vrow("COR-28", "verified", "backend")];
-    expect((await runAutoAdvance(rows, d)).sort()).toEqual(["COR-28"]); // COR-27 failed → not advanced; COR-28 still moved
+    expect((await runAutoAdvance(rows, h.deps)).sort()).toEqual(["COR-28"]); // COR-27 failed → not advanced
+    expect(h.reflected).toEqual(["COR-28"]); // the failed one is NOT reflected (so a retry can re-attempt it)
   });
 });

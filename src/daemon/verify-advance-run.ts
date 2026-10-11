@@ -9,10 +9,13 @@ import { advanceableTickets, type VerifyRunRow } from "../shared/verify-verdict.
 import type { LinearIssue } from "../shared/types.ts";
 
 export interface AdvanceDeps {
-  /** The synced dev ticket by key (for its UUID); undefined ⇒ not in the store, skip it. */
-  issueByKey: (key: string) => LinearIssue | undefined;
+  /** The synced dev ticket by key (for its UUID); null ⇒ not in the store, skip it. */
+  issueByKey: (key: string) => LinearIssue | null;
   /** Move the ticket (by UUID) to Done + post the audit comment. Throws on failure. */
   moveToDone: (issueId: string, ticketKey: string) => Promise<void>;
+  /** Reflect a successful move in the local store (so it leaves "Verifying" and a later run neither re-verifies
+   *  nor re-comments it — the move's idempotency in-process, with no extra Linear read). */
+  onAdvanced: (issue: LinearIssue) => void;
 }
 
 /**
@@ -26,6 +29,7 @@ export async function runAutoAdvance(rows: readonly VerifyRunRow[], deps: Advanc
     if (!issue) continue;
     try {
       await deps.moveToDone(issue.id, row.ticketKey);
+      deps.onAdvanced(issue); // reflect locally so a re-run doesn't re-advance / re-comment it
       advanced.push(row.ticketKey);
     } catch (err) {
       console.error(`verify auto-advance: ${row.ticketKey} → Done failed: ${err instanceof Error ? err.message : err}`);

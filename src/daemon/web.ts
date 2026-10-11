@@ -35,6 +35,11 @@ export function startWebServer(deps: WebServerDeps): WebServer {
   const server = Bun.serve({
     port: deps.port,
     hostname: "127.0.0.1", // localhost only — never exposed off the machine
+    // A verify run spawns an agent and blocks the request for minutes; Bun's default 10s idle timeout would kill
+    // it mid-run (the browser hangs on "running…" though the run finishes server-side). 255 is Bun's max — it
+    // covers the realistic single/few-agent run; a worst-case slow agent still exceeds it, so `ao verify run`
+    // (no HTTP timeout) stays the path for very long runs.
+    idleTimeout: 255,
     async fetch(req) {
       const { pathname } = new URL(req.url);
       if (pathname === "/" || pathname === "/index.html") {

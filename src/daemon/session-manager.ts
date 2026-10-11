@@ -18,7 +18,7 @@ import { spawnPty, type PtySession, type PtyExit } from "./pty.ts";
 import { Store } from "./store.ts";
 import type { StatusTracker } from "./monitors/status.ts";
 import type { RemoteAgents } from "./remote-box.ts";
-import { provisionWorktree, removeWorktree, repoTopOfWorktree, gitToplevel, branchName } from "./worktree.ts";
+import { provisionWorktree, removeWorktree, repoTopOfWorktree, gitToplevel, branchName, isThrowawayBranch } from "./worktree.ts";
 import { sessionDir, stateHome } from "../shared/paths.ts";
 import { buildSpawnSpec, DEFERRED_TOOL_GUIDANCE, type SpawnSpec } from "../shared/spawn-spec.ts";
 import { isBareTicket, extractTickets, expandTicketSeed } from "../shared/ticket.ts";
@@ -340,7 +340,17 @@ export function createSessionManager(
     },
     onExit(cb) { exitCbs.add(cb); return () => exitCbs.delete(cb); },
     shutdown() {
-      for (const pty of live.values()) pty.kill();
+      // SIGKILL, not the default SIGTERM: the daemon calls process.exit right after this, and a SIGTERM'd
+      // `claude` agent doesn't die instantly — it would reparent to init and linger as an orphan (the pile-up
+      // we saw). Force-kill so nothing survives. Reap throwaway (`ao/*`) inspector worktrees too, since their
+      // own kill+reap `finally` never ran; a sweep worker's ticket branch is left (it may hold un-pushed work).
+      for (const [id, pty] of live) {
+        pty.kill("SIGKILL");
+        const s = store.getSession(id);
+        if (s?.worktreePath && isThrowawayBranch(s.worktreeBranch)) {
+          try { removeWorktree({ repoTop: repoTopOfWorktree(s.worktreePath), path: s.worktreePath, branch: s.worktreeBranch! }); } catch { /* best-effort on exit */ }
+        }
+      }
       live.clear();
       remote?.shutdown();
     },

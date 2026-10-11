@@ -41,6 +41,7 @@ import { startWebServer, type WebServer } from "./web.ts";
 import { httpLinearClient, syncLinearIssues, fetchQaChildParentKeys, fetchIssueCommentBodies, resolveDoneStateId } from "./linear.ts";
 import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate } from "../shared/linear.ts";
 import { verifyRow, type VerifyRow } from "../shared/verify.ts";
+import { singleFlight } from "../shared/single-flight.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
 import { buildTerritory } from "../shared/collision.ts";
 import { liveSweepDeps, needsHydration, hydrateInReviewJob } from "./sweep-deps.ts";
@@ -211,7 +212,9 @@ export function startDaemon(home = stateHome()): Daemon {
         const probeCommand = `${process.execPath} run ${new URL("../cli/index.ts", import.meta.url).pathname} verify probe`;
         runAgent = (issue) => runVerifyAgent(issue, { spawn, allowWrites: config.verifyAllowWrites, probeCommand });
       }
-      runVerifyRun = async (ticketKey) => {
+      // single-flight: a second concurrent run (e.g. a second Run-checks) joins the in-flight one instead of
+      // spawning a parallel fleet of agents. Keyed by ticketKey so a single-ticket run and a full run don't block.
+      const runVerifyImpl = async (ticketKey?: string) => {
         const db = openCatalogDb(verifyDbUrl);
         // Behavioral RLS: sign in once per run (best-effort — a sign-in failure degrades to structural-only,
         // but is logged so a stale test password / bad key doesn't silently disable a configured check).
@@ -233,6 +236,7 @@ export function startDaemon(home = stateHome()): Daemon {
           await db.close();
         }
       };
+      runVerifyRun = singleFlight(runVerifyImpl, (ticketKey) => ticketKey ?? "__all__");
     }
     const qaTeamKey = (config.linearTeamKeys ?? [])[0]; // single-team org: QA targets resolve on this team
     if (config.linearApiKey && qaTeamKey) {

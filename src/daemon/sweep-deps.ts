@@ -14,7 +14,7 @@
 import type { Store } from "./store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { StatusTracker } from "./monitors/status.ts";
-import type { SweepJob } from "../shared/types.ts";
+import type { SweepJob, SweepState } from "../shared/types.ts";
 import type { CheckState, RequiredCheck } from "../shared/sweep-gate.ts";
 import { REQUIRED_CHECKS } from "../shared/sweep-gate.ts";
 import type { SweepEngineDeps, ReviewVerdict, WorkerResult, WorkerFeedback, PollResult } from "./sweep-engine.ts";
@@ -94,6 +94,18 @@ export function needsHydration(job: SweepJob): boolean {
   return job.kind === "in_review" && job.prNumber == null;
 }
 
+/**
+ * An in-review job "resting on a human": the agent drove it as far as it can and is waiting — `ready` (gate
+ * passed, a human merges) or `needs_human` (a blocker/judgment the agent can't clear). A later push to such a
+ * PR is the human's answer, so it should trigger a fresh review of the new head (see reReviewAdvancedPrs).
+ */
+const RESTING_IN_REVIEW: ReadonlySet<SweepState> = new Set(["ready", "needs_human"]);
+
+/** A resting in-review job that has a PR + a reviewed head — i.e. a candidate for a head-advance re-review. Pure. */
+export function isRestingWithPr(job: SweepJob): boolean {
+  return job.kind === "in_review" && RESTING_IN_REVIEW.has(job.state) && job.prNumber != null && job.headSha != null;
+}
+
 // --- live composition (live-only) ------------------------------------------
 
 const DEFAULT_CI_POLL_MS = 30_000;
@@ -150,6 +162,54 @@ export async function hydrateInReviewJob(store: Store, job: SweepJob, cfg: { rep
   if (number == null) return job;
   const headSha = headOf(await fetchPr(cfg.repo, number));
   return store.transitionSweepJob(job.id, { prNumber: number, headSha });
+}
+
+/** The live reader reReviewAdvancedPrs fetches a PR's current head with: `headOf(await fetchPr(repo, n))`,
+ *  injected so the re-review decision (below) is unit-testable without gh — mirrors SweepEngineDeps' I/O seams. */
+export function liveHeadReader(repo: string): (prNumber: number) => Promise<string | null> {
+  return (prNumber) => fetchPr(repo, prNumber).then(headOf);
+}
+
+/**
+ * Re-review PRs that advanced after resting. The in-review sweep drives a PR to `ready`/`needs_human` and then
+ * waits on a human; when the human pushes a fix, that resting job's reviewed head goes stale — yet the enqueue
+ * dedup (it treats any non-merged/failed job as active) would never re-review the new code. So before each
+ * sweep, re-open every resting in-review job whose PR head has moved past what it reviewed: back to `queued`
+ * with the new head (a fresh attempt — cycles/gate/reason/session cleared), for the supervisor to drive and
+ * review afresh. Bounded by uq_sweep_review(ticket_id, head_sha) — one review per head, so an unchanged PR is
+ * left resting, never looped. Returns the jobs re-opened.
+ *
+ * Fail-soft per job: this runs ahead of enqueue + pickup in scanInReview, so a single gh hiccup, closed PR, or
+ * UNIQUE collision must never throw out and starve the rest of the sweep. Heads are fetched concurrently.
+ */
+export async function reReviewAdvancedPrs(
+  store: Pick<Store, "listSweepJobs" | "getLinearIssue" | "transitionSweepJob" | "recordSweepEvent">,
+  stateName: string,
+  headFor: (prNumber: number) => Promise<string | null>,
+): Promise<SweepJob[]> {
+  // Only tickets STILL in the swept column: a human who moved the ticket out (e.g. back to In Progress) and
+  // keeps pushing it themselves has reclaimed it — the sweep must not yank it back. (syncBoard ran first, so
+  // the ticket's column is fresh.)
+  const resting = store.listSweepJobs({ kind: "in_review" })
+    .filter((j) => isRestingWithPr(j) && store.getLinearIssue(j.ticketId)?.stateName === stateName);
+  const heads = await Promise.allSettled(resting.map((j) => headFor(j.prNumber!)));
+  const reopened: SweepJob[] = [];
+  resting.forEach((job, i) => {
+    const res = heads[i]!;
+    // A rejected fetch (transient gh/network, or a closed/deleted PR) leaves the job resting, to retry next
+    // sweep; an unchanged or unknown head means the human hasn't pushed → still resting on them.
+    if (res.status !== "fulfilled" || res.value == null || res.value === job.headSha) return;
+    try {
+      reopened.push(store.transitionSweepJob(job.id, { state: "queued", headSha: res.value, cycles: 0, gate: null, reason: null, sessionId: null }));
+      store.recordSweepEvent(job.id, "state_change", { from: job.state, to: "queued", reason: "head-advance re-review", headSha: res.value });
+    } catch (err) {
+      // uq_sweep_review spans ALL in_review states for a ticket (not just active ones, unlike
+      // uq_sweep_rescue_active), so the head_sha UPDATE could collide with a historical sibling row if a human
+      // force-pushed back to an already-recorded sha. Pathological, but kept fail-soft so it never aborts.
+      console.error(`re-review ${job.ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+  });
+  return reopened;
 }
 
 /** Build the engine's deps from the live session manager + gh. Live-only; see file header. */

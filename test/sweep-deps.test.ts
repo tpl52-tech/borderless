@@ -1,5 +1,6 @@
 import { test, expect, describe } from "bun:test";
-import { checkStates, parseReviewVerdict, needsHydration, workerSeed } from "../src/daemon/sweep-deps.ts";
+import { checkStates, parseReviewVerdict, needsHydration, isRestingWithPr, reReviewAdvancedPrs, workerSeed } from "../src/daemon/sweep-deps.ts";
+import type { Store } from "../src/daemon/store.ts";
 import type { SweepJob } from "../src/shared/types.ts";
 import type { WorkerFeedback } from "../src/daemon/sweep-engine.ts";
 import type { Territory } from "../src/shared/collision.ts";
@@ -40,6 +41,124 @@ describe("needsHydration", () => {
     expect(needsHydration({ kind: "in_review", prNumber: null } as SweepJob)).toBe(true);
     expect(needsHydration({ kind: "in_review", prNumber: 5 } as SweepJob)).toBe(false);
     expect(needsHydration({ kind: "rescue", prNumber: null } as SweepJob)).toBe(false);
+  });
+});
+
+describe("isRestingWithPr (head-advance re-review candidate)", () => {
+  const job = (over: Partial<SweepJob>): SweepJob => ({
+    id: "j", kind: "in_review", ticketId: "t", ticketKey: "COR-20", assignee: null,
+    prNumber: 31, headSha: "sha-a", sessionId: null, state: "needs_human", cycles: 0,
+    gate: null, reason: null, createdAt: 0, updatedAt: 0, ...over,
+  });
+
+  test("true for a resting in-review job with a PR + reviewed head", () => {
+    expect(isRestingWithPr(job({ state: "needs_human" }))).toBe(true);
+    expect(isRestingWithPr(job({ state: "ready" }))).toBe(true);
+  });
+
+  test("false while the job is still being driven (not resting)", () => {
+    for (const state of ["queued", "fixing", "ci", "reviewing"] as const) {
+      expect(isRestingWithPr(job({ state }))).toBe(false);
+    }
+  });
+
+  test("false once terminal — a merged/failed job is done, not awaiting a new push", () => {
+    expect(isRestingWithPr(job({ state: "merged" }))).toBe(false);
+    expect(isRestingWithPr(job({ state: "failed" }))).toBe(false);
+  });
+
+  test("false without a PR or a reviewed head (nothing to compare a new head against)", () => {
+    expect(isRestingWithPr(job({ prNumber: null }))).toBe(false);
+    expect(isRestingWithPr(job({ headSha: null }))).toBe(false);
+  });
+
+  test("false for a rescue job (re-review is in-review-only)", () => {
+    expect(isRestingWithPr(job({ kind: "rescue", state: "needs_human" }))).toBe(false);
+  });
+});
+
+describe("reReviewAdvancedPrs (re-open resting jobs whose PR head advanced)", () => {
+  const mk = (over: Partial<SweepJob>): SweepJob => ({
+    id: over.id ?? "j", kind: "in_review", ticketId: over.ticketId ?? "t", ticketKey: over.ticketKey ?? "COR-20",
+    assignee: null, prNumber: 31, headSha: "sha-old", sessionId: "old-sess", state: "needs_human", cycles: 5,
+    gate: { grade: "A-" }, reason: "a blocker", createdAt: 0, updatedAt: 0, ...over,
+  });
+
+  /** A fake store that records transitions + events, scoped to the four methods reReviewAdvancedPrs reads.
+   *  `throwTransitionFor` makes transitionSweepJob throw for that job id — e.g. a uq_sweep_review collision. */
+  const fakeStore = (jobs: SweepJob[], columns: Record<string, string | undefined>, throwTransitionFor?: string) => {
+    const byId = new Map(jobs.map((j) => [j.id, { ...j }]));
+    const events: Array<{ jobId: string; detail: Record<string, unknown> }> = [];
+    const store = {
+      listSweepJobs: ({ kind }: { kind?: string } = {}) => [...byId.values()].filter((j) => !kind || j.kind === kind),
+      getLinearIssue: (id: string) => (columns[id] ? { stateName: columns[id] } : null),
+      transitionSweepJob: (id: string, patch: Partial<SweepJob>) => {
+        if (id === throwTransitionFor) throw new Error("SQLITE_CONSTRAINT: uq_sweep_review");
+        const next = { ...byId.get(id)!, ...patch, updatedAt: byId.get(id)!.updatedAt + 1 };
+        byId.set(id, next);
+        return next;
+      },
+      recordSweepEvent: (jobId: string, _event: string, detail: Record<string, unknown>) => { events.push({ jobId, detail }); return {} as never; },
+    };
+    return { store: store as unknown as Store, events, byId };
+  };
+  const headAdvanced = async () => "sha-new";
+
+  test("re-opens an advanced resting job in place: queued + new head, prior attempt cleared, event recorded", async () => {
+    const { store, events, byId } = fakeStore([mk({ id: "j1", ticketId: "t1" })], { t1: "In Review" });
+    const reopened = await reReviewAdvancedPrs(store, "In Review", headAdvanced);
+
+    expect(reopened.map((j) => j.id)).toEqual(["j1"]);
+    const j = byId.get("j1")!;
+    expect(j.state).toBe("queued");
+    expect(j.headSha).toBe("sha-new");
+    expect({ cycles: j.cycles, gate: j.gate, reason: j.reason, sessionId: j.sessionId }).toEqual({ cycles: 0, gate: null, reason: null, sessionId: null });
+    expect(events).toEqual([{ jobId: "j1", detail: { from: "needs_human", to: "queued", reason: "head-advance re-review", headSha: "sha-new" } }]);
+  });
+
+  test("leaves a job whose head is unchanged, or whose head is unknown (human hasn't pushed)", async () => {
+    const { store, byId } = fakeStore([mk({ id: "j1", ticketId: "t1" })], { t1: "In Review" });
+    expect(await reReviewAdvancedPrs(store, "In Review", async () => "sha-old")).toEqual([]);
+    expect(await reReviewAdvancedPrs(store, "In Review", async () => null)).toEqual([]);
+    expect(byId.get("j1")!.state).toBe("needs_human");
+  });
+
+  test("ignores a ticket that left the swept column — a human reclaimed it (back to In Progress)", async () => {
+    const { store, byId } = fakeStore([mk({ id: "j1", ticketId: "t1" })], { t1: "In Progress" });
+    expect(await reReviewAdvancedPrs(store, "In Review", headAdvanced)).toEqual([]);
+    expect(byId.get("j1")!.state).toBe("needs_human");
+  });
+
+  test("ignores jobs still being driven, terminal, or rescue (only resting-with-PR is a candidate)", async () => {
+    const jobs = [
+      mk({ id: "driving", ticketId: "t1", state: "reviewing" }),
+      mk({ id: "merged", ticketId: "t2", state: "merged" }),
+      mk({ id: "rescue", ticketId: "t3", kind: "rescue" }),
+    ];
+    const { store } = fakeStore(jobs, { t1: "In Review", t2: "In Review", t3: "In Review" });
+    expect(await reReviewAdvancedPrs(store, "In Review", headAdvanced)).toEqual([]);
+  });
+
+  test("fail-soft: one PR's fetch failure doesn't block re-review of the others", async () => {
+    const { store, byId } = fakeStore(
+      [mk({ id: "boom", ticketId: "t1", prNumber: 31 }), mk({ id: "ok", ticketId: "t2", prNumber: 32 })],
+      { t1: "In Review", t2: "In Review" },
+    );
+    const headFor = async (pr: number) => { if (pr === 31) throw new Error("gh exit 1"); return "sha-new"; };
+    const reopened = await reReviewAdvancedPrs(store, "In Review", headFor);
+    expect(reopened.map((j) => j.id)).toEqual(["ok"]); // the healthy one still re-opened
+    expect(byId.get("boom")!.state).toBe("needs_human"); // the failed one left resting, retried next sweep
+  });
+
+  test("fail-soft on the reopen UPDATE itself: a uq_sweep_review collision on one job doesn't block the others", async () => {
+    const { store, byId } = fakeStore(
+      [mk({ id: "collide", ticketId: "t1", prNumber: 31 }), mk({ id: "ok", ticketId: "t2", prNumber: 32 })],
+      { t1: "In Review", t2: "In Review" },
+      "collide", // transitionSweepJob throws for this one (a force-push back to an already-recorded sha)
+    );
+    const reopened = await reReviewAdvancedPrs(store, "In Review", headAdvanced);
+    expect(reopened.map((j) => j.id)).toEqual(["ok"]); // the collision was swallowed; the other still re-opened
+    expect(byId.get("collide")!.state).toBe("needs_human"); // left resting (the throwing UPDATE never applied)
   });
 });
 

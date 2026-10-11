@@ -51,6 +51,17 @@ export interface VerifyRunRow extends VerifyRow, TicketVerdict {}
 export interface VerifyRunResult {
   rows: VerifyRunRow[];
   configured: boolean;
+  /** Ticket keys the run auto-moved to Done (config.verifyAutoAdvance); omitted/empty when none / the flag is off. */
+  advanced?: string[];
+}
+
+/**
+ * The tickets a verify run may auto-advance to Done (config.verifyAutoAdvance): a PURE-BACKEND ticket the sweep
+ * marked `verified`. A `mixed` ticket's screen-testable half still needs a Cue QA tester sign-off (carried back
+ * by `verify qa-sync`), and a `ui` ticket is never `verified` by the sweep — so neither is advanced here. Pure.
+ */
+export function advanceableTickets(rows: readonly VerifyRunRow[]): VerifyRunRow[] {
+  return rows.filter((r) => r.verdict === "verified" && r.verifiability === "backend");
 }
 
 /**

@@ -167,6 +167,11 @@ export interface OperatorConfigLite {
    *  `service_role` is never in config), so it can't touch another user's data. The real safety is that the
    *  target DB holds no real data yet; COR-86 requires turning this off + deleting the creds before real users. */
   verifyAllowWrites?: boolean;
+  /** Whether a `verified` PURE-BACKEND Verifying ticket (no screen-testable half) is auto-moved to Done by the
+   *  verify run (PRD §13). Default false. Mixed/ui tickets are never advanced this way — their UI half waits for
+   *  the Cue QA tester sign-off that `verify qa-sync` carries back. Moves the ticket to Done + posts an audit
+   *  comment; outward-facing, so it's opt-in. */
+  verifyAutoAdvance?: boolean;
 }
 
 /** The app-session config for the behavioral RLS check. The URL + keys are public (they ship in the app). */
@@ -227,6 +232,7 @@ export function loadOperatorConfig(home = stateHome()): OperatorConfigLite {
     verifyDbUrl: typeof raw.verifyDbUrl === "string" && raw.verifyDbUrl.trim() ? raw.verifyDbUrl.trim() : undefined,
     verifyApp: parseVerifyApp(raw.verifyApp),
     verifyAllowWrites: raw.verifyAllowWrites === true,
+    verifyAutoAdvance: raw.verifyAutoAdvance === true,
   };
 }
 

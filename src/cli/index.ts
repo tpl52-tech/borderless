@@ -197,7 +197,7 @@ export async function main(argv: string[]): Promise<void> {
     if (rest[0] === "run") {
       const ticketKey = rest[1];
       await withDaemon("verify", async (client) => {
-        const { rows, configured } = await client.request<VerifyRunResult>("verify.run", ticketKey ? { ticketKey } : {});
+        const { rows, configured, advanced } = await client.request<VerifyRunResult>("verify.run", ticketKey ? { ticketKey } : {});
         if (!configured) { console.log("verify run: set `repo` + `branchOwner` + `verifyDbUrl` in ~/.borderless/config.json"); return; }
         if (rows.length === 0) { console.log(ticketKey ? `verify run: no ticket ${ticketKey} in the store — run \`ao sync\`?` : "verify run: nothing in Verifying"); return; }
         for (const r of rows) {
@@ -206,6 +206,7 @@ export async function main(argv: string[]): Promise<void> {
           for (const c of r.results) console.log(`    ${c.status.padEnd(12)} ${c.property}${c.target ? ` (${c.target})` : ""} — ${c.evidence}`);
           for (const f of r.agentFindings) console.log(`    ◆ ${f.status.padEnd(10)} ${f.criterion} — ${f.evidence}`);
         }
+        if (advanced?.length) console.log(`\n→ auto-advanced to Done: ${advanced.join(", ")}`);
       });
       return;
     }

@@ -29,6 +29,8 @@ import { verifyScan, liveMergedPrFor } from "./verify-scan.ts";
 import { runVerify, verifyTicket, type VerifyRunDeps } from "./verify-run.ts";
 import { runVerifyAgent } from "./verify-agent-run.ts";
 import { liveVerifyAgentSpawn } from "./verify-agent-spawn.ts";
+import { runAutoAdvance } from "./verify-advance-run.ts";
+import type { VerifyRunRow } from "../shared/verify-verdict.ts";
 import { runQaSubIssues } from "./verify-qa-run.ts";
 import { runQaWriteback } from "./verify-qa-sync-run.ts";
 import { QA_LABEL, qaRunsheetPrompt } from "../shared/verify-qa.ts";
@@ -212,6 +214,24 @@ export function startDaemon(home = stateHome()): Daemon {
         const probeCommand = `${process.execPath} run ${new URL("../cli/index.ts", import.meta.url).pathname} verify probe`;
         runAgent = (issue) => runVerifyAgent(issue, { spawn, allowWrites: config.verifyAllowWrites, probeCommand });
       }
+      // Auto-advance (config.verifyAutoAdvance): a verified PURE-BACKEND ticket is moved to Done + an audit
+      // comment. Composed once when enabled + a Linear key/team exist; mixed/ui tickets are never advanced here.
+      const advanceTeamKey = (config.linearTeamKeys ?? [])[0];
+      let autoAdvance: ((rows: VerifyRunRow[]) => Promise<string[]>) | undefined;
+      if (config.verifyAutoAdvance && config.linearApiKey && advanceTeamKey) {
+        const linear = httpLinearClient(config.linearApiKey);
+        let doneStateIdOnce: Promise<string | null> | null = null; // resolve the Done state at most once per boot
+        const moveToDone = async (issueId: string, ticketKey: string) => {
+          const stateId = await (doneStateIdOnce ??= resolveDoneStateId(linear, advanceTeamKey));
+          if (!stateId) throw new Error("no Done workflow state to move to");
+          parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id: issueId, input: { stateId } }));
+          try { // audit comment is non-essential; the move is the point
+            parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId,
+              body: `✅ Backend verified by Borderless — auto-advanced to Done. Every deterministic check + the verification agent passed, and ${ticketKey} has no screen-testable half.` } }));
+          } catch { /* keep the move even if the comment fails */ }
+        };
+        autoAdvance = (rows) => runAutoAdvance(rows, { issueByKey: (k) => store.getLinearIssueByIdentifier(k) ?? undefined, moveToDone });
+      }
       // single-flight: a second concurrent run (e.g. a second Run-checks) joins the in-flight one instead of
       // spawning a parallel fleet of agents. Keyed by ticketKey so a single-ticket run and a full run don't block.
       const runVerifyImpl = async (ticketKey?: string) => {
@@ -227,11 +247,15 @@ export function startDaemon(home = stateHome()): Daemon {
         try {
           const knownTables = await db.tables().catch(() => [] as string[]); // best-effort text-targeting
           const deps: VerifyRunDeps = { mergedPrFor, catalogRun: db.run, knownTables, ...(app ? { rlsProbe: app.rlsProbe } : {}), ...(runAgent ? { runAgent } : {}) };
+          let rows: VerifyRunRow[];
           if (ticketKey) {
             const issue = store.getLinearIssueByIdentifier(ticketKey);
-            return { rows: issue ? [await verifyTicket(issue, deps)] : [], configured: true };
+            rows = issue ? [await verifyTicket(issue, deps)] : [];
+          } else {
+            rows = await runVerify(store, deps);
           }
-          return { rows: await runVerify(store, deps), configured: true };
+          const advanced = autoAdvance ? await autoAdvance(rows) : [];
+          return { rows, configured: true, advanced };
         } finally {
           await db.close();
         }

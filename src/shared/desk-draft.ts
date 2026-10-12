@@ -1,6 +1,6 @@
 /**
  * Lead Desk v2 — chat → draft (PRD §9; web console). The lead describes work in natural language; the LLM
- * proposes a structured plan of epics + tickets (assignee, project, priority) which the lead reviews before
+ * proposes a structured plan of epics + tickets (assignee, priority) which the lead reviews before
  * ANYTHING is written to Linear. This is the PURE half: the single-shot prompt the model gets, and the parser
  * that turns its JSON reply into a validated, assignee-resolved draft. It fails SOFT — a garbled reply, a bad
  * shape, or an unresolvable assignee degrades to warnings (the ticket is kept, flagged), never a throw. The
@@ -25,8 +25,8 @@ export interface DeskDraft { epics: DraftEpic[]; tickets: DraftTicket[]; questio
 
 /** A person the lead can assign work to, for the review dropdowns (localhost console only, so a Linear id is ok). */
 export interface DraftPerson { name: string; linearId: string; }
-/** The draft endpoint's full response: the parsed draft + what the review cards' dropdowns need (assignable
- *  people, projects) + whether the chat backend is configured. */
+/** The draft endpoint's full response: the parsed draft + the assignable people the review dropdowns need +
+ *  whether the chat backend is configured. */
 export interface DeskDraftResponse extends DeskDraft { configured: boolean; assignable: DraftPerson[]; }
 
 /** Grounding for the draft prompt: who can be assigned + the existing epics, so the model stays real. */

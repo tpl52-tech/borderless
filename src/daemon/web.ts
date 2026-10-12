@@ -17,8 +17,9 @@ import type { Store } from "./store.ts";
 export interface WebServerDeps {
   store: Store;
   leadOpsProject?: string;
-  /** The current lead's GitHub login (config.branchOwner) — the desk's co-lead load excludes this person. */
-  leadGithub?: string;
+  /** The current lead's identifier (config.branchOwner — a netid or github login) — the desk's co-lead load
+   *  excludes this person (matched against each member's github OR netid). */
+  leadIdent?: string;
   /** Topbar project label (the semester/workspace), from config — not baked into the pure payload. */
   projectLabel: string;
   /** Advisory Ask Borderless over the chosen backend (the browser never gets the action tools). */
@@ -54,7 +55,7 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         return new Response(Bun.file(pagePath), { headers: { "content-type": "text/html; charset=utf-8" } });
       }
       if (pathname === "/api/console") {
-        const data = consolePayload(deps.store.listLinearIssues(), deps.store.listSweepJobs(), deps.leadOpsProject, deps.leadGithub);
+        const data = consolePayload(deps.store.listLinearIssues(), deps.store.listSweepJobs(), deps.leadOpsProject, deps.leadIdent);
         return Response.json({ ...data, project: deps.projectLabel });
       }
       if (pathname === "/api/sync" && req.method === "POST") {

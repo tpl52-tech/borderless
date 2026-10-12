@@ -34,9 +34,10 @@ describe("coLeadLoadRows", () => {
     ]);
   });
 
-  test("github match is case-insensitive; with no current-lead github every lead shows", () => {
-    expect(coLeadLoadRows([], ROSTER, "TPL52-TECH").map((r) => r.netid)).toEqual(["ktt38", "nb644"]);
-    expect(coLeadLoadRows([], ROSTER).map((r) => r.netid)).toEqual(["tpl52", "ktt38", "nb644"]);
+  test("the current lead matches by github OR netid (branchOwner can be either), case-insensitive", () => {
+    expect(coLeadLoadRows([], ROSTER, "tpl52-tech").map((r) => r.netid)).toEqual(["ktt38", "nb644"]); // github
+    expect(coLeadLoadRows([], ROSTER, "TPL52").map((r) => r.netid)).toEqual(["ktt38", "nb644"]);       // netid (the real branchOwner), case-insensitive
+    expect(coLeadLoadRows([], ROSTER).map((r) => r.netid)).toEqual(["tpl52", "ktt38", "nb644"]);        // no ident → every lead shows
   });
 });
 

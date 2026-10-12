@@ -79,7 +79,7 @@ export function startWebServer(deps: WebServerDeps): WebServer {
       if (pathname === "/api/desk/draft" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { text?: unknown };
         const text = typeof body.text === "string" ? body.text.trim() : "";
-        if (!text) return Response.json({ epics: [], tickets: [], questions: [], warnings: [], configured: true, assignable: [], projects: [] });
+        if (!text) return Response.json({ epics: [], tickets: [], questions: [], warnings: [], configured: true, assignable: [] });
         return Response.json(await deps.deskDraft(text)); // LLM drafts epics + tickets; writes nothing
       }
       if (pathname === "/api/desk/create" && req.method === "POST") {

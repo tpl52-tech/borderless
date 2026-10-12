@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import { delegate, type DelegateDeps } from "../src/daemon/lead-delegate.ts";
-import { parseLeadOpsTargets, parseIssueCreate } from "../src/shared/linear.ts";
+import { parseLeadOpsTargets, parseIssueCreate, parseTeamAndLabel, parseLabelCreate } from "../src/shared/linear.ts";
 import type { Member } from "../src/shared/roster.ts";
 import type { LeadOpsIssueInput } from "../src/shared/lead-desk.ts";
 
@@ -15,7 +15,7 @@ function deps(over: Partial<DelegateDeps> = {}): DelegateDeps & { created: LeadO
   return {
     roster: ROSTER,
     created, dms,
-    async createIssue(input) { created.push(input); return { ticketKey: "COR-100", url: "https://linear.app/x/COR-100" }; },
+    async createIssue(input) { created.push(input); return { id: "u-100", ticketKey: "COR-100", url: "https://linear.app/x/COR-100" }; },
     async sendDm(emails, text) { dms.push({ emails, text }); return true; },
     ...over,
   };
@@ -55,9 +55,23 @@ describe("Linear delegation parsers (PRD §9)", () => {
     expect(() => parseLeadOpsTargets({ data: { teams: { nodes: [{ id: "t" }] }, projects: { nodes: [] } } }, "COR", "Lead Ops")).toThrow(/no Linear project/i);
   });
 
-  test("parseIssueCreate returns the created key + url, throws on failure", () => {
-    expect(parseIssueCreate({ data: { issueCreate: { success: true, issue: { identifier: "COR-7", url: "u" } } } })).toEqual({ ticketKey: "COR-7", url: "u" });
+  test("parseIssueCreate returns the issue id + key + url, throws on failure or a missing id", () => {
+    expect(parseIssueCreate({ data: { issueCreate: { success: true, issue: { id: "u-7", identifier: "COR-7", url: "u" } } } })).toEqual({ id: "u-7", ticketKey: "COR-7", url: "u" });
+    expect(() => parseIssueCreate({ data: { issueCreate: { success: true, issue: { identifier: "COR-7" } } } })).toThrow(/did not succeed/i); // no id → epic can't be a parent
     expect(() => parseIssueCreate({ data: { issueCreate: { success: false } } })).toThrow(/did not succeed/i);
     expect(() => parseIssueCreate({})).toThrow(/did not succeed/i);
+  });
+});
+
+describe("Lead Desk v2 create parsers (PRD §9)", () => {
+  test("parseTeamAndLabel returns the team id + an optional label id (null when absent)", () => {
+    expect(parseTeamAndLabel({ data: { teams: { nodes: [{ id: "t1" }] }, issueLabels: { nodes: [{ id: "l1" }] } } }, "COR")).toEqual({ teamId: "t1", labelId: "l1" });
+    expect(parseTeamAndLabel({ data: { teams: { nodes: [{ id: "t1" }] }, issueLabels: { nodes: [] } } }, "COR")).toEqual({ teamId: "t1", labelId: null });
+    expect(() => parseTeamAndLabel({ data: { teams: { nodes: [] } } }, "COR")).toThrow(/no Linear team/i);
+  });
+
+  test("parseLabelCreate returns the new label id, throws on failure", () => {
+    expect(parseLabelCreate({ data: { issueLabelCreate: { success: true, issueLabel: { id: "l9" } } } })).toBe("l9");
+    expect(() => parseLabelCreate({ data: { issueLabelCreate: { success: false } } })).toThrow(/did not succeed/i);
   });
 });

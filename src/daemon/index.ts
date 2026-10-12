@@ -42,6 +42,8 @@ import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server
 import { startWebServer, type WebServer } from "./web.ts";
 import { httpLinearClient, syncLinearIssues, fetchQaChildParentKeys, fetchIssueCommentBodies, resolveDoneStateId } from "./linear.ts";
 import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate } from "../shared/linear.ts";
+import { parseTeamAndLabel, ISSUE_LABEL_CREATE_MUTATION, parseLabelCreate } from "../shared/linear.ts";
+import { runDeskCreate, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import { verifyRow, type VerifyRow } from "../shared/verify.ts";
 import { singleFlight } from "../shared/single-flight.ts";
 import type { InReviewSweepResult } from "../shared/types.ts";
@@ -56,9 +58,9 @@ import { askBorderless, type FleetDocs } from "./ask-borderless.ts";
 import { httpOpenRouterChat } from "./openrouter/chat.ts";
 import { claudeCliChat } from "./claude-chat.ts";
 import type { Chat, Message } from "./openrouter/runner.ts";
-import { memberByLinearId, ROSTER } from "../shared/roster.ts";
-import { coLeads, epicRows } from "../shared/lead-desk.ts";
-import { draftPrompt, parseDraft, type DraftContext, type DeskDraft } from "../shared/desk-draft.ts";
+import { memberByLinearId, firstName, ROSTER } from "../shared/roster.ts";
+import { coLeads, epicRows, DELEGATED_LABEL, delegationDmText } from "../shared/lead-desk.ts";
+import { draftPrompt, parseDraft, type DraftContext, type DeskDraftResponse, type DraftPerson } from "../shared/desk-draft.ts";
 
 export interface Daemon {
   store: Store;
@@ -424,23 +426,54 @@ export function startDaemon(home = stateHome()): Daemon {
   // Lead Desk v2 (PRD §9, web): the lead's words → the LLM's structured draft of epics + tickets (assignee,
   // project, priority), grounded in the roster + live projects/epics. Single-shot, no tools, no writes — the
   // lead reviews + confirms (P3) before anything is created. Shares the Ask chat backend.
-  const deskDraft = async (text: string): Promise<DeskDraft & { configured: boolean }> => {
+  // The people the lead can delegate to (co-leads + non-lead members, minus the current lead), with the Linear
+  // id the review dropdowns + create need. Localhost console only, so exposing the id is fine.
+  const assignablePeople = (): DraftPerson[] =>
+    [...coLeads(ROSTER, config.branchOwner), ...ROSTER.filter((m) => !m.lead)]
+      .map((m) => ({ name: firstName(m), linearId: m.linearIds[0] }))
+      .filter((p): p is DraftPerson => !!p.linearId);
+  const liveProjects = (): string[] =>
+    [...new Set(store.listLinearIssues().map((i) => i.projectName).filter((p): p is string => !!p))];
+
+  const deskDraft = async (text: string): Promise<DeskDraftResponse> => {
     const chat = makeChat();
-    if (!chat) return { epics: [], tickets: [], questions: [], warnings: ["the chat backend isn't configured (set askBackend / openRouterApiKey)"], configured: false };
-    const issues = store.listLinearIssues();
+    const extras = { assignable: assignablePeople(), projects: liveProjects() };
+    if (!chat) return { epics: [], tickets: [], questions: [], warnings: ["the chat backend isn't configured (set askBackend / openRouterApiKey)"], configured: false, ...extras };
     const ctx: DraftContext = {
       coLeads: coLeads(ROSTER, config.branchOwner).map((m) => m.name),
       members: ROSTER.filter((m) => !m.lead).map((m) => m.name),
-      projects: [...new Set(issues.map((i) => i.projectName).filter((p): p is string => !!p))],
-      epics: epicRows(issues).map((e) => e.title),
+      projects: extras.projects,
+      epics: epicRows(store.listLinearIssues()).map((e) => e.title),
     };
     const messages: Message[] = [
       { role: "system", content: "You turn a lead's request into a delegation plan. Output ONLY the JSON object the user's message specifies." },
       { role: "user", content: draftPrompt(text, ctx) },
     ];
     const res = await chat(messages, []);
-    return { ...parseDraft(res.text ?? "", ROSTER), configured: true };
+    return { ...parseDraft(res.text ?? "", ROSTER), configured: true, ...extras };
   };
+
+  // Lead Desk v2 confirm → create (PRD §9): the lead's reviewed draft → real Linear issues. Epics first (so a
+  // ticket can hang under its epic), each tagged `lead-delegated` + assigned + prioritized, then a best-effort
+  // Slack DM. Fail-soft per item (Linear has no transaction) — create what we can, report the rest.
+  const deskCreate = async (req: DeskCreateRequest): Promise<DeskCreateResult> => {
+    if (!config.linearApiKey || !leadTeamKey) return { created: [], errors: ["Linear not configured (API key + team)"], configured: false };
+    const linear = httpLinearClient(config.linearApiKey);
+    // Resolve the team id + the lead-delegated label (create the label once, on first use).
+    const { teamId, labelId: existing } = parseTeamAndLabel(await linear.query(QA_TARGETS_QUERY, { teamKey: leadTeamKey, label: DELEGATED_LABEL }), leadTeamKey);
+    const labelId = existing ?? parseLabelCreate(await linear.query(ISSUE_LABEL_CREATE_MUTATION, { input: { name: DELEGATED_LABEL, teamId, color: "#6E79D6" } }));
+    const issues = store.listLinearIssues(); // project name → id, from the synced store (the draft's projects are grounded on it)
+    return runDeskCreate(req, {
+      teamId, labelId,
+      projectIdFor: (name) => (name ? (issues.find((i) => i.projectName === name && i.projectId)?.projectId ?? null) : null),
+      createIssue: async (input) => parseIssueCreate(await linear.query(ISSUE_CREATE_MUTATION, { input })),
+      dmFor: async (assigneeLinearId, ctx) => {
+        const m = memberByLinearId(assigneeLinearId);
+        return m ? sendDm(m.emails, delegationDmText(m, ctx)) : false;
+      },
+    });
+  };
+  const deskCreateGuarded = singleFlight(deskCreate, (req) => req.draftId); // a double-clicked Create joins one run
 
   // Sync-only: pull the live Linear board into the store (no sweeps). Shared by the refresh button / `ao sync`
   // and by scanInReview, so there is one sync path. configured=false when no key/teams are set.
@@ -471,7 +504,7 @@ export function startDaemon(home = stateHome()): Daemon {
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runInReviewSweep: () => scanInReview("In Review"), deskDraft, port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runInReviewSweep: () => scanInReview("In Review"), deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

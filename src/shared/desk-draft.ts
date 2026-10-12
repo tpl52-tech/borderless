@@ -23,6 +23,12 @@ export interface DraftTicket {
 }
 export interface DeskDraft { epics: DraftEpic[]; tickets: DraftTicket[]; questions: string[]; warnings: string[]; }
 
+/** A person the lead can assign work to, for the review dropdowns (localhost console only, so a Linear id is ok). */
+export interface DraftPerson { name: string; linearId: string; }
+/** The draft endpoint's full response: the parsed draft + what the review cards' dropdowns need (assignable
+ *  people, projects) + whether the chat backend is configured. */
+export interface DeskDraftResponse extends DeskDraft { configured: boolean; assignable: DraftPerson[]; projects: string[]; }
+
 /** Grounding for the draft prompt: who can be assigned, the live projects + epics, so the model stays real. */
 export interface DraftContext { coLeads: string[]; members: string[]; projects: string[]; epics: string[]; }
 

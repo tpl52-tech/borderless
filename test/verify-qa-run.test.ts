@@ -24,7 +24,7 @@ function deps(over: Partial<QaSubIssueDeps> & { targets?: Partial<QaTargets>; st
       qaTargets: over.qaTargets ?? (async () => ({ teamId: "team-1", labelId: "label-1", existingParentKeys: [], ...over.targets })),
       issueByKey: over.issueByKey ?? ((k) => store[k]),
       generateRunsheet: over.generateRunsheet ?? (async (i) => { generated.push(i.identifier); return `run sheet for ${i.identifier}`; }),
-      createIssue: over.createIssue ?? (async (input): Promise<CreatedIssue> => { created.push(input); return { ticketKey: `QA-${created.length}`, url: `http://x/${created.length}` }; }),
+      createIssue: over.createIssue ?? (async (input): Promise<CreatedIssue> => { created.push(input); return { id: `qa-${created.length}`, ticketKey: `QA-${created.length}`, url: `http://x/${created.length}` }; }),
       write: over.write ?? true,
     },
   };

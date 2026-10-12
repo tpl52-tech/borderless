@@ -15,7 +15,7 @@ const issue = (over: Partial<LinearIssue>): LinearIssue => ({
   id: over.identifier ?? "x", identifier: "COR-1", title: "", description: null,
   stateName: "In Progress", stateType: "started", assignee: "renee-id",
   projectId: null, projectName: "ReUse", teamKey: "COR", url: null, priority: null,
-  blockedBy: [], dueDate: null, labels: [], gitBranchName: null, updatedAt: null, ...over,
+  blockedBy: [], dueDate: null, labels: [], parentId: null, gitBranchName: null, updatedAt: null, ...over,
 });
 
 describe("deliverableTokens — component/file names, high precision", () => {

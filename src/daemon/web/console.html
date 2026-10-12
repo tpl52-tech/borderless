@@ -302,10 +302,36 @@
 
       <!-- ============ LEAD_DESK ============ -->
       <section class="view" id="leaddesk" hidden>
-        <div class="vhead"><h1>LEAD DESK</h1><p>Ad-hoc lead / ops work handed to another lead &mdash; a <b style="color:var(--green)">Lead Ops</b> Linear issue + a Slack DM. The sweeps never touch these.</p></div>
-        <div class="panel p">
-          <div class="ph pink">DELEGATED <span class="ph-meta" id="d-meta">0 OPEN</span></div>
-          <div class="pb"><ul class="tasks" id="d-tasks"></ul></div>
+        <div class="vhead"><h1>LEAD DESK</h1><p>Describe work for your co-leads &mdash; Borderless drafts the tickets &amp; epics, you confirm, it files them in Linear. The board tracks what you've delegated and each co-lead's full plate.</p></div>
+        <div class="cols c-2">
+          <!-- LEFT: chat → tickets (wired up in the next slice) -->
+          <div class="col">
+            <div class="panel">
+              <div class="ph pink">CHAT &rarr; TICKETS <span class="ph-meta">draft &middot; review &middot; create</span></div>
+              <div class="pb">
+                <p class="note" id="ld-chat-note">Tell Borderless what you want your co-leads to build &mdash; e.g. &ldquo;Dana does the profile edit screen, Neha takes favorites RLS, new epic for Phase&nbsp;2 search.&rdquo; It drafts editable tickets + epics for you to confirm before anything is written to Linear.</p>
+                <div class="chat-input" style="margin-top:1rem">
+                  <input class="ci-field" id="ld-field" placeholder="Delegation chat — wiring up in the next step…" autocomplete="off" disabled style="background:transparent;color:var(--dim);outline:none" />
+                  <button class="ci-send" id="ld-send" disabled>Draft</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- RIGHT: the live board -->
+          <div class="col">
+            <div class="panel">
+              <div class="ph pink">DELEGATED <span class="ph-meta" id="ld-del-meta">0</span></div>
+              <div class="pb"><ul class="tasks" id="ld-delegated"></ul></div>
+            </div>
+            <div class="panel">
+              <div class="ph">EPICS <span class="ph-meta" id="ld-epic-meta">0</span></div>
+              <div class="pb"><ul class="tasks" id="ld-epics"></ul></div>
+            </div>
+            <div class="panel">
+              <div class="ph">CO-LEAD LOAD <span class="ph-meta" id="ld-load-meta">0</span></div>
+              <div class="pb"><ul class="load" id="ld-load"></ul></div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -423,12 +449,23 @@
       : `<tr><td colspan="3" class="s-dim">nothing to suggest</td></tr>`;
     $("a-load").innerHTML = (d.rosterLoad || []).map((m) => `<li><span>${esc(m.name)}${m.lead ? ' <span class="muted">lead</span>' : ""}</span><span class="cnt ${m.load === 0 ? "free" : ""}">${esc(m.load)}</span></li>`).join("");
 
-    // LEAD DESK
-    const desk = d.desk || [];
-    $("d-meta").textContent = `${desk.length} OPEN`;
-    $("d-tasks").innerHTML = desk.length
-      ? desk.map((t) => `<li><span class="dot open"></span>${esc(t.title)} <span class="s-dim">[${esc(t.state)}]</span><span class="to">&rarr; ${esc(t.assignee)}</span></li>`).join("")
-      : `<li><span class="muted">no open Lead Ops tasks</span></li>`;
+    // LEAD DESK (v2 board): delegated work · epics · co-lead load
+    const db = d.deskBoard || { coLeads: [], delegated: [], epics: [] };
+    const del = db.delegated || [];
+    $("ld-del-meta").textContent = String(del.length);
+    $("ld-delegated").innerHTML = del.length
+      ? del.map((t) => `<li><span class="dot open"></span><b>${esc(t.ticketKey)}</b> ${esc(t.title)} <span class="s-dim">[${esc(t.state)}]</span><span class="to">&rarr; ${esc(t.assignee)}</span></li>`).join("")
+      : `<li><span class="muted">nothing delegated yet &mdash; draft some on the left</span></li>`;
+    const epics = db.epics || [];
+    $("ld-epic-meta").textContent = String(epics.length);
+    $("ld-epics").innerHTML = epics.length
+      ? epics.map((e) => `<li><span><b>${esc(e.ticketKey)}</b> ${esc(e.title)}</span><span class="to">${esc(e.done)}/${esc(e.total)}</span></li>`).join("")
+      : `<li><span class="muted">no epics yet</span></li>`;
+    const load = db.coLeads || [];
+    $("ld-load-meta").textContent = String(load.length);
+    $("ld-load").innerHTML = load.length
+      ? load.map((m) => `<li><span>${esc(m.name)}</span><span class="cnt ${m.open === 0 ? "free" : ""}">${esc(m.open)}${m.blocked ? ` <span class="s-pink">&middot; ${esc(m.blocked)} blocked</span>` : ""}</span></li>`).join("")
+      : `<li><span class="muted">no co-leads configured</span></li>`;
 
     // ROSTER
     const r = d.roster || [];

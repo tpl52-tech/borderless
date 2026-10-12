@@ -38,7 +38,7 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
       url: "https://linear.app/cornell-ewb-softdev/issue/COR-1",
       stateName: "In Review", stateType: "started", assignee: "user-1",
       projectId: "proj-1", projectName: null, teamKey: "COR", priority: 2,
-      dueDate: null, labels: [], blockedBy: [], gitBranchName: null,
+      dueDate: null, labels: [], parentId: null, blockedBy: [], gitBranchName: null,
       updatedAt: Date.parse("2026-10-06T18:00:00.000Z"),
     });
     expect(hasNextPage).toBe(true);
@@ -85,6 +85,11 @@ describe("parseIssuesResponse (pure mapper, PRD §4)", () => {
     const { issues } = parseIssuesResponse(page([node({ branchName: "tpl52/cor-24-sign-up-screen" })]));
     expect(issues[0]!.gitBranchName).toBe("tpl52/cor-24-sign-up-screen");
     expect(parseIssuesResponse(page([node()])).issues[0]!.gitBranchName).toBeNull(); // absent → null
+  });
+
+  test("maps parentId from the parent node (null when it has no parent)", () => {
+    expect(parseIssuesResponse(page([node({ parent: { id: "epic-7" } })])).issues[0]!.parentId).toBe("epic-7");
+    expect(parseIssuesResponse(page([node()])).issues[0]!.parentId).toBeNull();
   });
 
   test("maps blockedBy from type=blocks inverse relations only", () => {

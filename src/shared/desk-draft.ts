@@ -9,7 +9,7 @@
 
 import type { Member } from "./roster.ts";
 import { firstName } from "./roster.ts";
-import { resolveDelegate } from "./lead-desk.ts";
+import { findMember } from "./lead-desk.ts";
 
 export interface DraftEpic { title: string; project: string | null; }
 export interface DraftTicket {
@@ -66,12 +66,13 @@ function extractJson(reply: string): string | null {
   return start >= 0 && end > start ? body.slice(start, end + 1) : null;
 }
 
-/** Resolve an assignee name to a member: resolveDelegate (full name / netid / github / email) first, then a
+/** Resolve an assignee name to a member: an exact match (full name / netid / github / email) first, then a
  *  UNIQUE first-name match (the model usually writes first names); ambiguous or unknown → null. */
 function resolveAssignee(roster: Member[], who: string): Member | null {
-  try { return resolveDelegate(roster, who); } catch { /* fall through to a first-name match */ }
+  const exact = findMember(roster, who);
+  if (exact) return exact;
   const q = who.trim().toLowerCase();
-  const byFirst = roster.filter((m) => (m.name.split(" ")[0] ?? "").toLowerCase() === q);
+  const byFirst = roster.filter((m) => firstName(m).toLowerCase() === q);
   return byFirst.length === 1 ? byFirst[0]! : null; // unique only — never guess between two people
 }
 
@@ -88,21 +89,21 @@ export function parseDraft(reply: string, roster: Member[]): DeskDraft {
 
   const warnings: string[] = [];
   const epics: DraftEpic[] = asArray(raw.epics)
-    .map((e) => ({ title: str((e as Record<string, unknown>)?.title), project: strOrNull((e as Record<string, unknown>)?.project) }))
+    .map((e) => ({ title: str(obj(e).title), project: strOrNull(obj(e).project) }))
     .filter((e) => e.title.length > 0);
 
   const tickets: DraftTicket[] = asArray(raw.tickets)
-    .map((raw) => {
-      const t = raw as Record<string, unknown>;
-      const title = str(t?.title);
-      const who = str(t?.assignee);
+    .map((entry) => {
+      const t = obj(entry);
+      const title = str(t.title);
+      const who = str(t.assignee);
       let assignee = who, assigneeLinearId: string | null = null, resolved = false;
       if (who) {
         const m = resolveAssignee(roster, who);
         if (m) { assignee = firstName(m); assigneeLinearId = m.linearIds[0] ?? null; resolved = true; }
         else warnings.push(`couldn't match "${who}" to a teammate — pick someone before creating`);
       }
-      return { title, assignee, assigneeLinearId, resolved, project: strOrNull(t?.project), priority: priorityNumber(t?.priority), epic: strOrNull(t?.epic) };
+      return { title, assignee, assigneeLinearId, resolved, project: strOrNull(t.project), priority: priorityNumber(t.priority), epic: strOrNull(t.epic) };
     })
     .filter((t) => t.title.length > 0);
 
@@ -113,5 +114,6 @@ export function parseDraft(reply: string, roster: Member[]): DeskDraft {
 
 function empty(warnings: string[]): DeskDraft { return { epics: [], tickets: [], questions: [], warnings }; }
 function asArray(v: unknown): unknown[] { return Array.isArray(v) ? v : []; }
+function obj(v: unknown): Record<string, unknown> { return v != null && typeof v === "object" ? v as Record<string, unknown> : {}; }
 function str(v: unknown): string { return typeof v === "string" ? v.trim() : ""; }
 function strOrNull(v: unknown): string | null { const s = str(v); return s.length ? s : null; }

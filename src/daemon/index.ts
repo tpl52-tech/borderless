@@ -383,15 +383,15 @@ export function startDaemon(home = stateHome()): Daemon {
   // (used only on the openrouter backend) also need a Linear key.
   // The chat backend both Ask and the Lead Desk draft run on: OpenRouter when configured, else the $0
   // subscription Claude CLI (PRD §12). Null only when OpenRouter is selected but its key is missing.
+  const backend = config.askBackend ?? "subscription";
   const makeChat = (): Chat | null => {
-    if ((config.askBackend ?? "subscription") === "openrouter") {
+    if (backend === "openrouter") {
       return config.openRouterApiKey ? httpOpenRouterChat(config.openRouterApiKey, config.openRouterModel ?? DEFAULT_OPENROUTER_MODEL) : null;
     }
     return claudeCliChat({ model: config.askModel }); // subscription: no key, answer-only (sandboxed)
   };
 
   const askRun: UdsServerDeps["askRun"] = async (question, allowActions) => {
-    const backend = config.askBackend ?? "subscription"; // PRD §12: the subscription CLI is the default ($0)
     const chat = makeChat();
     if (!chat) return { answer: "", steps: 0, costMicros: 0, configured: false }; // openrouter selected, no key
     const linear = config.linearApiKey ? httpLinearClient(config.linearApiKey) : null;

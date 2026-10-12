@@ -130,16 +130,25 @@ export function deskBoard(issues: LinearIssue[], roster: Member[], leadIdent?: s
 // --- delegation (PRD §9): capture a task → a Lead Ops issue assigned to a member, + a Slack DM ---------
 
 /**
+ * Find a roster member by netid, GitHub login, full name, or email (case-insensitive), or null. The
+ * non-throwing core both resolveDelegate (which throws) and the draft's assignee resolver build on, so
+ * "how do we match a name" lives in one place.
+ */
+export function findMember(roster: Member[], who: string): Member | null {
+  const q = who.trim().toLowerCase();
+  return roster.find((r) =>
+    r.netid.toLowerCase() === q ||
+    r.github.toLowerCase() === q ||
+    r.name.toLowerCase() === q ||
+    r.emails.some((e) => e.toLowerCase() === q)) ?? null;
+}
+
+/**
  * Resolve a delegate from the roster by netid, GitHub login, email, or full name (case-insensitive).
  * Throws when `who` matches nobody — delegation must never silently drop a task on no one.
  */
 export function resolveDelegate(roster: Member[], who: string): Member {
-  const q = who.trim().toLowerCase();
-  const m = roster.find((r) =>
-    r.netid.toLowerCase() === q ||
-    r.github.toLowerCase() === q ||
-    r.name.toLowerCase() === q ||
-    r.emails.some((e) => e.toLowerCase() === q));
+  const m = findMember(roster, who);
   if (!m) throw new Error(`lead-desk: no roster member matches "${who}" (try a netid, GitHub login, email, or full name)`);
   return m;
 }

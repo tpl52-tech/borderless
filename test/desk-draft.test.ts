@@ -7,7 +7,7 @@ const ROSTER: Member[] = [
   { name: "Neha Bommireddy", netid: "nb644", emails: [], linearIds: ["neha"], github: "nehab", lead: true },
 ];
 
-const ctx = { coLeads: ["Neha Bommireddy"], members: ["Dana Ryu"], projects: ["ReUse App — Fall 2026"], epics: ["Onboarding"] };
+const ctx = { coLeads: ["Neha Bommireddy"], members: ["Dana Ryu"], epics: ["Onboarding"] };
 
 describe("priorityNumber", () => {
   test("maps the words to Linear's numeric priority; unknown/absent → None(0)", () => {
@@ -21,7 +21,6 @@ describe("draftPrompt", () => {
     const p = draftPrompt("Dana builds the profile screen", ctx);
     expect(p).toContain("co-leads: Neha Bommireddy");
     expect(p).toContain("others: Dana Ryu");
-    expect(p).toContain("Live projects: ReUse App — Fall 2026");
     expect(p).toContain("Existing epics: Onboarding");
     expect(p).toContain('"priority":"None|Low|Medium|High|Urgent"');
     expect(p).toContain("Lead's request: Dana builds the profile screen");
@@ -40,9 +39,9 @@ describe("parseDraft", () => {
     });
     const d = parseDraft(reply, ROSTER);
     expect(d.warnings).toEqual([]);
-    expect(d.epics).toEqual([{ title: "Phase 2 Search", project: "ReUse App — Fall 2026" }]);
-    expect(d.tickets[0]).toEqual({ title: "Profile edit screen", assignee: "Dana", assigneeLinearId: "dana-1", resolved: true, project: "ReUse App — Fall 2026", priority: 2, epic: null });
-    expect(d.tickets[1]).toEqual({ title: "Favorites RLS", assignee: "Neha", assigneeLinearId: "neha", resolved: true, project: null, priority: 1, epic: "Phase 2 Search" });
+    expect(d.epics).toEqual([{ title: "Phase 2 Search" }]);
+    expect(d.tickets[0]).toEqual({ title: "Profile edit screen", assignee: "Dana", assigneeLinearId: "dana-1", resolved: true, priority: 2, epic: null });
+    expect(d.tickets[1]).toEqual({ title: "Favorites RLS", assignee: "Neha", assigneeLinearId: "neha", resolved: true, priority: 1, epic: "Phase 2 Search" });
     expect(d.questions).toEqual(["Which milestone?"]);
   });
 

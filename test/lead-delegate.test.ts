@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import { delegate, type DelegateDeps } from "../src/daemon/lead-delegate.ts";
-import { parseLeadOpsTargets, parseIssueCreate, parseTeamAndLabel, parseLabelCreate } from "../src/shared/linear.ts";
+import { parseLeadOpsTargets, parseIssueCreate, parseDeskTargets, parseLabelCreate } from "../src/shared/linear.ts";
 import type { Member } from "../src/shared/roster.ts";
 import type { LeadOpsIssueInput } from "../src/shared/lead-desk.ts";
 
@@ -64,10 +64,11 @@ describe("Linear delegation parsers (PRD §9)", () => {
 });
 
 describe("Lead Desk v2 create parsers (PRD §9)", () => {
-  test("parseTeamAndLabel returns the team id + an optional label id (null when absent)", () => {
-    expect(parseTeamAndLabel({ data: { teams: { nodes: [{ id: "t1" }] }, issueLabels: { nodes: [{ id: "l1" }] } } }, "COR")).toEqual({ teamId: "t1", labelId: "l1" });
-    expect(parseTeamAndLabel({ data: { teams: { nodes: [{ id: "t1" }] }, issueLabels: { nodes: [] } } }, "COR")).toEqual({ teamId: "t1", labelId: null });
-    expect(() => parseTeamAndLabel({ data: { teams: { nodes: [] } } }, "COR")).toThrow(/no Linear team/i);
+  test("parseDeskTargets returns team + Lead Ops project ids + an optional label id (null when absent); throws on a missing team/project", () => {
+    expect(parseDeskTargets({ data: { teams: { nodes: [{ id: "t1" }] }, projects: { nodes: [{ id: "p1" }] }, issueLabels: { nodes: [{ id: "l1" }] } } }, "COR", "Lead Ops")).toEqual({ teamId: "t1", projectId: "p1", labelId: "l1" });
+    expect(parseDeskTargets({ data: { teams: { nodes: [{ id: "t1" }] }, projects: { nodes: [{ id: "p1" }] }, issueLabels: { nodes: [] } } }, "COR", "Lead Ops")).toEqual({ teamId: "t1", projectId: "p1", labelId: null });
+    expect(() => parseDeskTargets({ data: { teams: { nodes: [] }, projects: { nodes: [{ id: "p1" }] } } }, "COR", "Lead Ops")).toThrow(/no Linear team/i);
+    expect(() => parseDeskTargets({ data: { teams: { nodes: [{ id: "t1" }] }, projects: { nodes: [] } } }, "COR", "Lead Ops")).toThrow(/no Linear project/i);
   });
 
   test("parseLabelCreate returns the new label id, throws on failure", () => {

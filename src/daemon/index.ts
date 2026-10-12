@@ -41,7 +41,7 @@ import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
 import { startWebServer, type WebServer } from "./web.ts";
 import { httpLinearClient, syncLinearIssues, fetchQaChildParentKeys, fetchIssueCommentBodies, resolveDoneStateId } from "./linear.ts";
-import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate, parseTeamAndLabel, ISSUE_LABEL_CREATE_MUTATION, parseLabelCreate } from "../shared/linear.ts";
+import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate, ISSUE_LABEL_CREATE_MUTATION, parseLabelCreate, DESK_TARGETS_QUERY, parseDeskTargets } from "../shared/linear.ts";
 import { runDeskCreate, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import { verifyRow, type VerifyRow } from "../shared/verify.ts";
 import { singleFlight } from "../shared/single-flight.ts";
@@ -58,7 +58,7 @@ import { httpOpenRouterChat } from "./openrouter/chat.ts";
 import { claudeCliChat } from "./claude-chat.ts";
 import type { Chat, Message } from "./openrouter/runner.ts";
 import { memberByLinearId, firstName, ROSTER } from "../shared/roster.ts";
-import { coLeads, epicRows, DELEGATED_LABEL, DELEGATED_LABEL_COLOR, delegationDmText } from "../shared/lead-desk.ts";
+import { coLeads, epicRows, DELEGATED_LABEL, DELEGATED_LABEL_COLOR, delegationDmText, DEFAULT_LEAD_OPS_PROJECT } from "../shared/lead-desk.ts";
 import { draftPrompt, parseDraft, type DraftContext, type DeskDraftResponse, type DraftPerson } from "../shared/desk-draft.ts";
 
 export interface Daemon {
@@ -423,25 +423,21 @@ export function startDaemon(home = stateHome()): Daemon {
   };
 
   // Lead Desk v2 (PRD §9, web): the lead's words → the LLM's structured draft of epics + tickets (assignee,
-  // project, priority), grounded in the roster + live projects/epics. Single-shot, no tools, no writes — the
-  // lead reviews + confirms (P3) before anything is created. Shares the Ask chat backend.
+  // priority), grounded in the roster + existing epics. Single-shot, no tools, no writes — the lead reviews +
+  // confirms before anything is created. Shares the Ask chat backend.
   // The people the lead can delegate to (co-leads + non-lead members, minus the current lead), with the Linear
   // id the review dropdowns + create need. Localhost console only, so exposing the id is fine.
   const assignablePeople = (): DraftPerson[] =>
     [...coLeads(ROSTER, config.branchOwner), ...ROSTER.filter((m) => !m.lead)]
       .map((m) => ({ name: firstName(m), linearId: m.linearIds[0] }))
       .filter((p): p is DraftPerson => !!p.linearId);
-  const liveProjects = (): string[] =>
-    [...new Set(store.listLinearIssues().map((i) => i.projectName).filter((p): p is string => !!p))];
-
   const deskDraft = async (text: string): Promise<DeskDraftResponse> => {
     const chat = makeChat();
-    const extras = { assignable: assignablePeople(), projects: liveProjects() };
+    const extras = { assignable: assignablePeople() };
     if (!chat) return { epics: [], tickets: [], questions: [], warnings: ["the chat backend isn't configured (set askBackend / openRouterApiKey)"], configured: false, ...extras };
     const ctx: DraftContext = {
       coLeads: coLeads(ROSTER, config.branchOwner).map((m) => m.name),
       members: ROSTER.filter((m) => !m.lead).map((m) => m.name),
-      projects: extras.projects,
       epics: epicRows(store.listLinearIssues()).map((e) => e.title),
     };
     const messages: Message[] = [
@@ -458,15 +454,23 @@ export function startDaemon(home = stateHome()): Daemon {
   const deskCreate = async (req: DeskCreateRequest): Promise<DeskCreateResult> => {
     if (!config.linearApiKey || !leadTeamKey) return { created: [], errors: ["Linear not configured (API key + team)"], configured: false };
     const linear = httpLinearClient(config.linearApiKey);
-    // Resolve the team id + the lead-delegated label (create the label once, on first use). Two concurrent
-    // first-time creates could race two labels (singleFlight only dedupes a same-draftId double-click) — but
-    // this is a single-lead localhost console, and it self-heals: later runs find the (first) label.
-    const { teamId, labelId: existing } = parseTeamAndLabel(await linear.query(QA_TARGETS_QUERY, { teamKey: leadTeamKey, label: DELEGATED_LABEL }), leadTeamKey);
-    const labelId = existing ?? parseLabelCreate(await linear.query(ISSUE_LABEL_CREATE_MUTATION, { input: { name: DELEGATED_LABEL, teamId, color: DELEGATED_LABEL_COLOR } }));
-    const issues = store.listLinearIssues(); // project name → id, from the synced store (the draft's projects are grounded on it)
+    // All lead-desk work files under the Lead Ops project (the sweeps leave it alone). Resolve the team + that
+    // project + the lead-delegated label in ONE round-trip; create the label if it doesn't exist yet. Two
+    // concurrent first-time creates could race two labels (singleFlight only dedupes a same-draftId double-
+    // click) — but this is a single-lead localhost console, and it self-heals: later runs find the first label.
+    const leadOpsName = config.leadOpsProject ?? DEFAULT_LEAD_OPS_PROJECT;
+    let teamId: string, projectId: string, labelId: string;
+    try {
+      const t = parseDeskTargets(await linear.query(DESK_TARGETS_QUERY, { teamKey: leadTeamKey, project: leadOpsName, label: DELEGATED_LABEL }), leadTeamKey, leadOpsName);
+      teamId = t.teamId; projectId = t.projectId;
+      labelId = t.labelId ?? parseLabelCreate(await linear.query(ISSUE_LABEL_CREATE_MUTATION, { input: { name: DELEGATED_LABEL, teamId, color: DELEGATED_LABEL_COLOR } }));
+    } catch (err) {
+      // Missing Lead Ops project/team, or a Linear hiccup during resolution → a readable error in the console
+      // (the errors array the client already renders), not an opaque 500.
+      return { created: [], errors: [err instanceof Error ? err.message : String(err)], configured: true };
+    }
     return runDeskCreate(req, {
-      teamId, labelId,
-      projectIdFor: (name) => (name ? (issues.find((i) => i.projectName === name && i.projectId)?.projectId ?? null) : null),
+      teamId, labelId, projectId,
       createIssue: async (input) => parseIssueCreate(await linear.query(ISSUE_CREATE_MUTATION, { input })),
       dmFor: async (assigneeLinearId, ctx) => {
         const m = memberByLinearId(assigneeLinearId);

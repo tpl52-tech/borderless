@@ -1,6 +1,6 @@
 /**
  * Lead Desk v2 — chat → draft (PRD §9; web console). The lead describes work in natural language; the LLM
- * proposes a structured plan of epics + tickets (assignee, project, priority) which the lead reviews before
+ * proposes a structured plan of epics + tickets (assignee, priority) which the lead reviews before
  * ANYTHING is written to Linear. This is the PURE half: the single-shot prompt the model gets, and the parser
  * that turns its JSON reply into a validated, assignee-resolved draft. It fails SOFT — a garbled reply, a bad
  * shape, or an unresolvable assignee degrades to warnings (the ticket is kept, flagged), never a throw. The
@@ -12,13 +12,12 @@ import { firstName } from "./roster.ts";
 import { findMember } from "./lead-desk.ts";
 import { asArray, obj, str, strOrNull } from "./coerce.ts";
 
-export interface DraftEpic { title: string; project: string | null; }
+export interface DraftEpic { title: string; }
 export interface DraftTicket {
   title: string;
   assignee: string;                 // display name (resolved first name, or the raw string the model returned)
   assigneeLinearId: string | null;  // resolved Linear user id, or null when unresolved
   resolved: boolean;                // false → the lead must fix the assignee before create
-  project: string | null;           // the model's inferred project, or null
   priority: number;                 // Linear priority 0..4 (0 None, 1 Urgent, 2 High, 3 Medium, 4 Low)
   epic: string | null;              // the epic title this ticket belongs under, or null
 }
@@ -26,12 +25,12 @@ export interface DeskDraft { epics: DraftEpic[]; tickets: DraftTicket[]; questio
 
 /** A person the lead can assign work to, for the review dropdowns (localhost console only, so a Linear id is ok). */
 export interface DraftPerson { name: string; linearId: string; }
-/** The draft endpoint's full response: the parsed draft + what the review cards' dropdowns need (assignable
- *  people, projects) + whether the chat backend is configured. */
-export interface DeskDraftResponse extends DeskDraft { configured: boolean; assignable: DraftPerson[]; projects: string[]; }
+/** The draft endpoint's full response: the parsed draft + the assignable people the review dropdowns need +
+ *  whether the chat backend is configured. */
+export interface DeskDraftResponse extends DeskDraft { configured: boolean; assignable: DraftPerson[]; }
 
-/** Grounding for the draft prompt: who can be assigned, the live projects + epics, so the model stays real. */
-export interface DraftContext { coLeads: string[]; members: string[]; projects: string[]; epics: string[]; }
+/** Grounding for the draft prompt: who can be assigned + the existing epics, so the model stays real. */
+export interface DraftContext { coLeads: string[]; members: string[]; epics: string[]; }
 
 const PRIORITY: Record<string, number> = { none: 0, urgent: 1, high: 2, medium: 3, low: 4 };
 
@@ -46,18 +45,16 @@ export function draftPrompt(text: string, ctx: DraftContext): string {
     "You are a staff engineering lead's delegation assistant. Turn the lead's request into a plan of Linear",
     "work: epics (big parent items) and tickets (each assigned to ONE person). Output ONLY a JSON object — no",
     "prose, no code fence — matching exactly this shape:",
-    '{"epics":[{"title":str,"project":str|null}],"tickets":[{"title":str,"assignee":str,"project":str|null,"priority":"None|Low|Medium|High|Urgent","epic":str|null}],"questions":[str]}',
+    '{"epics":[{"title":str}],"tickets":[{"title":str,"assignee":str,"priority":"None|Low|Medium|High|Urgent","epic":str|null}],"questions":[str]}',
     "",
     "Rules:",
     "- assignee MUST be one of the people listed below, written EXACTLY as shown (full name). If the lead",
     "  didn't say who, make your best pick and add a question about it.",
-    "- project: infer from the work; use one of the live projects verbatim when it fits, else null.",
     "- epic: the title of the epic this ticket belongs under (from your epics array or an existing epic), else null.",
     "- Only create an epic when the lead asks for one or the work clearly needs a parent. Never invent work the lead didn't ask for.",
     "- questions: anything you guessed or that's genuinely ambiguous; [] if none.",
     "",
     `People you can assign — co-leads: ${ctx.coLeads.join(", ") || "(none)"}${ctx.members.length ? ` · others: ${ctx.members.join(", ")}` : ""}`,
-    `Live projects: ${ctx.projects.join(", ") || "(none)"}`,
     `Existing epics: ${ctx.epics.join(", ") || "(none)"}`,
     "",
     `Lead's request: ${text}`,
@@ -96,7 +93,7 @@ export function parseDraft(reply: string, roster: Member[]): DeskDraft {
 
   const warnings: string[] = [];
   const epics: DraftEpic[] = asArray(raw.epics)
-    .map((e) => ({ title: str(obj(e).title), project: strOrNull(obj(e).project) }))
+    .map((e) => ({ title: str(obj(e).title) }))
     .filter((e) => e.title.length > 0);
 
   const tickets: DraftTicket[] = asArray(raw.tickets)
@@ -110,7 +107,7 @@ export function parseDraft(reply: string, roster: Member[]): DeskDraft {
         if (m) { assignee = firstName(m); assigneeLinearId = m.linearIds[0] ?? null; resolved = true; }
         else warnings.push(`couldn't match "${who}" to a teammate — pick someone before creating`);
       }
-      return { title, assignee, assigneeLinearId, resolved, project: strOrNull(t.project), priority: priorityNumber(t.priority), epic: strOrNull(t.epic) };
+      return { title, assignee, assigneeLinearId, resolved, priority: priorityNumber(t.priority), epic: strOrNull(t.epic) };
     })
     .filter((t) => t.title.length > 0);
 

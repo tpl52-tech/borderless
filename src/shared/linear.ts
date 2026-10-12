@@ -164,15 +164,25 @@ export function parseQaTargets(json: unknown, teamKey: string, label: string): {
   return { teamId, labelId };
 }
 
-// --- Lead Desk v2 create targets: team id + the lead-delegated label, created if missing -----------------
+// --- Lead Desk v2 create targets: team + Lead Ops project + the lead-delegated label, in ONE round-trip ---
 
-/** Parse {@link QA_TARGETS_QUERY} for the team id + an OPTIONAL label id (null when the label doesn't exist
- *  yet, so the caller can create it). The team must exist (fails loud). */
-export function parseTeamAndLabel(json: unknown, teamKey: string): { teamId: string; labelId: string | null } {
-  const data = (json as { data?: { teams?: { nodes?: Array<{ id?: string }> }; issueLabels?: { nodes?: Array<{ id?: string }> } } } | null)?.data;
+/** The team id + Lead Ops project id + the lead-delegated label id, resolved together (lead-desk create). */
+export const DESK_TARGETS_QUERY = `
+query BorderlessDeskTargets($teamKey: String!, $project: String!, $label: String!) {
+  teams(filter: { key: { eq: $teamKey } }, first: 1) { nodes { id } }
+  projects(filter: { name: { eq: $project } }, first: 1) { nodes { id } }
+  issueLabels(filter: { name: { eq: $label } }, first: 1) { nodes { id } }
+}`;
+
+/** Parse {@link DESK_TARGETS_QUERY} → team id + Lead Ops project id + an OPTIONAL label id (null when the
+ *  label doesn't exist yet, so the caller can create it). Team + project must exist (fails loud). */
+export function parseDeskTargets(json: unknown, teamKey: string, project: string): { teamId: string; projectId: string; labelId: string | null } {
+  const data = (json as { data?: { teams?: { nodes?: Array<{ id?: string }> }; projects?: { nodes?: Array<{ id?: string }> }; issueLabels?: { nodes?: Array<{ id?: string }> } } } | null)?.data;
   const teamId = data?.teams?.nodes?.[0]?.id;
+  const projectId = data?.projects?.nodes?.[0]?.id;
   if (!teamId) throw new Error(`lead-desk: no Linear team with key "${teamKey}"`);
-  return { teamId, labelId: data?.issueLabels?.nodes?.[0]?.id ?? null };
+  if (!projectId) throw new Error(`lead-desk: no Linear project named "${project}" (create it, or set leadOpsProject)`);
+  return { teamId, projectId, labelId: data?.issueLabels?.nodes?.[0]?.id ?? null };
 }
 
 /** Create a workspace label (the lead-desk's `lead-delegated` tag, made once on first use). */

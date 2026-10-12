@@ -571,16 +571,15 @@
   function ldRender(d) {
     if (d.configured === false) { ldDraftBox.innerHTML = `<div class="ld-card s-pink">&#9888; ${esc((d.warnings || [])[0] || "chat backend not configured")}</div>`; return; }
     ldDraftId = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random());
-    const people = d.assignable || [], projects = d.projects || [], epics = d.epics || [];
-    const projSel = (f, selName) => `<select class="ld-sel" data-f="${f}">${projects.map((p) => opt(p, p, p === selName)).join("") || opt("", "(no projects)", true)}</select>`;
+    const people = d.assignable || [], epics = d.epics || [];
     const out = [];
     if (epics.length) out.push(`<div class="ld-sec">EPICS</div>` + epics.map((e, i) =>
-      `<div class="ld-card" data-epic="${i}"><input class="ld-in" data-f="title" value="${esc(e.title)}" /><div class="ld-row"><span class="s-amber">&#9670; epic</span> ${projSel("project", e.project)}</div></div>`).join(""));
+      `<div class="ld-card" data-epic="${i}"><input class="ld-in" data-f="title" value="${esc(e.title)}" /><span class="s-amber" style="font-size:.64rem;letter-spacing:.08em">&#9670; EPIC</span></div>`).join(""));
     if ((d.tickets || []).length) out.push(`<div class="ld-sec">TICKETS</div>` + d.tickets.map((t) => {
       const asg = `<select class="ld-sel" data-f="assignee">${opt("", "— unassigned —", !t.assigneeLinearId)}${people.map((p) => opt(p.linearId, p.name, p.linearId === t.assigneeLinearId)).join("")}</select>`;
       const prio = `<select class="ld-sel" data-f="priority">${LD_PRIO.map((p, i) => opt(i, p, i === t.priority)).join("")}</select>`;
       const epicSel = `<select class="ld-sel" data-f="epic">${opt("", "— no epic —", !t.epic)}${epics.map((e, i) => opt(i, e.title, e.title === t.epic)).join("")}</select>`;
-      return `<div class="ld-card" data-ticket="1"><input class="ld-in" data-f="title" value="${esc(t.title)}" /><div class="ld-row">${asg}${projSel("project", t.project)}${prio}${epicSel}<label class="ld-dm"><input type="checkbox" data-f="dm" checked /> DM</label></div></div>`;
+      return `<div class="ld-card" data-ticket="1"><input class="ld-in" data-f="title" value="${esc(t.title)}" /><div class="ld-row">${asg}${prio}${epicSel}<label class="ld-dm"><input type="checkbox" data-f="dm" checked /> DM</label></div></div>`;
     }).join(""));
     if ((d.questions || []).length) out.push(`<div class="ld-sec">QUESTIONS Borderless had</div>` + d.questions.map((q) => `<div class="ld-card s-dim">? ${esc(q)}</div>`).join(""));
     if ((d.warnings || []).length) out.push(d.warnings.map((w) => `<div class="ld-card s-pink">&#9888; ${esc(w)}</div>`).join(""));
@@ -594,17 +593,16 @@
     // ticket selects). Blanking an epic's title drops it, which shifts positions — so remap each ticket's epic
     // index through render-index → kept-index (a reference to a dropped epic becomes null = no parent).
     const rendered = [...ldDraftBox.querySelectorAll("[data-epic]")]
-      .map((el) => ({ renderIdx: Number(el.getAttribute("data-epic")), title: val(el, "title").value.trim(), project: val(el, "project").value || null }));
+      .map((el) => ({ renderIdx: Number(el.getAttribute("data-epic")), title: val(el, "title").value.trim() }));
     const kept = rendered.filter((e) => e.title);
     const remap = new Map(kept.map((e, ci) => [e.renderIdx, ci]));
-    const epics = kept.map((e) => ({ title: e.title, project: e.project }));
+    const epics = kept.map((e) => ({ title: e.title }));
     const tickets = [...ldDraftBox.querySelectorAll("[data-ticket]")].map((el) => {
       const epicIdx = val(el, "epic").value;
       const ci = epicIdx === "" ? undefined : remap.get(Number(epicIdx)); // dropped epic → undefined → no parent
       return {
         title: val(el, "title").value.trim(),
         assigneeLinearId: val(el, "assignee").value || null,
-        project: val(el, "project").value || null,
         priority: Number(val(el, "priority").value),
         epicIndex: ci === undefined ? null : ci, // position in the SENT `epics`, resolved to a parent id server-side
         dm: val(el, "dm").checked,

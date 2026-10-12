@@ -9,7 +9,7 @@
 
 import type { LinearIssue } from "./types.ts";
 import { isTerminalState } from "./boards.ts";
-import { buildRosterIndexes, type Member } from "./roster.ts";
+import { buildRosterIndexes, firstName, type Member } from "./roster.ts";
 
 /** Default name of the lead-desk project; overridable via operator config (PRD §9). */
 export const DEFAULT_LEAD_OPS_PROJECT = "Lead Ops";
@@ -70,7 +70,7 @@ export function coLeadLoadRows(issues: LinearIssue[], roster: Member[], leadGith
     .map((m) => {
       const ids = new Set(m.linearIds);
       const open = issues.filter((i) => i.assignee != null && ids.has(i.assignee) && !isTerminalState(i.stateType));
-      return { name: m.name.split(" ")[0] ?? m.name, netid: m.netid, open: open.length, blocked: open.filter((i) => i.blockedBy.length > 0).length };
+      return { name: firstName(m), netid: m.netid, open: open.length, blocked: open.filter((i) => i.blockedBy.length > 0).length };
     });
 }
 
@@ -82,12 +82,15 @@ export function delegatedRows(issues: LinearIssue[], roster: Member[], label: st
   const byLinearId = buildRosterIndexes(roster).byLinearId;
   return issues
     .filter((i) => i.labels.includes(label) && !isTerminalState(i.stateType))
-    .map((i) => ({
-      ticketKey: i.identifier,
-      title: i.title,
-      assignee: i.assignee ? (byLinearId.get(i.assignee)?.name.split(" ")[0] ?? i.assignee) : "unassigned",
-      state: i.stateName ?? "—",
-    }))
+    .map((i) => {
+      const m = i.assignee ? byLinearId.get(i.assignee) : undefined;
+      return {
+        ticketKey: i.identifier,
+        title: i.title,
+        assignee: m ? firstName(m) : (i.assignee ?? "unassigned"), // known member → first name; else raw id, else unassigned
+        state: i.stateName ?? "—",
+      };
+    })
     .sort((a, b) => a.assignee.localeCompare(b.assignee) || a.ticketKey.localeCompare(b.ticketKey));
 }
 
@@ -162,9 +165,8 @@ export function buildLeadOpsIssueInput(
 
 /** The Slack DM announcing a delegated task to its assignee (PRD §9). */
 export function delegationDmText(assignee: Member, issue: { ticketKey: string; title: string; url: string | null }): string {
-  const firstName = assignee.name.split(" ")[0];
   const link = issue.url ? `\n${issue.url}` : "";
-  return `Hi ${firstName} — you've been assigned a lead-desk task: ${issue.title} (${issue.ticketKey}).${link}`;
+  return `Hi ${firstName(assignee)} — you've been assigned a lead-desk task: ${issue.title} (${issue.ticketKey}).${link}`;
 }
 
 /** A lead-desk delegation request: who to assign, the task title, and optional notes (PRD §9). */

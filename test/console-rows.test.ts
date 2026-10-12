@@ -38,7 +38,7 @@ describe("consolePayload (live snapshot from already-read store data)", () => {
     expect(p.sweeps[0]!.prNumber).toBe(7);
     expect(p.boards.map((b) => b.ticketKey)).toContain("COR-2"); // unblocked + unassigned
     expect(Array.isArray(p.assign)).toBe(true);
-    expect(Array.isArray(p.desk)).toBe(true);
+    expect(Array.isArray(p.deskBoard.coLeads)).toBe(true);
     expect(p.roster.length).toBe(12);
     expect(p.rosterLoad.length).toBe(12);
     expect(p.rosterLoad.every((m) => typeof m.load === "number")).toBe(true);
@@ -48,7 +48,9 @@ describe("consolePayload (live snapshot from already-read store data)", () => {
     expect(p.sweeps).toEqual([]);
     expect(p.boards).toEqual([]);
     expect(p.assign).toEqual([]);
-    expect(p.desk).toEqual([]);
+    expect(p.deskBoard.delegated).toEqual([]);
+    expect(p.deskBoard.epics).toEqual([]);
+    expect(p.deskBoard.coLeads.every((c) => c.open === 0 && c.blocked === 0)).toBe(true); // no issues → zero load
     expect(p.roster.length).toBe(12);
   });
 });

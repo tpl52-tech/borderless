@@ -69,6 +69,11 @@ export function memberByLinearId(linearId: string): Member | undefined {
   return byLinearId.get(linearId);
 }
 
+/** A member's first name for the console's compact owner/assignee cells. */
+export function firstName(m: Member): string {
+  return m.name.split(" ")[0] ?? m.name; // split never yields []; the ?? only satisfies noUncheckedIndexedAccess
+}
+
 /** Member for a GitHub login (case-insensitive) — e.g. a PR author -> person -> Slack. */
 export function memberByGithub(login: string): Member | undefined {
   return byGithub.get(login.toLowerCase());

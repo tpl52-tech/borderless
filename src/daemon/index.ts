@@ -458,7 +458,9 @@ export function startDaemon(home = stateHome()): Daemon {
   const deskCreate = async (req: DeskCreateRequest): Promise<DeskCreateResult> => {
     if (!config.linearApiKey || !leadTeamKey) return { created: [], errors: ["Linear not configured (API key + team)"], configured: false };
     const linear = httpLinearClient(config.linearApiKey);
-    // Resolve the team id + the lead-delegated label (create the label once, on first use).
+    // Resolve the team id + the lead-delegated label (create the label once, on first use). Two concurrent
+    // first-time creates could race two labels (singleFlight only dedupes a same-draftId double-click) — but
+    // this is a single-lead localhost console, and it self-heals: later runs find the (first) label.
     const { teamId, labelId: existing } = parseTeamAndLabel(await linear.query(QA_TARGETS_QUERY, { teamKey: leadTeamKey, label: DELEGATED_LABEL }), leadTeamKey);
     const labelId = existing ?? parseLabelCreate(await linear.query(ISSUE_LABEL_CREATE_MUTATION, { input: { name: DELEGATED_LABEL, teamId, color: DELEGATED_LABEL_COLOR } }));
     const issues = store.listLinearIssues(); // project name → id, from the synced store (the draft's projects are grounded on it)

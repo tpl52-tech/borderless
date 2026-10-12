@@ -590,17 +590,23 @@
 
   function ldCollect() {
     const val = (el, f) => el.querySelector(`[data-f="${f}"]`);
-    const epics = [...ldDraftBox.querySelectorAll("[data-epic]")]
-      .map((el) => ({ title: val(el, "title").value.trim(), project: val(el, "project").value || null }))
-      .filter((e) => e.title);
+    // Epics in render order, each remembering its ORIGINAL render index (= the value its option carries in the
+    // ticket selects). Blanking an epic's title drops it, which shifts positions — so remap each ticket's epic
+    // index through render-index → kept-index (a reference to a dropped epic becomes null = no parent).
+    const rendered = [...ldDraftBox.querySelectorAll("[data-epic]")]
+      .map((el) => ({ renderIdx: Number(el.getAttribute("data-epic")), title: val(el, "title").value.trim(), project: val(el, "project").value || null }));
+    const kept = rendered.filter((e) => e.title);
+    const remap = new Map(kept.map((e, ci) => [e.renderIdx, ci]));
+    const epics = kept.map((e) => ({ title: e.title, project: e.project }));
     const tickets = [...ldDraftBox.querySelectorAll("[data-ticket]")].map((el) => {
       const epicIdx = val(el, "epic").value;
+      const ci = epicIdx === "" ? undefined : remap.get(Number(epicIdx)); // dropped epic → undefined → no parent
       return {
         title: val(el, "title").value.trim(),
         assigneeLinearId: val(el, "assignee").value || null,
         project: val(el, "project").value || null,
         priority: Number(val(el, "priority").value),
-        epicIndex: epicIdx === "" ? null : Number(epicIdx), // position in `epics`, resolved to a parent id server-side
+        epicIndex: ci === undefined ? null : ci, // position in the SENT `epics`, resolved to a parent id server-side
         dm: val(el, "dm").checked,
       };
     }).filter((t) => t.title);

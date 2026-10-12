@@ -511,7 +511,7 @@
       if (!res.ok) throw new Error(String(res.status));
       const d = await res.json();
       await load(); // refresh the SWEEP_QUEUE with the re-opened + newly-enqueued jobs
-      return d.configured === false ? "no Linear key / repo" : `✓ ${d.reopened} re-opened · ${d.created} new · ${d.started} running`;
+      return d.configured === false ? "Linear not configured" : `✓ ${d.reopened} re-opened · ${d.created} new · ${d.started} running`;
     } catch { return "sweep failed"; }
   }, 3000));
 

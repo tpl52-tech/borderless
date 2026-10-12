@@ -274,7 +274,7 @@ export interface InReviewSweepResult {
   reopened: number;    // resting jobs re-opened because their PR head advanced past what they reviewed
   created: number;     // brand-new in-review jobs enqueued
   started: number;     // jobs the supervisor kicked off this sweep
-  configured: boolean; // false when no Linear key / repo is set — nothing could be swept
+  configured: boolean; // false when Linear isn't configured (no API key / team keys) — the board sync couldn't run
 }
 
 /** A sweep attempt on one ticket: in-review (drive a PR) or rescue (build from scratch). */

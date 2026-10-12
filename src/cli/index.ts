@@ -76,7 +76,7 @@ export async function main(argv: string[]): Promise<void> {
       const r = await client.request<InReviewSweepResult>(
         "sweep.scanInReview", stateName ? { stateName } : {},
       );
-      const note = r.configured ? "" : " — no Linear key / repo configured";
+      const note = r.configured ? "" : " — Linear not configured (no API key / teams)";
       console.log(`sweep: synced ${r.synced} issue(s), re-opened ${r.reopened} advanced, enqueued ${r.created} job(s), started ${r.started} run(s)${note}`);
     });
     return;

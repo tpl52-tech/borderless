@@ -642,7 +642,7 @@
     ldSend.textContent = orig; ldSend.disabled = false;
   }
   // Grow the textarea with its content (capped by CSS max-height, then it scrolls).
-  const ldGrow = () => { ldField.style.height = "auto"; ldField.style.height = ldField.scrollHeight + "px"; };
+  const ldGrow = () => { ldField.style.height = "auto"; ldField.style.height = (ldField.scrollHeight + 2) + "px"; }; // +2 = the 1px top/bottom border (box-sizing:border-box, so scrollHeight excludes it)
   ldField.addEventListener("input", ldGrow);
   ldSend.addEventListener("click", ldDoDraft);
   ldField.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ldDoDraft(); } }); // Enter drafts, Shift+Enter = newline

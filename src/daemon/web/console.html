@@ -180,6 +180,11 @@
   .ld-draft { margin-top: 1rem; display: flex; flex-direction: column; gap: .4rem; }
   .ld-sec { font-size: .64rem; letter-spacing: .09em; color: var(--dim); margin: .7rem 0 .1rem; }
   .ld-card { font-size: .8rem; line-height: 1.4; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
+  .ld-in { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 5px; padding: .35rem .5rem; font: inherit; font-size: .8rem; margin-bottom: .4rem; }
+  .ld-row { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+  .ld-sel { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 5px; padding: .3rem .4rem; font: inherit; font-size: .72rem; max-width: 100%; }
+  .ld-dm { font-size: .72rem; color: var(--ink-2); display: inline-flex; align-items: center; gap: .25rem; cursor: pointer; }
+  .ld-create { margin-top: .9rem; }
   .ci-field { flex: 1; border: 1px solid var(--line-2); border-radius: 12px; padding: .75rem .95rem; color: var(--dim); font-family: -apple-system, system-ui, sans-serif; font-size: .9rem; }
   .ci-send { background: var(--pink); color: #3a0c28; border: 0; border-radius: 12px; padding: .7rem 1.2rem; font-weight: 700; font-family: -apple-system, system-ui, sans-serif; cursor: pointer; }
   .ci-send:hover { background: color-mix(in srgb, var(--pink) 88%, white); }
@@ -557,23 +562,73 @@
     } catch { return "sweep failed"; }
   }, 3000));
 
-  // ---- LEAD DESK: chat → draft (render the LLM's proposed epics + tickets; writes nothing yet) ----
+  // ---- LEAD DESK: chat → draft → review (editable) → create in Linear ----
   const ldField = $("ld-field"), ldSend = $("ld-send"), ldDraftBox = $("ld-draft"), ldNote = $("ld-chat-note");
-  const LD_PRIO = ["None", "Urgent", "High", "Medium", "Low"];
+  const LD_PRIO = ["None", "Urgent", "High", "Medium", "Low"]; // index = Linear priority number
+  let ldDraftId = "";
+  const opt = (value, label, sel) => `<option value="${esc(value)}"${sel ? " selected" : ""}>${esc(label)}</option>`;
+
   function ldRender(d) {
     if (d.configured === false) { ldDraftBox.innerHTML = `<div class="ld-card s-pink">&#9888; ${esc((d.warnings || [])[0] || "chat backend not configured")}</div>`; return; }
+    ldDraftId = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random());
+    const people = d.assignable || [], projects = d.projects || [], epics = d.epics || [];
+    const projSel = (f, selName) => `<select class="ld-sel" data-f="${f}">${projects.map((p) => opt(p, p, p === selName)).join("") || opt("", "(no projects)", true)}</select>`;
     const out = [];
-    if ((d.epics || []).length) out.push(`<div class="ld-sec">EPICS</div>` + d.epics.map((e) => `<div class="ld-card"><span class="s-amber">&#9670;</span> <b>${esc(e.title)}</b>${e.project ? ` <span class="s-dim">&middot; ${esc(e.project)}</span>` : ""}</div>`).join(""));
+    if (epics.length) out.push(`<div class="ld-sec">EPICS</div>` + epics.map((e, i) =>
+      `<div class="ld-card" data-epic="${i}"><input class="ld-in" data-f="title" value="${esc(e.title)}" /><div class="ld-row"><span class="s-amber">&#9670; epic</span> ${projSel("project", e.project)}</div></div>`).join(""));
     if ((d.tickets || []).length) out.push(`<div class="ld-sec">TICKETS</div>` + d.tickets.map((t) => {
-      const who = t.resolved ? esc(t.assignee) : `<span class="s-pink">${esc(t.assignee)} ?</span>`;
-      const meta = `[${esc(LD_PRIO[t.priority] || "None")}]${t.project ? " &middot; " + esc(t.project) : ""}${t.epic ? " &middot; epic: " + esc(t.epic) : ""}`;
-      return `<div class="ld-card"><b>${esc(t.title)}</b> <span class="to">&rarr; ${who}</span> <span class="s-dim">${meta}</span></div>`;
+      const asg = `<select class="ld-sel" data-f="assignee">${opt("", "— unassigned —", !t.assigneeLinearId)}${people.map((p) => opt(p.linearId, p.name, p.linearId === t.assigneeLinearId)).join("")}</select>`;
+      const prio = `<select class="ld-sel" data-f="priority">${LD_PRIO.map((p, i) => opt(i, p, i === t.priority)).join("")}</select>`;
+      const epicSel = `<select class="ld-sel" data-f="epic">${opt("", "— no epic —", !t.epic)}${epics.map((e, i) => opt(i, e.title, e.title === t.epic)).join("")}</select>`;
+      return `<div class="ld-card" data-ticket="1"><input class="ld-in" data-f="title" value="${esc(t.title)}" /><div class="ld-row">${asg}${projSel("project", t.project)}${prio}${epicSel}<label class="ld-dm"><input type="checkbox" data-f="dm" checked /> DM</label></div></div>`;
     }).join(""));
-    if ((d.questions || []).length) out.push(`<div class="ld-sec">QUESTIONS</div>` + d.questions.map((q) => `<div class="ld-card s-dim">? ${esc(q)}</div>`).join(""));
+    if ((d.questions || []).length) out.push(`<div class="ld-sec">QUESTIONS Borderless had</div>` + d.questions.map((q) => `<div class="ld-card s-dim">? ${esc(q)}</div>`).join(""));
     if ((d.warnings || []).length) out.push(d.warnings.map((w) => `<div class="ld-card s-pink">&#9888; ${esc(w)}</div>`).join(""));
-    if ((d.epics || []).length || (d.tickets || []).length) out.push(`<div class="ld-sec">Review + Create land in the next step.</div>`);
+    if (epics.length || (d.tickets || []).length) out.push(`<button class="btn green ld-create" id="ld-create">&#10003; Create in Linear</button>`);
     ldDraftBox.innerHTML = out.join("") || `<div class="ld-card s-dim">no draft produced</div>`;
   }
+
+  function ldCollect() {
+    const val = (el, f) => el.querySelector(`[data-f="${f}"]`);
+    // Epics in render order, each remembering its ORIGINAL render index (= the value its option carries in the
+    // ticket selects). Blanking an epic's title drops it, which shifts positions — so remap each ticket's epic
+    // index through render-index → kept-index (a reference to a dropped epic becomes null = no parent).
+    const rendered = [...ldDraftBox.querySelectorAll("[data-epic]")]
+      .map((el) => ({ renderIdx: Number(el.getAttribute("data-epic")), title: val(el, "title").value.trim(), project: val(el, "project").value || null }));
+    const kept = rendered.filter((e) => e.title);
+    const remap = new Map(kept.map((e, ci) => [e.renderIdx, ci]));
+    const epics = kept.map((e) => ({ title: e.title, project: e.project }));
+    const tickets = [...ldDraftBox.querySelectorAll("[data-ticket]")].map((el) => {
+      const epicIdx = val(el, "epic").value;
+      const ci = epicIdx === "" ? undefined : remap.get(Number(epicIdx)); // dropped epic → undefined → no parent
+      return {
+        title: val(el, "title").value.trim(),
+        assigneeLinearId: val(el, "assignee").value || null,
+        project: val(el, "project").value || null,
+        priority: Number(val(el, "priority").value),
+        epicIndex: ci === undefined ? null : ci, // position in the SENT `epics`, resolved to a parent id server-side
+        dm: val(el, "dm").checked,
+      };
+    }).filter((t) => t.title);
+    return { epics, tickets };
+  }
+
+  async function ldCreate() {
+    const btn = $("ld-create"); if (!btn || btn.disabled) return;
+    const { epics, tickets } = ldCollect();
+    if (!epics.length && !tickets.length) return;
+    btn.disabled = true; btn.textContent = "⟳ creating…";
+    try {
+      const res = await fetch("/api/desk/create", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ draftId: ldDraftId, epics, tickets }) });
+      if (!res.ok) throw new Error(String(res.status));
+      const r = await res.json();
+      const lines = (r.created || []).map((c) => `<div class="ld-card"><span class="s-green">&#10003;</span> ${esc(c.ticketKey)}${c.dmSent ? ' <span class="s-dim">&middot; DM sent</span>' : ""}</div>`)
+        .concat((r.errors || []).map((e) => `<div class="ld-card s-pink">&#9888; ${esc(e)}</div>`));
+      ldDraftBox.innerHTML = `<div class="ld-sec">CREATED</div>` + (lines.join("") || `<div class="ld-card s-pink">nothing created</div>`);
+      load(); // refresh the board → new tickets appear under DELEGATED (via the lead-delegated label)
+    } catch { btn.disabled = false; btn.textContent = "✓ Create in Linear"; ldDraftBox.insertAdjacentHTML("beforeend", `<div class="ld-card s-pink">&#9888; create failed — Linear configured?</div>`); }
+  }
+
   async function ldDoDraft() {
     const text = ldField.value.trim();
     if (!text || ldSend.disabled) return;
@@ -589,6 +644,7 @@
   }
   ldSend.addEventListener("click", ldDoDraft);
   ldField.addEventListener("keydown", (e) => { if (e.key === "Enter") ldDoDraft(); });
+  ldDraftBox.addEventListener("click", (e) => { if (e.target.closest("#ld-create")) ldCreate(); }); // delegated: button is re-rendered
 
   // ---- shared: run an async action with a button's busy state (disable + spinner, restore after) ----
   async function withBusy(btn, label, fn) {

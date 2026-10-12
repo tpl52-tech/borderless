@@ -10,6 +10,7 @@
 import type { Member } from "./roster.ts";
 import { firstName } from "./roster.ts";
 import { findMember } from "./lead-desk.ts";
+import { asArray, obj, str, strOrNull } from "./coerce.ts";
 
 export interface DraftEpic { title: string; project: string | null; }
 export interface DraftTicket {
@@ -22,6 +23,12 @@ export interface DraftTicket {
   epic: string | null;              // the epic title this ticket belongs under, or null
 }
 export interface DeskDraft { epics: DraftEpic[]; tickets: DraftTicket[]; questions: string[]; warnings: string[]; }
+
+/** A person the lead can assign work to, for the review dropdowns (localhost console only, so a Linear id is ok). */
+export interface DraftPerson { name: string; linearId: string; }
+/** The draft endpoint's full response: the parsed draft + what the review cards' dropdowns need (assignable
+ *  people, projects) + whether the chat backend is configured. */
+export interface DeskDraftResponse extends DeskDraft { configured: boolean; assignable: DraftPerson[]; projects: string[]; }
 
 /** Grounding for the draft prompt: who can be assigned, the live projects + epics, so the model stays real. */
 export interface DraftContext { coLeads: string[]; members: string[]; projects: string[]; epics: string[]; }
@@ -113,7 +120,3 @@ export function parseDraft(reply: string, roster: Member[]): DeskDraft {
 }
 
 function empty(warnings: string[]): DeskDraft { return { epics: [], tickets: [], questions: [], warnings }; }
-function asArray(v: unknown): unknown[] { return Array.isArray(v) ? v : []; }
-function obj(v: unknown): Record<string, unknown> { return v != null && typeof v === "object" ? v as Record<string, unknown> : {}; }
-function str(v: unknown): string { return typeof v === "string" ? v.trim() : ""; }
-function strOrNull(v: unknown): string | null { const s = str(v); return s.length ? s : null; }

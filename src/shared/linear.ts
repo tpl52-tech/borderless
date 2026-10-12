@@ -164,6 +164,30 @@ export function parseQaTargets(json: unknown, teamKey: string, label: string): {
   return { teamId, labelId };
 }
 
+// --- Lead Desk v2 create targets: team id + the lead-delegated label, created if missing -----------------
+
+/** Parse {@link QA_TARGETS_QUERY} for the team id + an OPTIONAL label id (null when the label doesn't exist
+ *  yet, so the caller can create it). The team must exist (fails loud). */
+export function parseTeamAndLabel(json: unknown, teamKey: string): { teamId: string; labelId: string | null } {
+  const data = (json as { data?: { teams?: { nodes?: Array<{ id?: string }> }; issueLabels?: { nodes?: Array<{ id?: string }> } } } | null)?.data;
+  const teamId = data?.teams?.nodes?.[0]?.id;
+  if (!teamId) throw new Error(`lead-desk: no Linear team with key "${teamKey}"`);
+  return { teamId, labelId: data?.issueLabels?.nodes?.[0]?.id ?? null };
+}
+
+/** Create a workspace label (the lead-desk's `lead-delegated` tag, made once on first use). */
+export const ISSUE_LABEL_CREATE_MUTATION = `
+mutation BorderlessLabelCreate($input: IssueLabelCreateInput!) {
+  issueLabelCreate(input: $input) { success issueLabel { id } }
+}`;
+
+/** Parse {@link ISSUE_LABEL_CREATE_MUTATION} → the new label id; throws on failure. */
+export function parseLabelCreate(json: unknown): string {
+  const r = (json as { data?: { issueLabelCreate?: { success?: boolean; issueLabel?: { id?: string } } } } | null)?.data?.issueLabelCreate;
+  if (!r?.success || !r.issueLabel?.id) throw new Error("lead-desk: Linear issueLabelCreate did not succeed");
+  return r.issueLabel.id;
+}
+
 /**
  * The dev tickets that already have a `manual-qa` child — the idempotency set. PAGINATED (`$after`): this set
  * is the sole basis of "don't re-create", so it must never silently truncate (unlike a capped `first:`); the
@@ -192,7 +216,7 @@ export const ISSUE_CREATE_MUTATION = `
 mutation BorderlessIssueCreate($input: IssueCreateInput!) {
   issueCreate(input: $input) {
     success
-    issue { identifier url }
+    issue { id identifier url }
   }
 }`;
 
@@ -203,19 +227,22 @@ export interface IssueCreateInput {
   title: string;
   description: string;
   assigneeId: string | null;
+  /** Optional: Linear priority 0..4 (0 None, 1 Urgent, 2 High, 3 Medium, 4 Low) — lead-desk tickets carry it. */
+  priority?: number;
   /** Optional: make this a sub-issue of the given issue UUID (manual-QA children hang under the dev ticket). */
   parentId?: string;
   /** Optional: label UUIDs to attach on create (the manual-QA child gets the `manual-qa` label). */
   labelIds?: string[];
 }
 
-export interface CreatedIssue { ticketKey: string; url: string | null; }
+export interface CreatedIssue { id: string; ticketKey: string; url: string | null; }
 
-/** Parse {@link ISSUE_CREATE_MUTATION}; throws if the mutation didn't succeed (fails loud, never silent). */
+/** Parse {@link ISSUE_CREATE_MUTATION}; throws if the mutation didn't succeed (fails loud, never silent). The
+ *  issue UUID (`id`) is returned so a created epic can be a parent for its children (lead-desk epics). */
 export function parseIssueCreate(json: unknown): CreatedIssue {
-  const r = (json as { data?: { issueCreate?: { success?: boolean; issue?: { identifier?: string; url?: string | null } } } } | null)?.data?.issueCreate;
-  if (!r?.success || !r.issue?.identifier) throw new Error("lead-desk: Linear issueCreate did not succeed");
-  return { ticketKey: r.issue.identifier, url: r.issue.url ?? null };
+  const r = (json as { data?: { issueCreate?: { success?: boolean; issue?: { id?: string; identifier?: string; url?: string | null } } } } | null)?.data?.issueCreate;
+  if (!r?.success || !r.issue?.identifier || !r.issue.id) throw new Error("lead-desk: Linear issueCreate did not succeed");
+  return { id: r.issue.id, ticketKey: r.issue.identifier, url: r.issue.url ?? null };
 }
 
 // --- Ask Borderless fleet writes (PRD §10): reassign an issue, comment on an issue --------------------

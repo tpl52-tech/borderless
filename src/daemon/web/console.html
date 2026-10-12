@@ -570,7 +570,7 @@
   // ---- LEAD DESK: chat → draft → review (editable) → create in Linear ----
   const ldField = $("ld-field"), ldSend = $("ld-send"), ldDraftBox = $("ld-draft"), ldNote = $("ld-chat-note");
   const LD_PRIO = ["None", "Urgent", "High", "Medium", "Low"]; // index = Linear priority number
-  let ldDraftId = "", ldLastText = ""; // ldLastText = the request we drafted from, reused when re-drafting with answers
+  let ldDraftId = "", ldLastText = "", ldBusy = false; // ldLastText = the request we drafted from (reused on re-draft); ldBusy stops draft/create/re-draft interleaving (they each re-render the box)
   const opt = (value, label, sel) => `<option value="${esc(value)}"${sel ? " selected" : ""}>${esc(label)}</option>`;
 
   function ldRender(d) {
@@ -588,12 +588,12 @@
     }).join(""));
     const qs = d.questions || [];
     if (qs.length) out.push(`<div class="ld-sec">QUESTIONS Borderless has</div>` + qs.map((q) => {
-      const opts = (q.options || []).length
+      const input = (q.options || []).length // MCQ → clickable pills; open question → a free-text answer
         ? `<div class="ld-opts">${q.options.map((o) => `<button class="ld-opt" data-opt="${esc(o)}">${esc(o)}</button>`).join("")}</div>`
-        : "";
-      return `<div class="ld-card ld-q" data-q="${esc(q.question)}"><div class="s-dim">? ${esc(q.question)}</div>${opts}</div>`;
+        : `<input class="ld-in ld-ans" placeholder="your answer…" autocomplete="off" style="margin-top:.45rem" />`;
+      return `<div class="ld-card ld-q" data-q="${esc(q.question)}"><div class="s-dim">? ${esc(q.question)}</div>${input}</div>`;
     }).join(""));
-    if (qs.some((q) => (q.options || []).length)) out.push(`<button class="btn o-pink ld-redraft" id="ld-redraft">&#8635; Re-draft with answers</button>`);
+    if (qs.length) out.push(`<button class="btn o-pink ld-redraft" id="ld-redraft">&#8635; Re-draft with answers</button>`);
     if ((d.warnings || []).length) out.push(d.warnings.map((w) => `<div class="ld-card s-pink">&#9888; ${esc(w)}</div>`).join(""));
     if (epics.length || (d.tickets || []).length) out.push(`<button class="btn green ld-create" id="ld-create">&#10003; Create in Linear</button>`);
     ldDraftBox.innerHTML = out.join("") || `<div class="ld-card s-dim">no draft produced</div>`;
@@ -624,10 +624,10 @@
   }
 
   async function ldCreate() {
-    const btn = $("ld-create"); if (!btn || btn.disabled) return;
+    const btn = $("ld-create"); if (!btn || btn.disabled || ldBusy) return;
     const { epics, tickets } = ldCollect();
     if (!epics.length && !tickets.length) return;
-    btn.disabled = true; btn.textContent = "⟳ creating…";
+    ldBusy = true; btn.disabled = true; btn.textContent = "⟳ creating…";
     try {
       const res = await fetch("/api/desk/create", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ draftId: ldDraftId, epics, tickets }) });
       if (!res.ok) throw new Error(String(res.status));
@@ -637,40 +637,43 @@
       ldDraftBox.innerHTML = `<div class="ld-sec">CREATED</div>` + (lines.join("") || `<div class="ld-card s-pink">nothing created</div>`);
       load(); // refresh the board → new tickets appear under DELEGATED (via the lead-delegated label)
     } catch { btn.disabled = false; btn.textContent = "✓ Create in Linear"; ldDraftBox.insertAdjacentHTML("beforeend", `<div class="ld-card s-pink">&#9888; create failed — Linear configured?</div>`); }
+    ldBusy = false;
   }
 
   async function ldDoDraft() {
     const text = ldField.value.trim();
-    if (!text || ldSend.disabled) return;
-    ldLastText = text;
+    if (!text || ldSend.disabled || ldBusy) return;
+    ldLastText = text; ldBusy = true;
     ldSend.disabled = true; const orig = ldSend.textContent; ldSend.textContent = "⟳ drafting…";
     if (ldNote) ldNote.hidden = true;
     ldDraftBox.innerHTML = `<div class="ld-card s-dim">drafting…</div>`;
     try {
-      const res = await fetch("/api/desk/draft", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+      const res = await fetch("/api/desk/draft", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, answers: [] }) });
       if (!res.ok) throw new Error(String(res.status));
       ldRender(await res.json());
       ldField.value = ""; ldGrow(); // clear the box once a draft lands (keep it on failure so you can retry)
     } catch { ldDraftBox.innerHTML = `<div class="ld-card s-pink">draft failed — is the chat backend configured?</div>`; }
-    ldSend.textContent = orig; ldSend.disabled = false;
+    ldSend.textContent = orig; ldSend.disabled = false; ldBusy = false;
   }
   // Grow the textarea with its content (capped by CSS max-height, then it scrolls).
   const ldGrow = () => { ldField.style.height = "auto"; ldField.style.height = (ldField.scrollHeight + 2) + "px"; }; // +2 = the 1px top/bottom border (box-sizing:border-box, so scrollHeight excludes it)
   ldField.addEventListener("input", ldGrow);
   // Re-draft with the lead's MCQ picks fed back in, so the model refines (reassigns, resolves ambiguity, etc.).
   async function ldRedraft() {
-    const btn = $("ld-redraft"); if (!btn || btn.disabled) return;
-    const answers = [...ldDraftBox.querySelectorAll(".ld-q")].map((card) => {
-      const sel = card.querySelector(".ld-opt.sel");
-      return sel ? { question: card.getAttribute("data-q"), answer: sel.getAttribute("data-opt") } : null;
+    const btn = $("ld-redraft"); if (!btn || btn.disabled || ldBusy) return;
+    const answers = [...ldDraftBox.querySelectorAll(".ld-q")].map((card) => { // an MCQ pick, else a typed answer
+      const sel = card.querySelector(".ld-opt.sel"), txt = card.querySelector(".ld-ans");
+      const answer = sel ? sel.getAttribute("data-opt") : (txt ? txt.value.trim() : "");
+      return answer ? { question: card.getAttribute("data-q"), answer } : null;
     }).filter(Boolean);
-    if (!answers.length) { btn.textContent = "pick an answer first"; setTimeout(() => { btn.innerHTML = "&#8635; Re-draft with answers"; }, 1600); return; }
-    btn.disabled = true; btn.textContent = "⟳ re-drafting…";
+    if (!answers.length) { btn.textContent = "answer at least one first"; setTimeout(() => { btn.innerHTML = "&#8635; Re-draft with answers"; }, 1600); return; }
+    ldBusy = true; btn.disabled = true; btn.textContent = "⟳ re-drafting…";
     try {
       const res = await fetch("/api/desk/draft", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: ldLastText, answers }) });
       if (!res.ok) throw new Error(String(res.status));
       ldRender(await res.json());
     } catch { btn.disabled = false; btn.innerHTML = "&#8635; Re-draft with answers"; ldDraftBox.insertAdjacentHTML("beforeend", `<div class="ld-card s-pink">&#9888; re-draft failed</div>`); }
+    ldBusy = false;
   }
 
   ldSend.addEventListener("click", ldDoDraft);
@@ -678,8 +681,8 @@
   ldDraftBox.addEventListener("click", (e) => { // delegated: cards/buttons are re-rendered each draft
     if (e.target.closest("#ld-create")) return void ldCreate();
     if (e.target.closest("#ld-redraft")) return void ldRedraft();
-    const opt = e.target.closest(".ld-opt");
-    if (opt) { opt.closest(".ld-q").querySelectorAll(".ld-opt").forEach((b) => b.classList.remove("sel")); opt.classList.add("sel"); } // single-select per question
+    const pill = e.target.closest(".ld-opt");
+    if (pill) { pill.closest(".ld-q").querySelectorAll(".ld-opt").forEach((b) => b.classList.remove("sel")); pill.classList.add("sel"); } // single-select per question
   });
 
   // ---- shared: run an async action with a button's busy state (disable + spinner, restore after) ----

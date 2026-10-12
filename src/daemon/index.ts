@@ -431,7 +431,7 @@ export function startDaemon(home = stateHome()): Daemon {
     [...coLeads(ROSTER, config.branchOwner), ...ROSTER.filter((m) => !m.lead)]
       .map((m) => ({ name: firstName(m), linearId: m.linearIds[0] }))
       .filter((p): p is DraftPerson => !!p.linearId);
-  const deskDraft = async (text: string, answers: DraftAnswer[] = []): Promise<DeskDraftResponse> => {
+  const deskDraft = async (text: string, answers: DraftAnswer[]): Promise<DeskDraftResponse> => {
     const chat = makeChat();
     const extras = { assignable: assignablePeople() };
     if (!chat) return { epics: [], tickets: [], questions: [], warnings: ["the chat backend isn't configured (set askBackend / openRouterApiKey)"], configured: false, ...extras };

@@ -318,10 +318,10 @@
             <div class="panel">
               <div class="ph pink">CHAT &rarr; TICKETS <span class="ph-meta">draft &middot; review &middot; create</span></div>
               <div class="pb">
-                <p class="note" id="ld-chat-note">Tell Borderless what you want your co-leads to build &mdash; e.g. &ldquo;Dana does the profile edit screen, Neha takes favorites RLS, new epic for Phase&nbsp;2 search.&rdquo; It drafts epics + tickets for you to review. (Nothing is written to Linear yet &mdash; editing + Create land in the next step.)</p>
+                <p class="note" id="ld-chat-note">Tell Borderless what you want your co-leads to build &mdash; e.g. &ldquo;Dana does the profile edit screen, Neha takes favorites RLS, new epic for Phase&nbsp;2 search.&rdquo; It drafts epics + tickets for you to edit, then Create files them in Lead Ops.</p>
                 <div id="ld-draft" class="ld-draft"></div>
-                <div class="chat-input" style="margin-top:1rem">
-                  <input class="ci-field" id="ld-field" placeholder="Describe work for your co-leads…" autocomplete="off" style="background:transparent;color:var(--ink);outline:none" />
+                <div class="chat-input" style="margin-top:1rem;align-items:flex-end">
+                  <textarea class="ci-field" id="ld-field" rows="1" placeholder="Describe work for your co-leads…" autocomplete="off" style="background:transparent;color:var(--ink);outline:none;resize:none;overflow-y:auto;max-height:11rem;line-height:1.4"></textarea>
                   <button class="ci-send" id="ld-send">Draft</button>
                 </div>
               </div>
@@ -637,11 +637,15 @@
       const res = await fetch("/api/desk/draft", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
       if (!res.ok) throw new Error(String(res.status));
       ldRender(await res.json());
+      ldField.value = ""; ldGrow(); // clear the box once a draft lands (keep it on failure so you can retry)
     } catch { ldDraftBox.innerHTML = `<div class="ld-card s-pink">draft failed — is the chat backend configured?</div>`; }
     ldSend.textContent = orig; ldSend.disabled = false;
   }
+  // Grow the textarea with its content (capped by CSS max-height, then it scrolls).
+  const ldGrow = () => { ldField.style.height = "auto"; ldField.style.height = ldField.scrollHeight + "px"; };
+  ldField.addEventListener("input", ldGrow);
   ldSend.addEventListener("click", ldDoDraft);
-  ldField.addEventListener("keydown", (e) => { if (e.key === "Enter") ldDoDraft(); });
+  ldField.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ldDoDraft(); } }); // Enter drafts, Shift+Enter = newline
   ldDraftBox.addEventListener("click", (e) => { if (e.target.closest("#ld-create")) ldCreate(); }); // delegated: button is re-rendered
 
   // ---- shared: run an async action with a button's busy state (disable + spinner, restore after) ----

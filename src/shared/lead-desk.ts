@@ -59,20 +59,24 @@ export const DELEGATED_LABEL = "lead-delegated";
 export interface CoLeadLoadRow { name: string; netid: string; open: number; blocked: number; }
 
 /**
- * Co-leads' load: the OTHER leads (roster `lead`, minus the current lead), each with their open assigned count
- * across ALL projects + how many are blocked. Pure — so a lead sees who's slammed before delegating more.
- * `leadIdent` is the current lead's identifier (config.branchOwner), matched against a member's github OR
- * netid — branchOwner is a netid for some teams (`tpl52`), a github login for others (`tpl52-tech`).
+ * The current lead's co-leads: the OTHER leads (roster `lead`, minus the lead whose github OR netid matches
+ * `leadIdent` = config.branchOwner, case-insensitive — branchOwner is a netid for some teams (`tpl52`), a
+ * github login for others (`tpl52-tech`)). The one home for "who is a co-lead", shared by the load panel and
+ * the draft's assignable-people list.
  */
-export function coLeadLoadRows(issues: LinearIssue[], roster: Member[], leadIdent?: string): CoLeadLoadRow[] {
+export function coLeads(roster: Member[], leadIdent?: string): Member[] {
   const self = (leadIdent ?? "").toLowerCase();
-  return roster
-    .filter((m) => m.lead && m.github.toLowerCase() !== self && m.netid.toLowerCase() !== self)
-    .map((m) => {
-      const ids = new Set(m.linearIds);
-      const open = issues.filter((i) => i.assignee != null && ids.has(i.assignee) && !isTerminalState(i.stateType));
-      return { name: firstName(m), netid: m.netid, open: open.length, blocked: open.filter((i) => i.blockedBy.length > 0).length };
-    });
+  return roster.filter((m) => m.lead && m.github.toLowerCase() !== self && m.netid.toLowerCase() !== self);
+}
+
+/** Co-leads' load: each co-lead's open assigned count across ALL projects + how many are blocked. Pure — so a
+ *  lead sees who's slammed before delegating more. */
+export function coLeadLoadRows(issues: LinearIssue[], roster: Member[], leadIdent?: string): CoLeadLoadRow[] {
+  return coLeads(roster, leadIdent).map((m) => {
+    const ids = new Set(m.linearIds);
+    const open = issues.filter((i) => i.assignee != null && ids.has(i.assignee) && !isTerminalState(i.stateType));
+    return { name: firstName(m), netid: m.netid, open: open.length, blocked: open.filter((i) => i.blockedBy.length > 0).length };
+  });
 }
 
 /** One row of the DELEGATED panel. */

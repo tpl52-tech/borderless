@@ -176,6 +176,10 @@
   .ctext { font-family: -apple-system, system-ui, sans-serif; font-size: .93rem; line-height: 1.62; color: var(--ink); white-space: pre-wrap; max-width: 68ch; }
   .cmsg.user .ctext { background: color-mix(in srgb, var(--pink) 8%, transparent); border: 1px solid color-mix(in srgb, var(--pink) 20%, var(--line)); border-radius: 12px; padding: .7rem .9rem; }
   .chat-input { position: sticky; bottom: 0; background: var(--bg); padding: .8rem 0 .2rem; display: flex; gap: .6rem; align-items: center; }
+  /* lead-desk draft (chat → tickets) */
+  .ld-draft { margin-top: 1rem; display: flex; flex-direction: column; gap: .4rem; }
+  .ld-sec { font-size: .64rem; letter-spacing: .09em; color: var(--dim); margin: .7rem 0 .1rem; }
+  .ld-card { font-size: .8rem; line-height: 1.4; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
   .ci-field { flex: 1; border: 1px solid var(--line-2); border-radius: 12px; padding: .75rem .95rem; color: var(--dim); font-family: -apple-system, system-ui, sans-serif; font-size: .9rem; }
   .ci-send { background: var(--pink); color: #3a0c28; border: 0; border-radius: 12px; padding: .7rem 1.2rem; font-weight: 700; font-family: -apple-system, system-ui, sans-serif; cursor: pointer; }
   .ci-send:hover { background: color-mix(in srgb, var(--pink) 88%, white); }
@@ -309,10 +313,11 @@
             <div class="panel">
               <div class="ph pink">CHAT &rarr; TICKETS <span class="ph-meta">draft &middot; review &middot; create</span></div>
               <div class="pb">
-                <p class="note" id="ld-chat-note">Tell Borderless what you want your co-leads to build &mdash; e.g. &ldquo;Dana does the profile edit screen, Neha takes favorites RLS, new epic for Phase&nbsp;2 search.&rdquo; It drafts editable tickets + epics for you to confirm before anything is written to Linear.</p>
+                <p class="note" id="ld-chat-note">Tell Borderless what you want your co-leads to build &mdash; e.g. &ldquo;Dana does the profile edit screen, Neha takes favorites RLS, new epic for Phase&nbsp;2 search.&rdquo; It drafts epics + tickets for you to review. (Nothing is written to Linear yet &mdash; editing + Create land in the next step.)</p>
+                <div id="ld-draft" class="ld-draft"></div>
                 <div class="chat-input" style="margin-top:1rem">
-                  <input class="ci-field" id="ld-field" placeholder="Delegation chat — wiring up in the next step…" autocomplete="off" disabled style="background:transparent;color:var(--dim);outline:none" />
-                  <button class="ci-send" id="ld-send" disabled>Draft</button>
+                  <input class="ci-field" id="ld-field" placeholder="Describe work for your co-leads…" autocomplete="off" style="background:transparent;color:var(--ink);outline:none" />
+                  <button class="ci-send" id="ld-send">Draft</button>
                 </div>
               </div>
             </div>
@@ -551,6 +556,39 @@
       return d.configured === false ? "Linear not configured" : `✓ ${d.reopened} re-opened · ${d.created} new · ${d.started} running`;
     } catch { return "sweep failed"; }
   }, 3000));
+
+  // ---- LEAD DESK: chat → draft (render the LLM's proposed epics + tickets; writes nothing yet) ----
+  const ldField = $("ld-field"), ldSend = $("ld-send"), ldDraftBox = $("ld-draft"), ldNote = $("ld-chat-note");
+  const LD_PRIO = ["None", "Urgent", "High", "Medium", "Low"];
+  function ldRender(d) {
+    if (d.configured === false) { ldDraftBox.innerHTML = `<div class="ld-card s-pink">&#9888; ${esc((d.warnings || [])[0] || "chat backend not configured")}</div>`; return; }
+    const out = [];
+    if ((d.epics || []).length) out.push(`<div class="ld-sec">EPICS</div>` + d.epics.map((e) => `<div class="ld-card"><span class="s-amber">&#9670;</span> <b>${esc(e.title)}</b>${e.project ? ` <span class="s-dim">&middot; ${esc(e.project)}</span>` : ""}</div>`).join(""));
+    if ((d.tickets || []).length) out.push(`<div class="ld-sec">TICKETS</div>` + d.tickets.map((t) => {
+      const who = t.resolved ? esc(t.assignee) : `<span class="s-pink">${esc(t.assignee)} ?</span>`;
+      const meta = `[${esc(LD_PRIO[t.priority] || "None")}]${t.project ? " &middot; " + esc(t.project) : ""}${t.epic ? " &middot; epic: " + esc(t.epic) : ""}`;
+      return `<div class="ld-card"><b>${esc(t.title)}</b> <span class="to">&rarr; ${who}</span> <span class="s-dim">${meta}</span></div>`;
+    }).join(""));
+    if ((d.questions || []).length) out.push(`<div class="ld-sec">QUESTIONS</div>` + d.questions.map((q) => `<div class="ld-card s-dim">? ${esc(q)}</div>`).join(""));
+    if ((d.warnings || []).length) out.push(d.warnings.map((w) => `<div class="ld-card s-pink">&#9888; ${esc(w)}</div>`).join(""));
+    if ((d.epics || []).length || (d.tickets || []).length) out.push(`<div class="ld-sec">Review + Create land in the next step.</div>`);
+    ldDraftBox.innerHTML = out.join("") || `<div class="ld-card s-dim">no draft produced</div>`;
+  }
+  async function ldDoDraft() {
+    const text = ldField.value.trim();
+    if (!text || ldSend.disabled) return;
+    ldSend.disabled = true; const orig = ldSend.textContent; ldSend.textContent = "⟳ drafting…";
+    if (ldNote) ldNote.hidden = true;
+    ldDraftBox.innerHTML = `<div class="ld-card s-dim">drafting…</div>`;
+    try {
+      const res = await fetch("/api/desk/draft", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+      if (!res.ok) throw new Error(String(res.status));
+      ldRender(await res.json());
+    } catch { ldDraftBox.innerHTML = `<div class="ld-card s-pink">draft failed — is the chat backend configured?</div>`; }
+    ldSend.textContent = orig; ldSend.disabled = false;
+  }
+  ldSend.addEventListener("click", ldDoDraft);
+  ldField.addEventListener("keydown", (e) => { if (e.key === "Enter") ldDoDraft(); });
 
   // ---- shared: run an async action with a button's busy state (disable + spinner, restore after) ----
   async function withBusy(btn, label, fn) {

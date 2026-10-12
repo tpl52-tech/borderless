@@ -55,8 +55,10 @@ import { liveSlackDm } from "./slack.ts";
 import { askBorderless, type FleetDocs } from "./ask-borderless.ts";
 import { httpOpenRouterChat } from "./openrouter/chat.ts";
 import { claudeCliChat } from "./claude-chat.ts";
-import type { Chat } from "./openrouter/runner.ts";
+import type { Chat, Message } from "./openrouter/runner.ts";
 import { memberByLinearId, ROSTER } from "../shared/roster.ts";
+import { coLeads, epicRows } from "../shared/lead-desk.ts";
+import { draftPrompt, parseDraft, type DraftContext, type DeskDraft } from "../shared/desk-draft.ts";
 
 export interface Daemon {
   store: Store;
@@ -379,15 +381,19 @@ export function startDaemon(home = stateHome()): Daemon {
   // Ask Borderless (PRD §10/§12): fleet-aware chat. Default backend is the subscription `claude` CLI (no key,
   // answer-only); "openrouter" is opt-in (needs a key, supports the action tools). The Linear-write tools
   // (used only on the openrouter backend) also need a Linear key.
+  // The chat backend both Ask and the Lead Desk draft run on: OpenRouter when configured, else the $0
+  // subscription Claude CLI (PRD §12). Null only when OpenRouter is selected but its key is missing.
+  const makeChat = (): Chat | null => {
+    if ((config.askBackend ?? "subscription") === "openrouter") {
+      return config.openRouterApiKey ? httpOpenRouterChat(config.openRouterApiKey, config.openRouterModel ?? DEFAULT_OPENROUTER_MODEL) : null;
+    }
+    return claudeCliChat({ model: config.askModel }); // subscription: no key, answer-only (sandboxed)
+  };
+
   const askRun: UdsServerDeps["askRun"] = async (question, allowActions) => {
     const backend = config.askBackend ?? "subscription"; // PRD §12: the subscription CLI is the default ($0)
-    let chat: Chat;
-    if (backend === "openrouter") {
-      if (!config.openRouterApiKey) return { answer: "", steps: 0, costMicros: 0, configured: false };
-      chat = httpOpenRouterChat(config.openRouterApiKey, config.openRouterModel ?? DEFAULT_OPENROUTER_MODEL);
-    } else {
-      chat = claudeCliChat({ model: config.askModel }); // subscription: no key, answer-only (sandboxed)
-    }
+    const chat = makeChat();
+    if (!chat) return { answer: "", steps: 0, costMicros: 0, configured: false }; // openrouter selected, no key
     const linear = config.linearApiKey ? httpLinearClient(config.linearApiKey) : null;
     const issueUuid = (ticketKey: string) => store.getLinearIssueByIdentifier(ticketKey)?.id ?? null;
     // These throw on a guard miss so the fleet tool reports it as an error (not a false success); the
@@ -413,6 +419,27 @@ export function startDaemon(home = stateHome()): Daemon {
       ? "\n\n[Ask on the subscription backend is advisory — it can't run actions. Set askBackend:\"openrouter\" with an openRouterApiKey to let --yes act.]"
       : "";
     return { answer: answer + note, steps: result.steps, costMicros: result.costMicros, configured: true };
+  };
+
+  // Lead Desk v2 (PRD §9, web): the lead's words → the LLM's structured draft of epics + tickets (assignee,
+  // project, priority), grounded in the roster + live projects/epics. Single-shot, no tools, no writes — the
+  // lead reviews + confirms (P3) before anything is created. Shares the Ask chat backend.
+  const deskDraft = async (text: string): Promise<DeskDraft & { configured: boolean }> => {
+    const chat = makeChat();
+    if (!chat) return { epics: [], tickets: [], questions: [], warnings: ["the chat backend isn't configured (set askBackend / openRouterApiKey)"], configured: false };
+    const issues = store.listLinearIssues();
+    const ctx: DraftContext = {
+      coLeads: coLeads(ROSTER, config.branchOwner).map((m) => m.name),
+      members: ROSTER.filter((m) => !m.lead).map((m) => m.name),
+      projects: [...new Set(issues.map((i) => i.projectName).filter((p): p is string => !!p))],
+      epics: epicRows(issues).map((e) => e.title),
+    };
+    const messages: Message[] = [
+      { role: "system", content: "You turn a lead's request into a delegation plan. Output ONLY the JSON object the user's message specifies." },
+      { role: "user", content: draftPrompt(text, ctx) },
+    ];
+    const res = await chat(messages, []);
+    return { ...parseDraft(res.text ?? "", ROSTER), configured: true };
   };
 
   // Sync-only: pull the live Linear board into the store (no sweeps). Shared by the refresh button / `ao sync`
@@ -444,7 +471,7 @@ export function startDaemon(home = stateHome()): Daemon {
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runInReviewSweep: () => scanInReview("In Review"), port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runInReviewSweep: () => scanInReview("In Review"), deskDraft, port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

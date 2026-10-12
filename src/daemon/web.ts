@@ -10,6 +10,7 @@
 
 import { consolePayload } from "../shared/console-rows.ts";
 import type { InReviewSweepResult } from "../shared/types.ts";
+import type { DeskDraft } from "../shared/desk-draft.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 import type { Store } from "./store.ts";
@@ -33,6 +34,8 @@ export interface WebServerDeps {
   /** PRD §4/§11: run the In-Review sweep from the browser SWEEP button — sync + re-review + enqueue + kick the
    *  engine; the fixer/reviewer agents run server-side in the daemon. Deduped (singleFlight) upstream. */
   runInReviewSweep: () => Promise<InReviewSweepResult>;
+  /** PRD §9 (Lead Desk v2): the lead's words → the LLM's structured draft of epics + tickets. Writes nothing. */
+  deskDraft: (text: string) => Promise<DeskDraft & { configured: boolean }>;
   port: number;
 }
 
@@ -69,6 +72,12 @@ export function startWebServer(deps: WebServerDeps): WebServer {
       }
       if (pathname === "/api/sweep" && req.method === "POST") {
         return Response.json(await deps.runInReviewSweep()); // enqueue + drive the In-Review sweep (agents run server-side)
+      }
+      if (pathname === "/api/desk/draft" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { text?: unknown };
+        const text = typeof body.text === "string" ? body.text.trim() : "";
+        if (!text) return Response.json({ epics: [], tickets: [], questions: [], warnings: [], configured: true });
+        return Response.json(await deps.deskDraft(text)); // LLM drafts epics + tickets; writes nothing (create is P3)
       }
       if (pathname === "/api/ask" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { question?: unknown };

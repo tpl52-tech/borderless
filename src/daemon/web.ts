@@ -1,9 +1,11 @@
 /**
  * Web console (PRD §11) — a localhost HTTP server that serves the browser version of the lead console: the
  * exact docs/borderless-console.html design (shipped as web/console.html) wired to live daemon data via a
- * JSON feed, plus an advisory ASK endpoint. It is a READ mirror — consequential actions (sweep, rescue,
- * merge) stay terminal-driven (`ao sweep`, …). Bound to 127.0.0.1 only. The payload builder is a pure store
- * read (tested); the HTTP wiring is thin + live.
+ * JSON feed, plus an advisory ASK endpoint. It is mostly a READ mirror; the code-driving buttons that DO act —
+ * VERIFY "Run checks" and SWEEP "In Review" — run server-side in the daemon (deduped via singleFlight so a
+ * double-click can't fan out a second agent fleet), while rescue + merge stay terminal-driven (`ao rescue`,
+ * `gh pr merge`). Bound to 127.0.0.1 only. The payload builder is a pure store read (tested); the HTTP wiring
+ * is thin + live.
  */
 
 import { consolePayload } from "../shared/console-rows.ts";
@@ -24,6 +26,9 @@ export interface WebServerDeps {
   verifyScan: () => Promise<VerifyScanResult>;
   /** PRD §13 V2b: run the structural checks over the read-only DB role → a verdict per Verifying ticket. */
   verifyRun: () => Promise<VerifyRunResult>;
+  /** PRD §4/§11: run the In-Review sweep from the browser SWEEP button — sync + re-review + enqueue + kick the
+   *  engine; the fixer/reviewer agents run server-side in the daemon. Deduped (singleFlight) upstream. */
+  runInReviewSweep: () => Promise<{ synced: number; reopened: number; created: number; started: number }>;
   port: number;
 }
 
@@ -57,6 +62,9 @@ export function startWebServer(deps: WebServerDeps): WebServer {
       }
       if (pathname === "/api/verify/run" && req.method === "POST") {
         return Response.json(await deps.verifyRun()); // executes the catalog checks over the read-only role
+      }
+      if (pathname === "/api/sweep" && req.method === "POST") {
+        return Response.json(await deps.runInReviewSweep()); // enqueue + drive the In-Review sweep (agents run server-side)
       }
       if (pathname === "/api/ask" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { question?: unknown };

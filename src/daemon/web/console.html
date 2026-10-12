@@ -224,7 +224,7 @@
           <h1>SWEEP CONSOLE</h1>
           <p class="hero-sub" id="s-herosub">loading&hellip;</p>
           <div class="hero-actions">
-            <button class="btn green" data-cmd='ao sweep "In Review"'>&#9654; SWEEP IN REVIEW</button>
+            <button class="btn green" id="s-sweep">&#9654; SWEEP IN REVIEW</button>
             <button class="btn o-pink" data-cmd="ao rescue">&#10227; SCAN OVERDUE</button>
           </div>
         </div>
@@ -506,6 +506,23 @@
       refreshBtn.textContent = j.configured === false ? "no Linear key" : `✓ ${j.synced} synced`;
     } catch { refreshBtn.textContent = "sync failed"; }
     setTimeout(() => { refreshBtn.innerHTML = orig; refreshBtn.disabled = false; }, 2500);
+  });
+
+  // ---- SWEEPS: run the In-Review sweep from the browser (sync + re-review + enqueue + drive; agents run in the daemon) ----
+  const sweepBtn = $("s-sweep");
+  sweepBtn.addEventListener("click", async () => {
+    if (sweepBtn.disabled) return;
+    sweepBtn.disabled = true;
+    const orig = sweepBtn.innerHTML;
+    sweepBtn.textContent = "⟳ sweeping…";
+    try {
+      const res = await fetch("/api/sweep", { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      const d = await res.json();
+      await load(); // refresh the SWEEP_QUEUE with the re-opened + newly-enqueued jobs
+      sweepBtn.textContent = `✓ ${d.reopened} re-opened · ${d.created} new · ${d.started} running`;
+    } catch { sweepBtn.textContent = "sweep failed — is the daemon configured (repo + Linear key)?"; }
+    setTimeout(() => { sweepBtn.innerHTML = orig; sweepBtn.disabled = false; }, 3000);
   });
 
   // ---- shared: run an async action with a button's busy state (disable + spinner, restore after) ----

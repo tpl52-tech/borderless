@@ -423,7 +423,7 @@ export function startDaemon(home = stateHome()): Daemon {
     return { synced, configured: true };
   };
 
-  const scanInReview = async (stateName = "In Review"): Promise<{ synced: number; reopened: number; created: number; started: number }> => {
+  const scanInReviewImpl = async (stateName = "In Review"): Promise<{ synced: number; reopened: number; created: number; started: number }> => {
     const { synced } = await syncBoard();
     // A human may have pushed a fix to a resting PR since we last reviewed it; re-open those for a fresh review
     // before enqueuing brand-new In-Review tickets (both get driven by the one pickup below).
@@ -433,6 +433,9 @@ export function startDaemon(home = stateHome()): Daemon {
     const started = sweepSupervisor?.pickup().length ?? 0; // kick the engine on the newly-queued jobs
     return { synced, reopened, created, started };
   };
+  // Dedupe concurrent sweeps of the same column onto one in-flight run — the web SWEEP button double-clicked,
+  // or a button + a terminal `ao sweep` at once, must join one run, never spawn a duplicate agent fleet.
+  const scanInReview = singleFlight(scanInReviewImpl, (stateName) => stateName ?? "In Review");
 
   server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, verifyQa: runVerifyQa, verifyQaSync: runVerifyQaSync });
 
@@ -440,7 +443,7 @@ export function startDaemon(home = stateHome()): Daemon {
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runInReviewSweep: () => scanInReview("In Review"), port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

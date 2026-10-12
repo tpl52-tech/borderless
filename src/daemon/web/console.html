@@ -600,7 +600,7 @@
         assigneeLinearId: val(el, "assignee").value || null,
         project: val(el, "project").value || null,
         priority: Number(val(el, "priority").value),
-        epic: epicIdx === "" ? null : (epics[Number(epicIdx)] || {}).title || null,
+        epicIndex: epicIdx === "" ? null : Number(epicIdx), // position in `epics`, resolved to a parent id server-side
         dm: val(el, "dm").checked,
       };
     }).filter((t) => t.title);

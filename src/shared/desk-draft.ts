@@ -10,6 +10,7 @@
 import type { Member } from "./roster.ts";
 import { firstName } from "./roster.ts";
 import { findMember } from "./lead-desk.ts";
+import { asArray, obj, str, strOrNull } from "./coerce.ts";
 
 export interface DraftEpic { title: string; project: string | null; }
 export interface DraftTicket {
@@ -119,7 +120,3 @@ export function parseDraft(reply: string, roster: Member[]): DeskDraft {
 }
 
 function empty(warnings: string[]): DeskDraft { return { epics: [], tickets: [], questions: [], warnings }; }
-function asArray(v: unknown): unknown[] { return Array.isArray(v) ? v : []; }
-function obj(v: unknown): Record<string, unknown> { return v != null && typeof v === "object" ? v as Record<string, unknown> : {}; }
-function str(v: unknown): string { return typeof v === "string" ? v.trim() : ""; }
-function strOrNull(v: unknown): string | null { const s = str(v); return s.length ? s : null; }

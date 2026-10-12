@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { issueCreateInput, runDeskCreate, type DeskCreateDeps, type DeskCreateRequest } from "../src/shared/desk-create.ts";
+import { issueCreateInput, runDeskCreate, parseCreateRequest, type DeskCreateDeps, type DeskCreateRequest } from "../src/shared/desk-create.ts";
 import type { IssueCreateInput, CreatedIssue } from "../src/shared/linear.ts";
 
 describe("issueCreateInput (lead-desk create → Linear issueCreate input)", () => {
@@ -40,7 +40,7 @@ describe("runDeskCreate (orchestration, injected I/O)", () => {
     const { deps, creates, dms } = fakeDeps();
     const r = await runDeskCreate(req({
       epics: [{ title: "Phase 2", project: "ReUse" }],
-      tickets: [{ title: "Search UI", assigneeLinearId: "u1", project: "ReUse", priority: 2, epic: "Phase 2", dm: true }],
+      tickets: [{ title: "Search UI", assigneeLinearId: "u1", project: "ReUse", priority: 2, epicIndex: 0, dm: true }],
     }), deps);
     expect(r.errors).toEqual([]);
     expect(r.created).toEqual([
@@ -57,8 +57,8 @@ describe("runDeskCreate (orchestration, injected I/O)", () => {
   test("an unknown project skips the item with an error; the rest still create (fail-soft)", async () => {
     const { deps, creates } = fakeDeps();
     const r = await runDeskCreate(req({ tickets: [
-      { title: "bad", assigneeLinearId: "u1", project: "Nope", priority: 0, epic: null, dm: false },
-      { title: "good", assigneeLinearId: "u2", project: "ReUse", priority: 0, epic: null, dm: false },
+      { title: "bad", assigneeLinearId: "u1", project: "Nope", priority: 0, epicIndex: null, dm: false },
+      { title: "good", assigneeLinearId: "u2", project: "ReUse", priority: 0, epicIndex: null, dm: false },
     ] }), deps);
     expect(r.created.map((c) => c.ticketKey)).toEqual(["COR-1"]); // only "good"
     expect(r.errors[0]).toContain('ticket "bad"');
@@ -68,8 +68,8 @@ describe("runDeskCreate (orchestration, injected I/O)", () => {
   test("a createIssue failure on one item is caught; later items still create", async () => {
     const { deps } = fakeDeps({ createIssue: async (input) => { if (input.title === "boom") throw new Error("Linear 500"); return { id: "x", ticketKey: "COR-9", url: null }; } });
     const r = await runDeskCreate(req({ tickets: [
-      { title: "boom", assigneeLinearId: null, project: "ReUse", priority: 0, epic: null, dm: false },
-      { title: "ok", assigneeLinearId: null, project: "ReUse", priority: 0, epic: null, dm: false },
+      { title: "boom", assigneeLinearId: null, project: "ReUse", priority: 0, epicIndex: null, dm: false },
+      { title: "ok", assigneeLinearId: null, project: "ReUse", priority: 0, epicIndex: null, dm: false },
     ] }), deps);
     expect(r.created).toHaveLength(1);
     expect(r.errors[0]).toContain("Linear 500");
@@ -78,9 +78,61 @@ describe("runDeskCreate (orchestration, injected I/O)", () => {
   test("dm:false, or no assignee, sends no DM", async () => {
     const { deps, dms } = fakeDeps();
     await runDeskCreate(req({ tickets: [
-      { title: "a", assigneeLinearId: "u1", project: "ReUse", priority: 0, epic: null, dm: false },
-      { title: "b", assigneeLinearId: null, project: "ReUse", priority: 0, epic: null, dm: true },
+      { title: "a", assigneeLinearId: "u1", project: "ReUse", priority: 0, epicIndex: null, dm: false },
+      { title: "b", assigneeLinearId: null, project: "ReUse", priority: 0, epicIndex: null, dm: true },
     ] }), deps);
     expect(dms).toEqual([]);
+  });
+
+  test("duplicate epic titles no longer collide — each ticket routes to its epic by index", async () => {
+    const { deps, creates } = fakeDeps();
+    await runDeskCreate(req({
+      epics: [{ title: "Dup", project: "ReUse" }, { title: "Dup", project: "ReUse" }],
+      tickets: [
+        { title: "t0", assigneeLinearId: null, project: "ReUse", priority: 0, epicIndex: 0, dm: false },
+        { title: "t1", assigneeLinearId: null, project: "ReUse", priority: 0, epicIndex: 1, dm: false },
+      ],
+    }), deps);
+    expect(creates[2]!.parentId).toBe("uuid-1"); // t0 → the FIRST "Dup"
+    expect(creates[3]!.parentId).toBe("uuid-2"); // t1 → the SECOND "Dup" (would've collided if keyed by title)
+  });
+
+  test("a ticket whose epic failed to create is still filed, but without a parent + a clear note", async () => {
+    let n = 0;
+    const creates: IssueCreateInput[] = [];
+    const deps: DeskCreateDeps = {
+      teamId: "T", labelId: "L", projectIdFor: () => "proj", dmFor: async () => false,
+      createIssue: async (input) => { if (input.title === "Doomed") throw new Error("nope"); creates.push(input); n++; return { id: `u${n}`, ticketKey: `COR-${n}`, url: null }; },
+    };
+    const r = await runDeskCreate(req({
+      epics: [{ title: "Doomed", project: "x" }],
+      tickets: [{ title: "orphan", assigneeLinearId: null, project: "x", priority: 0, epicIndex: 0, dm: false }],
+    }), deps);
+    expect(r.created.map((c) => c.ticketKey)).toEqual(["COR-1"]);   // the ticket is still filed
+    expect(creates[0]!.parentId).toBeUndefined();                   // but with no parent (its epic failed)
+    expect(r.errors.some((e) => e.includes('epic "Doomed"'))).toBe(true);
+    expect(r.errors.some((e) => e.includes("filed without a parent"))).toBe(true);
+  });
+});
+
+describe("parseCreateRequest (untrusted create body → clean request)", () => {
+  test("null without a draftId; coerces every field; drops empty-title items; clamps priority", () => {
+    expect(parseCreateRequest({ foo: 1 })).toBeNull();
+    expect(parseCreateRequest("nope")).toBeNull();
+    const r = parseCreateRequest({
+      draftId: "d",
+      epics: [{ title: " E ", project: 5 }, { title: "" }],
+      tickets: [
+        { title: "T", assigneeLinearId: "u1", project: "P", priority: 9, epicIndex: 1, dm: true },
+        { title: 123 },
+        { title: "noAsg", priority: "high", epicIndex: "0", dm: "yes" },
+      ],
+    })!;
+    expect(r.draftId).toBe("d");
+    expect(r.epics).toEqual([{ title: "E", project: null }]); // numeric project → null; empty title dropped
+    expect(r.tickets).toEqual([
+      { title: "T", assigneeLinearId: "u1", project: "P", priority: 0, epicIndex: 1, dm: true }, // priority 9 out of 0..4 → 0
+      { title: "noAsg", assigneeLinearId: null, project: null, priority: 0, epicIndex: null, dm: false }, // "high"→0, "0"(string)→null, "yes"→false
+    ]);
   });
 });

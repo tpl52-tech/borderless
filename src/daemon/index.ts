@@ -41,8 +41,7 @@ import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
 import { startWebServer, type WebServer } from "./web.ts";
 import { httpLinearClient, syncLinearIssues, fetchQaChildParentKeys, fetchIssueCommentBodies, resolveDoneStateId } from "./linear.ts";
-import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate } from "../shared/linear.ts";
-import { parseTeamAndLabel, ISSUE_LABEL_CREATE_MUTATION, parseLabelCreate } from "../shared/linear.ts";
+import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate, parseTeamAndLabel, ISSUE_LABEL_CREATE_MUTATION, parseLabelCreate } from "../shared/linear.ts";
 import { runDeskCreate, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import { verifyRow, type VerifyRow } from "../shared/verify.ts";
 import { singleFlight } from "../shared/single-flight.ts";
@@ -59,7 +58,7 @@ import { httpOpenRouterChat } from "./openrouter/chat.ts";
 import { claudeCliChat } from "./claude-chat.ts";
 import type { Chat, Message } from "./openrouter/runner.ts";
 import { memberByLinearId, firstName, ROSTER } from "../shared/roster.ts";
-import { coLeads, epicRows, DELEGATED_LABEL, delegationDmText } from "../shared/lead-desk.ts";
+import { coLeads, epicRows, DELEGATED_LABEL, DELEGATED_LABEL_COLOR, delegationDmText } from "../shared/lead-desk.ts";
 import { draftPrompt, parseDraft, type DraftContext, type DeskDraftResponse, type DraftPerson } from "../shared/desk-draft.ts";
 
 export interface Daemon {
@@ -461,7 +460,7 @@ export function startDaemon(home = stateHome()): Daemon {
     const linear = httpLinearClient(config.linearApiKey);
     // Resolve the team id + the lead-delegated label (create the label once, on first use).
     const { teamId, labelId: existing } = parseTeamAndLabel(await linear.query(QA_TARGETS_QUERY, { teamKey: leadTeamKey, label: DELEGATED_LABEL }), leadTeamKey);
-    const labelId = existing ?? parseLabelCreate(await linear.query(ISSUE_LABEL_CREATE_MUTATION, { input: { name: DELEGATED_LABEL, teamId, color: "#6E79D6" } }));
+    const labelId = existing ?? parseLabelCreate(await linear.query(ISSUE_LABEL_CREATE_MUTATION, { input: { name: DELEGATED_LABEL, teamId, color: DELEGATED_LABEL_COLOR } }));
     const issues = store.listLinearIssues(); // project name → id, from the synced store (the draft's projects are grounded on it)
     return runDeskCreate(req, {
       teamId, labelId,

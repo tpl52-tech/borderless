@@ -11,7 +11,7 @@
 import { consolePayload } from "../shared/console-rows.ts";
 import type { InReviewSweepResult } from "../shared/types.ts";
 import type { DeskDraftResponse } from "../shared/desk-draft.ts";
-import type { DeskCreateRequest, DeskCreateResult } from "../shared/desk-create.ts";
+import { parseCreateRequest, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 import type { Store } from "./store.ts";
@@ -83,11 +83,9 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         return Response.json(await deps.deskDraft(text)); // LLM drafts epics + tickets; writes nothing
       }
       if (pathname === "/api/desk/create" && req.method === "POST") {
-        const body = (await req.json().catch(() => null)) as Partial<DeskCreateRequest> | null;
-        if (!body || typeof body.draftId !== "string" || !Array.isArray(body.epics) || !Array.isArray(body.tickets)) {
-          return Response.json({ created: [], errors: ["bad request"], configured: true });
-        }
-        return Response.json(await deps.deskCreate({ draftId: body.draftId, epics: body.epics, tickets: body.tickets }));
+        const parsed = parseCreateRequest(await req.json().catch(() => null)); // coerce every field (untrusted body)
+        if (!parsed) return Response.json({ created: [], errors: ["bad request"], configured: true });
+        return Response.json(await deps.deskCreate(parsed));
       }
       if (pathname === "/api/ask" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { question?: unknown };

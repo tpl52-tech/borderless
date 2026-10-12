@@ -54,6 +54,8 @@ export function deskOverview(
 
 /** The label the lead-desk stamps on work it dispatches; the DELEGATED panel reads the store by it. */
 export const DELEGATED_LABEL = "lead-delegated";
+/** The color the `lead-delegated` label is created with (on first use), if it doesn't exist yet. */
+export const DELEGATED_LABEL_COLOR = "#6E79D6";
 
 /** One co-lead's plate: open (non-terminal) assigned issues + how many of those are blocked. */
 export interface CoLeadLoadRow { name: string; netid: string; open: number; blocked: number; }

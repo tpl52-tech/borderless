@@ -59,7 +59,7 @@ import { claudeCliChat } from "./claude-chat.ts";
 import type { Chat, Message } from "./openrouter/runner.ts";
 import { memberByLinearId, firstName, ROSTER } from "../shared/roster.ts";
 import { coLeads, epicRows, DELEGATED_LABEL, DELEGATED_LABEL_COLOR, delegationDmText, DEFAULT_LEAD_OPS_PROJECT } from "../shared/lead-desk.ts";
-import { draftPrompt, parseDraft, type DraftContext, type DeskDraftResponse, type DraftPerson } from "../shared/desk-draft.ts";
+import { draftPrompt, parseDraft, type DraftContext, type DeskDraftResponse, type DraftPerson, type DraftAnswer } from "../shared/desk-draft.ts";
 
 export interface Daemon {
   store: Store;
@@ -431,7 +431,7 @@ export function startDaemon(home = stateHome()): Daemon {
     [...coLeads(ROSTER, config.branchOwner), ...ROSTER.filter((m) => !m.lead)]
       .map((m) => ({ name: firstName(m), linearId: m.linearIds[0] }))
       .filter((p): p is DraftPerson => !!p.linearId);
-  const deskDraft = async (text: string): Promise<DeskDraftResponse> => {
+  const deskDraft = async (text: string, answers: DraftAnswer[]): Promise<DeskDraftResponse> => {
     const chat = makeChat();
     const extras = { assignable: assignablePeople() };
     if (!chat) return { epics: [], tickets: [], questions: [], warnings: ["the chat backend isn't configured (set askBackend / openRouterApiKey)"], configured: false, ...extras };
@@ -442,7 +442,7 @@ export function startDaemon(home = stateHome()): Daemon {
     };
     const messages: Message[] = [
       { role: "system", content: "You turn a lead's request into a delegation plan. Output ONLY the JSON object the user's message specifies." },
-      { role: "user", content: draftPrompt(text, ctx) },
+      { role: "user", content: draftPrompt(text, ctx, answers) },
     ];
     const res = await chat(messages, []);
     return { ...parseDraft(res.text ?? "", ROSTER), configured: true, ...extras };

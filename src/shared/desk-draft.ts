@@ -21,7 +21,16 @@ export interface DraftTicket {
   priority: number;                 // Linear priority 0..4 (0 None, 1 Urgent, 2 High, 3 Medium, 4 Low)
   epic: string | null;              // the epic title this ticket belongs under, or null
 }
-export interface DeskDraft { epics: DraftEpic[]; tickets: DraftTicket[]; questions: string[]; warnings: string[]; }
+/** A clarifying question from the model. `options` non-empty → render as MCQ (the lead picks one); empty → an
+ *  open/informational question. */
+export interface DraftQuestion { question: string; options: string[]; }
+/** The lead's answer to a prior MCQ, fed back on a re-draft so the model refines without asking it again. */
+export interface DraftAnswer { question: string; answer: string; }
+/** Coerce the untrusted `answers` from a re-draft POST → clean DraftAnswer[] (drops incomplete pairs). Pure. */
+export function parseDraftAnswers(raw: unknown): DraftAnswer[] {
+  return asArray(raw).map((a) => ({ question: str(obj(a).question), answer: str(obj(a).answer) })).filter((a) => a.question && a.answer);
+}
+export interface DeskDraft { epics: DraftEpic[]; tickets: DraftTicket[]; questions: DraftQuestion[]; warnings: string[]; }
 
 /** A person the lead can assign work to, for the review dropdowns (localhost console only, so a Linear id is ok). */
 export interface DraftPerson { name: string; linearId: string; }
@@ -40,22 +49,29 @@ export function priorityNumber(word: unknown): number {
 }
 
 /** The single-shot prompt: the lead's words + grounding context + the exact JSON contract to emit. Pure. */
-export function draftPrompt(text: string, ctx: DraftContext): string {
+export function draftPrompt(text: string, ctx: DraftContext, answers: DraftAnswer[] = []): string {
+  const answered = answers.length
+    ? ["", "The lead has already answered these — incorporate them and do NOT ask them again:",
+       ...answers.map((a) => `  Q: ${a.question} → A: ${a.answer}`)]
+    : [];
   return [
     "You are a staff engineering lead's delegation assistant. Turn the lead's request into a plan of Linear",
     "work: epics (big parent items) and tickets (each assigned to ONE person). Output ONLY a JSON object — no",
     "prose, no code fence — matching exactly this shape:",
-    '{"epics":[{"title":str}],"tickets":[{"title":str,"assignee":str,"priority":"None|Low|Medium|High|Urgent","epic":str|null}],"questions":[str]}',
+    '{"epics":[{"title":str}],"tickets":[{"title":str,"assignee":str,"priority":"None|Low|Medium|High|Urgent","epic":str|null}],"questions":[{"question":str,"options":[str]}]}',
     "",
     "Rules:",
     "- assignee MUST be one of the people listed below, written EXACTLY as shown (full name). If the lead",
     "  didn't say who, make your best pick and add a question about it.",
     "- epic: the title of the epic this ticket belongs under (from your epics array or an existing epic), else null.",
     "- Only create an epic when the lead asks for one or the work clearly needs a parent. Never invent work the lead didn't ask for.",
-    "- questions: anything you guessed or that's genuinely ambiguous; [] if none.",
+    "- questions: ask anything you guessed or that's genuinely ambiguous. When the answer is a choice among a few",
+    "  clear options, LIST them in `options` so the lead can pick (multiple-choice); use `options`:[] for an open",
+    "  question. Keep questions few and high-value. [] questions if none.",
     "",
     `People you can assign — co-leads: ${ctx.coLeads.join(", ") || "(none)"}${ctx.members.length ? ` · others: ${ctx.members.join(", ")}` : ""}`,
     `Existing epics: ${ctx.epics.join(", ") || "(none)"}`,
+    ...answered,
     "",
     `Lead's request: ${text}`,
   ].join("\n");
@@ -111,7 +127,11 @@ export function parseDraft(reply: string, roster: Member[]): DeskDraft {
     })
     .filter((t) => t.title.length > 0);
 
-  const questions = asArray(raw.questions).map(str).filter((q) => q.length > 0);
+  const questions: DraftQuestion[] = asArray(raw.questions).map((q) => {
+    if (typeof q === "string") return { question: q.trim(), options: [] }; // tolerate the old plain-string shape
+    const o = obj(q);
+    return { question: str(o.question), options: asArray(o.options).map(str).filter((s) => s.length > 0) };
+  }).filter((q) => q.question.length > 0);
   if (epics.length === 0 && tickets.length === 0) warnings.push("the draft had no tickets — try being more specific");
   return { epics, tickets, questions, warnings };
 }

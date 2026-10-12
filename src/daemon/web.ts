@@ -10,7 +10,7 @@
 
 import { consolePayload } from "../shared/console-rows.ts";
 import type { InReviewSweepResult } from "../shared/types.ts";
-import type { DeskDraftResponse } from "../shared/desk-draft.ts";
+import { parseDraftAnswers, type DeskDraftResponse, type DraftAnswer } from "../shared/desk-draft.ts";
 import { parseCreateRequest, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
@@ -35,8 +35,9 @@ export interface WebServerDeps {
   /** PRD §4/§11: run the In-Review sweep from the browser SWEEP button — sync + re-review + enqueue + kick the
    *  engine; the fixer/reviewer agents run server-side in the daemon. Deduped (singleFlight) upstream. */
   runInReviewSweep: () => Promise<InReviewSweepResult>;
-  /** PRD §9 (Lead Desk v2): the lead's words → the LLM's structured draft of epics + tickets. Writes nothing. */
-  deskDraft: (text: string) => Promise<DeskDraftResponse>;
+  /** PRD §9 (Lead Desk v2): the lead's words (+ any MCQ answers from a re-draft) → the LLM's structured draft
+   *  of epics + tickets + clarifying questions. Writes nothing. */
+  deskDraft: (text: string, answers: DraftAnswer[]) => Promise<DeskDraftResponse>;
   /** PRD §9 (Lead Desk v2): the lead's reviewed draft → real Linear issues (assign, label, DM). Deduped upstream. */
   deskCreate: (req: DeskCreateRequest) => Promise<DeskCreateResult>;
   port: number;
@@ -77,10 +78,10 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         return Response.json(await deps.runInReviewSweep()); // enqueue + drive the In-Review sweep (agents run server-side)
       }
       if (pathname === "/api/desk/draft" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { text?: unknown };
+        const body = (await req.json().catch(() => ({}))) as { text?: unknown; answers?: unknown };
         const text = typeof body.text === "string" ? body.text.trim() : "";
         if (!text) return Response.json({ epics: [], tickets: [], questions: [], warnings: [], configured: true, assignable: [] });
-        return Response.json(await deps.deskDraft(text)); // LLM drafts epics + tickets; writes nothing
+        return Response.json(await deps.deskDraft(text, parseDraftAnswers(body.answers))); // LLM drafts epics + tickets (+ MCQ answers on a re-draft); writes nothing
       }
       if (pathname === "/api/desk/create" && req.method === "POST") {
         const parsed = parseCreateRequest(await req.json().catch(() => null)); // coerce every field (untrusted body)

@@ -8,7 +8,7 @@
 import type { LinearIssue, SweepJob } from "./types.ts";
 import { doNext, type DoNextEntry } from "./boards.ts";
 import { activeLoads, suggestAssignments, type AssignmentSuggestion } from "./assign.ts";
-import { deskOverview } from "./lead-desk.ts";
+import { deskOverview, deskBoard } from "./lead-desk.ts";
 import { ROSTER, memberByLinearId, type Member } from "./roster.ts";
 
 /** The OWNER cell for a sweep job: the assignee's roster first name, else the raw Linear id, else null. */
@@ -41,14 +41,15 @@ export function assignRow(s: AssignmentSuggestion) {
 }
 
 /** The full live snapshot spanning all six screens, from already-read store data. Pure. */
-export function consolePayload(issues: LinearIssue[], sweepJobs: SweepJob[], leadOpsProject?: string) {
+export function consolePayload(issues: LinearIssue[], sweepJobs: SweepJob[], leadOpsProject?: string, leadGithub?: string) {
   const loads = activeLoads(issues, ROSTER);
   const ranked = doNext(issues);
   return {
     sweeps: sweepJobs.map(sweepRow),
     boards: ranked.map(boardRow),
     assign: suggestAssignments(ranked, ROSTER, loads).map(assignRow),
-    desk: deskOverview(issues, ROSTER, leadOpsProject),
+    desk: deskOverview(issues, ROSTER, leadOpsProject), // legacy Lead Ops list (TUI desk screen)
+    deskBoard: deskBoard(issues, ROSTER, leadGithub),   // Lead Desk v2 board (web console): co-leads, delegated, epics
     roster: ROSTER.map(rosterRow),
     rosterLoad: ROSTER.map((m) => ({ name: m.name.split(" ")[0], netid: m.netid, lead: Boolean(m.lead), load: loads.get(m.netid) ?? 0 })),
   };

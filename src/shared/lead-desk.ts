@@ -50,6 +50,75 @@ export function deskOverview(
     }));
 }
 
+// --- Lead Desk v2 board (PRD §9; web console) ---------------------------------------------------------
+
+/** The label the lead-desk stamps on work it dispatches; the DELEGATED panel reads the store by it. */
+export const DELEGATED_LABEL = "lead-delegated";
+
+/** One co-lead's plate: open (non-terminal) assigned issues + how many of those are blocked. */
+export interface CoLeadLoadRow { name: string; netid: string; open: number; blocked: number; }
+
+/**
+ * Co-leads' load: the OTHER leads (roster `lead`, minus the current lead matched by github), each with their
+ * open assigned count across ALL projects + how many are blocked. Pure — so a lead sees who's slammed before
+ * delegating more.
+ */
+export function coLeadLoadRows(issues: LinearIssue[], roster: Member[], leadGithub?: string): CoLeadLoadRow[] {
+  const self = (leadGithub ?? "").toLowerCase();
+  return roster
+    .filter((m) => m.lead && m.github.toLowerCase() !== self)
+    .map((m) => {
+      const ids = new Set(m.linearIds);
+      const open = issues.filter((i) => i.assignee != null && ids.has(i.assignee) && !isTerminalState(i.stateType));
+      return { name: m.name.split(" ")[0] ?? m.name, netid: m.netid, open: open.length, blocked: open.filter((i) => i.blockedBy.length > 0).length };
+    });
+}
+
+/** One row of the DELEGATED panel. */
+export interface DelegatedRow { ticketKey: string; title: string; assignee: string; state: string; }
+
+/** Work the lead has dispatched: open issues carrying the `lead-delegated` label, by assignee first name. Pure. */
+export function delegatedRows(issues: LinearIssue[], roster: Member[], label: string = DELEGATED_LABEL): DelegatedRow[] {
+  const byLinearId = buildRosterIndexes(roster).byLinearId;
+  return issues
+    .filter((i) => i.labels.includes(label) && !isTerminalState(i.stateType))
+    .map((i) => ({
+      ticketKey: i.identifier,
+      title: i.title,
+      assignee: i.assignee ? (byLinearId.get(i.assignee)?.name.split(" ")[0] ?? i.assignee) : "unassigned",
+      state: i.stateName ?? "—",
+    }))
+    .sort((a, b) => a.assignee.localeCompare(b.assignee) || a.ticketKey.localeCompare(b.ticketKey));
+}
+
+/** One epic (a parent issue) with its sub-issue completion. */
+export interface EpicRow { ticketKey: string; title: string; done: number; total: number; }
+
+/** Epics = parent issues in the synced set, with children progress (done = terminal children). Least-complete
+ *  first, so the in-flight epics lead. Pure. */
+export function epicRows(issues: LinearIssue[]): EpicRow[] {
+  const byId = new Map(issues.map((i) => [i.id, i]));
+  const children = new Map<string, LinearIssue[]>();
+  for (const i of issues) {
+    if (!i.parentId) continue;
+    const arr = children.get(i.parentId);
+    if (arr) arr.push(i); else children.set(i.parentId, [i]);
+  }
+  const rows: EpicRow[] = [];
+  for (const [parentId, kids] of children) {
+    const parent = byId.get(parentId);
+    if (!parent) continue; // parent outside the synced team → can't render it
+    rows.push({ ticketKey: parent.identifier, title: parent.title, done: kids.filter((k) => isTerminalState(k.stateType)).length, total: kids.length });
+  }
+  return rows.sort((a, b) => a.done / a.total - b.done / b.total || a.ticketKey.localeCompare(b.ticketKey));
+}
+
+/** The whole Lead Desk v2 board (web console): co-lead load, delegated work, epics. Pure. */
+export interface DeskBoard { coLeads: CoLeadLoadRow[]; delegated: DelegatedRow[]; epics: EpicRow[]; }
+export function deskBoard(issues: LinearIssue[], roster: Member[], leadGithub?: string): DeskBoard {
+  return { coLeads: coLeadLoadRows(issues, roster, leadGithub), delegated: delegatedRows(issues, roster), epics: epicRows(issues) };
+}
+
 // --- delegation (PRD §9): capture a task → a Lead Ops issue assigned to a member, + a Slack DM ---------
 
 /**

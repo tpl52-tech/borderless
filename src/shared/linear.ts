@@ -22,6 +22,7 @@ export interface LinearIssueUpsert {
   priority: number | null;
   dueDate: number | null; // epoch ms; feeds the rescue overdue check (PRD §5)
   labels: string[]; // label names; `lead-level` excludes a ticket from rescue
+  parentId: string | null; // parent/epic issue UUID when this is a sub-issue (lead-desk epics)
   blockedBy: string[]; // ids of issues that block this one; feeds the boards critical path (PRD §7)
   gitBranchName: string | null; // Linear's suggested branch — matches the team's PR branches (PRD §4)
   updatedAt: number | null; // epoch ms
@@ -46,6 +47,7 @@ query BorderlessIssues($filter: IssueFilter, $after: String) {
       project { id name }
       team { key }
       labels(first: 50) { nodes { name } }  # cap high: missing a lead-level label would mis-admit a rescue
+      parent { id }  # the epic/parent issue, when this is a sub-issue (lead-desk epics)
       inverseRelations(first: 50) { nodes { type issue { id } } }  # relations pointing AT this issue; type=blocks → a blocker
     }
   }
@@ -73,6 +75,7 @@ interface RawIssueNode {
   project?: { id?: string | null; name?: string | null } | null;
   team?: { key?: string | null } | null;
   labels?: { nodes?: Array<{ name?: string | null }> } | null;
+  parent?: { id?: string | null } | null;
   inverseRelations?: { nodes?: Array<{ type?: string | null; issue?: { id?: string | null } | null }> } | null;
 }
 interface RawIssuesResponse {
@@ -101,6 +104,7 @@ export function parseIssuesResponse(json: unknown): IssuesPage {
       priority: typeof n.priority === "number" ? n.priority : null,
       dueDate: Number.isNaN(due) ? null : due,
       labels: (n.labels?.nodes ?? []).map((l) => l.name).filter((name): name is string => typeof name === "string"),
+      parentId: n.parent?.id ?? null,
       // inverseRelations point AT this issue; a type="blocks" relation's `issue` is a ticket that blocks it.
       blockedBy: (n.inverseRelations?.nodes ?? [])
         .filter((r) => r.type === "blocks")

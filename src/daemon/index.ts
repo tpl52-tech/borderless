@@ -44,6 +44,7 @@ import { httpLinearClient, syncLinearIssues, fetchQaChildParentKeys, fetchIssueC
 import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate } from "../shared/linear.ts";
 import { verifyRow, type VerifyRow } from "../shared/verify.ts";
 import { singleFlight } from "../shared/single-flight.ts";
+import type { InReviewSweepResult } from "../shared/types.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
 import { buildTerritory } from "../shared/collision.ts";
 import { liveSweepDeps, needsHydration, hydrateInReviewJob, reReviewAdvancedPrs, liveHeadReader } from "./sweep-deps.ts";
@@ -423,15 +424,15 @@ export function startDaemon(home = stateHome()): Daemon {
     return { synced, configured: true };
   };
 
-  const scanInReviewImpl = async (stateName = "In Review"): Promise<{ synced: number; reopened: number; created: number; started: number }> => {
-    const { synced } = await syncBoard();
+  const scanInReviewImpl = async (stateName = "In Review"): Promise<InReviewSweepResult> => {
+    const { synced, configured } = await syncBoard();
     // A human may have pushed a fix to a resting PR since we last reviewed it; re-open those for a fresh review
     // before enqueuing brand-new In-Review tickets (both get driven by the one pickup below).
     const reopened = sweepSupervisor && config.repo
       ? (await reReviewAdvancedPrs(store, stateName, liveHeadReader(config.repo))).length : 0;
     const created = store.enqueueInReviewSweeps(stateName, config.leadOpsProject).length;
     const started = sweepSupervisor?.pickup().length ?? 0; // kick the engine on the newly-queued jobs
-    return { synced, reopened, created, started };
+    return { synced, reopened, created, started, configured };
   };
   // Dedupe concurrent sweeps of the same column onto one in-flight run — the web SWEEP button double-clicked,
   // or a button + a terminal `ao sweep` at once, must join one run, never spawn a duplicate agent fleet.

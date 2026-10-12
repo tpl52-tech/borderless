@@ -9,6 +9,7 @@
  */
 
 import { consolePayload } from "../shared/console-rows.ts";
+import type { InReviewSweepResult } from "../shared/types.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 import type { Store } from "./store.ts";
@@ -28,7 +29,7 @@ export interface WebServerDeps {
   verifyRun: () => Promise<VerifyRunResult>;
   /** PRD §4/§11: run the In-Review sweep from the browser SWEEP button — sync + re-review + enqueue + kick the
    *  engine; the fixer/reviewer agents run server-side in the daemon. Deduped (singleFlight) upstream. */
-  runInReviewSweep: () => Promise<{ synced: number; reopened: number; created: number; started: number }>;
+  runInReviewSweep: () => Promise<InReviewSweepResult>;
   port: number;
 }
 

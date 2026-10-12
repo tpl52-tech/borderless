@@ -185,6 +185,11 @@
   .ld-sel { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 5px; padding: .3rem .4rem; font: inherit; font-size: .72rem; max-width: 100%; }
   .ld-dm { font-size: .72rem; color: var(--ink-2); display: inline-flex; align-items: center; gap: .25rem; cursor: pointer; }
   .ld-create { margin-top: .9rem; }
+  .ld-opts { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .45rem; }
+  .ld-opt { background: var(--bg); color: var(--ink-2); border: 1px solid var(--line-2); border-radius: 999px; padding: .25rem .6rem; font: inherit; font-size: .72rem; cursor: pointer; }
+  .ld-opt:hover { border-color: var(--pink); }
+  .ld-opt.sel { background: var(--pink); color: #3a0c28; border-color: var(--pink); }
+  .ld-redraft { margin-top: .6rem; }
   .ci-field { flex: 1; border: 1px solid var(--line-2); border-radius: 12px; padding: .75rem .95rem; color: var(--dim); font-family: -apple-system, system-ui, sans-serif; font-size: .9rem; }
   .ci-send { background: var(--pink); color: #3a0c28; border: 0; border-radius: 12px; padding: .7rem 1.2rem; font-weight: 700; font-family: -apple-system, system-ui, sans-serif; cursor: pointer; }
   .ci-send:hover { background: color-mix(in srgb, var(--pink) 88%, white); }
@@ -565,7 +570,7 @@
   // ---- LEAD DESK: chat → draft → review (editable) → create in Linear ----
   const ldField = $("ld-field"), ldSend = $("ld-send"), ldDraftBox = $("ld-draft"), ldNote = $("ld-chat-note");
   const LD_PRIO = ["None", "Urgent", "High", "Medium", "Low"]; // index = Linear priority number
-  let ldDraftId = "";
+  let ldDraftId = "", ldLastText = ""; // ldLastText = the request we drafted from, reused when re-drafting with answers
   const opt = (value, label, sel) => `<option value="${esc(value)}"${sel ? " selected" : ""}>${esc(label)}</option>`;
 
   function ldRender(d) {
@@ -581,7 +586,14 @@
       const epicSel = `<select class="ld-sel" data-f="epic">${opt("", "— no epic —", !t.epic)}${epics.map((e, i) => opt(i, e.title, e.title === t.epic)).join("")}</select>`;
       return `<div class="ld-card" data-ticket="1"><input class="ld-in" data-f="title" value="${esc(t.title)}" /><div class="ld-row">${asg}${prio}${epicSel}<label class="ld-dm"><input type="checkbox" data-f="dm" checked /> DM</label></div></div>`;
     }).join(""));
-    if ((d.questions || []).length) out.push(`<div class="ld-sec">QUESTIONS Borderless had</div>` + d.questions.map((q) => `<div class="ld-card s-dim">? ${esc(q)}</div>`).join(""));
+    const qs = d.questions || [];
+    if (qs.length) out.push(`<div class="ld-sec">QUESTIONS Borderless has</div>` + qs.map((q) => {
+      const opts = (q.options || []).length
+        ? `<div class="ld-opts">${q.options.map((o) => `<button class="ld-opt" data-opt="${esc(o)}">${esc(o)}</button>`).join("")}</div>`
+        : "";
+      return `<div class="ld-card ld-q" data-q="${esc(q.question)}"><div class="s-dim">? ${esc(q.question)}</div>${opts}</div>`;
+    }).join(""));
+    if (qs.some((q) => (q.options || []).length)) out.push(`<button class="btn o-pink ld-redraft" id="ld-redraft">&#8635; Re-draft with answers</button>`);
     if ((d.warnings || []).length) out.push(d.warnings.map((w) => `<div class="ld-card s-pink">&#9888; ${esc(w)}</div>`).join(""));
     if (epics.length || (d.tickets || []).length) out.push(`<button class="btn green ld-create" id="ld-create">&#10003; Create in Linear</button>`);
     ldDraftBox.innerHTML = out.join("") || `<div class="ld-card s-dim">no draft produced</div>`;
@@ -630,6 +642,7 @@
   async function ldDoDraft() {
     const text = ldField.value.trim();
     if (!text || ldSend.disabled) return;
+    ldLastText = text;
     ldSend.disabled = true; const orig = ldSend.textContent; ldSend.textContent = "⟳ drafting…";
     if (ldNote) ldNote.hidden = true;
     ldDraftBox.innerHTML = `<div class="ld-card s-dim">drafting…</div>`;
@@ -644,9 +657,30 @@
   // Grow the textarea with its content (capped by CSS max-height, then it scrolls).
   const ldGrow = () => { ldField.style.height = "auto"; ldField.style.height = (ldField.scrollHeight + 2) + "px"; }; // +2 = the 1px top/bottom border (box-sizing:border-box, so scrollHeight excludes it)
   ldField.addEventListener("input", ldGrow);
+  // Re-draft with the lead's MCQ picks fed back in, so the model refines (reassigns, resolves ambiguity, etc.).
+  async function ldRedraft() {
+    const btn = $("ld-redraft"); if (!btn || btn.disabled) return;
+    const answers = [...ldDraftBox.querySelectorAll(".ld-q")].map((card) => {
+      const sel = card.querySelector(".ld-opt.sel");
+      return sel ? { question: card.getAttribute("data-q"), answer: sel.getAttribute("data-opt") } : null;
+    }).filter(Boolean);
+    if (!answers.length) { btn.textContent = "pick an answer first"; setTimeout(() => { btn.innerHTML = "&#8635; Re-draft with answers"; }, 1600); return; }
+    btn.disabled = true; btn.textContent = "⟳ re-drafting…";
+    try {
+      const res = await fetch("/api/desk/draft", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: ldLastText, answers }) });
+      if (!res.ok) throw new Error(String(res.status));
+      ldRender(await res.json());
+    } catch { btn.disabled = false; btn.innerHTML = "&#8635; Re-draft with answers"; ldDraftBox.insertAdjacentHTML("beforeend", `<div class="ld-card s-pink">&#9888; re-draft failed</div>`); }
+  }
+
   ldSend.addEventListener("click", ldDoDraft);
   ldField.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ldDoDraft(); } }); // Enter drafts, Shift+Enter = newline
-  ldDraftBox.addEventListener("click", (e) => { if (e.target.closest("#ld-create")) ldCreate(); }); // delegated: button is re-rendered
+  ldDraftBox.addEventListener("click", (e) => { // delegated: cards/buttons are re-rendered each draft
+    if (e.target.closest("#ld-create")) return void ldCreate();
+    if (e.target.closest("#ld-redraft")) return void ldRedraft();
+    const opt = e.target.closest(".ld-opt");
+    if (opt) { opt.closest(".ld-q").querySelectorAll(".ld-opt").forEach((b) => b.classList.remove("sel")); opt.classList.add("sel"); } // single-select per question
+  });
 
   // ---- shared: run an async action with a button's busy state (disable + spinner, restore after) ----
   async function withBusy(btn, label, fn) {

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { priorityNumber, draftPrompt, parseDraft } from "../src/shared/desk-draft.ts";
+import { priorityNumber, draftPrompt, parseDraft, parseDraftAnswers } from "../src/shared/desk-draft.ts";
 import type { Member } from "../src/shared/roster.ts";
 
 const ROSTER: Member[] = [
@@ -42,7 +42,7 @@ describe("parseDraft", () => {
     expect(d.epics).toEqual([{ title: "Phase 2 Search" }]);
     expect(d.tickets[0]).toEqual({ title: "Profile edit screen", assignee: "Dana", assigneeLinearId: "dana-1", resolved: true, priority: 2, epic: null });
     expect(d.tickets[1]).toEqual({ title: "Favorites RLS", assignee: "Neha", assigneeLinearId: "neha", resolved: true, priority: 1, epic: "Phase 2 Search" });
-    expect(d.questions).toEqual(["Which milestone?"]);
+    expect(d.questions).toEqual([{ question: "Which milestone?", options: [] }]);
   });
 
   test("tolerates a ```json fenced reply with surrounding prose", () => {
@@ -69,5 +69,37 @@ describe("parseDraft", () => {
   test("fails soft on non-JSON and on invalid JSON", () => {
     expect(parseDraft("the model rambled with no json", ROSTER).warnings[0]).toContain("couldn't read a draft");
     expect(parseDraft("{not valid json,,,}", ROSTER).warnings[0]).toContain("wasn't valid JSON");
+  });
+});
+
+describe("MCQ clarification questions", () => {
+  test("parseDraft reads {question,options} MCQ questions and tolerates a plain-string question", () => {
+    const reply = JSON.stringify({ tickets: [{ title: "X", assignee: "Neha", priority: "Low" }], questions: [
+      { question: "Who owns search?", options: ["Kenan Tat", "Roma Rangaswamy"] },
+      "What's the deadline?",
+      { question: "", options: ["ignored"] }, // empty question dropped
+    ] });
+    expect(parseDraft(reply, ROSTER).questions).toEqual([
+      { question: "Who owns search?", options: ["Kenan Tat", "Roma Rangaswamy"] },
+      { question: "What's the deadline?", options: [] },
+    ]);
+  });
+
+  test("draftPrompt folds in prior answers (so the model won't re-ask) and documents the options field", () => {
+    const p = draftPrompt("do the search work", ctx, [{ question: "Who owns search?", answer: "Kenan Tat" }]);
+    expect(p).toContain('"questions":[{"question":str,"options":[str]}]');
+    expect(p).toContain("already answered");
+    expect(p).toContain("Q: Who owns search? → A: Kenan Tat");
+    expect(draftPrompt("x", ctx)).not.toContain("already answered"); // no section when there are no answers
+  });
+
+  test("parseDraftAnswers coerces untrusted answers and drops incomplete pairs", () => {
+    expect(parseDraftAnswers([
+      { question: " Who? ", answer: "Kenan" },
+      { question: "no answer" },
+      { answer: "no question" },
+      "garbage",
+    ])).toEqual([{ question: "Who?", answer: "Kenan" }]);
+    expect(parseDraftAnswers(undefined)).toEqual([]);
   });
 });

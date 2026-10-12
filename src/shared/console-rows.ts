@@ -42,14 +42,14 @@ export function assignRow(s: AssignmentSuggestion) {
 }
 
 /** The full live snapshot spanning all six screens, from already-read store data. Pure. */
-export function consolePayload(issues: LinearIssue[], sweepJobs: SweepJob[], leadOpsProject?: string, leadGithub?: string) {
+export function consolePayload(issues: LinearIssue[], sweepJobs: SweepJob[], leadOpsProject?: string, leadIdent?: string) {
   const loads = activeLoads(issues, ROSTER);
   const ranked = doNext(issues);
   return {
     sweeps: sweepJobs.map(sweepRow),
     boards: ranked.map(boardRow),
     assign: suggestAssignments(ranked, ROSTER, loads).map(assignRow),
-    deskBoard: deskBoard(issues, ROSTER, leadGithub), // Lead Desk v2 board (web console): co-leads, delegated, epics
+    deskBoard: deskBoard(issues, ROSTER, leadIdent), // Lead Desk v2 board (web console): co-leads, delegated, epics
     roster: ROSTER.map(rosterRow),
     rosterLoad: ROSTER.map((m) => ({ name: firstName(m), netid: m.netid, lead: Boolean(m.lead), load: loads.get(m.netid) ?? 0 })),
   };

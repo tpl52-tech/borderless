@@ -59,14 +59,15 @@ export const DELEGATED_LABEL = "lead-delegated";
 export interface CoLeadLoadRow { name: string; netid: string; open: number; blocked: number; }
 
 /**
- * Co-leads' load: the OTHER leads (roster `lead`, minus the current lead matched by github), each with their
- * open assigned count across ALL projects + how many are blocked. Pure — so a lead sees who's slammed before
- * delegating more.
+ * Co-leads' load: the OTHER leads (roster `lead`, minus the current lead), each with their open assigned count
+ * across ALL projects + how many are blocked. Pure — so a lead sees who's slammed before delegating more.
+ * `leadIdent` is the current lead's identifier (config.branchOwner), matched against a member's github OR
+ * netid — branchOwner is a netid for some teams (`tpl52`), a github login for others (`tpl52-tech`).
  */
-export function coLeadLoadRows(issues: LinearIssue[], roster: Member[], leadGithub?: string): CoLeadLoadRow[] {
-  const self = (leadGithub ?? "").toLowerCase();
+export function coLeadLoadRows(issues: LinearIssue[], roster: Member[], leadIdent?: string): CoLeadLoadRow[] {
+  const self = (leadIdent ?? "").toLowerCase();
   return roster
-    .filter((m) => m.lead && m.github.toLowerCase() !== self)
+    .filter((m) => m.lead && m.github.toLowerCase() !== self && m.netid.toLowerCase() !== self)
     .map((m) => {
       const ids = new Set(m.linearIds);
       const open = issues.filter((i) => i.assignee != null && ids.has(i.assignee) && !isTerminalState(i.stateType));
@@ -118,8 +119,8 @@ export function epicRows(issues: LinearIssue[]): EpicRow[] {
 
 /** The whole Lead Desk v2 board (web console): co-lead load, delegated work, epics. Pure. */
 export interface DeskBoard { coLeads: CoLeadLoadRow[]; delegated: DelegatedRow[]; epics: EpicRow[]; }
-export function deskBoard(issues: LinearIssue[], roster: Member[], leadGithub?: string): DeskBoard {
-  return { coLeads: coLeadLoadRows(issues, roster, leadGithub), delegated: delegatedRows(issues, roster), epics: epicRows(issues) };
+export function deskBoard(issues: LinearIssue[], roster: Member[], leadIdent?: string): DeskBoard {
+  return { coLeads: coLeadLoadRows(issues, roster, leadIdent), delegated: delegatedRows(issues, roster), epics: epicRows(issues) };
 }
 
 // --- delegation (PRD §9): capture a task → a Lead Ops issue assigned to a member, + a Slack DM ---------

@@ -59,20 +59,24 @@ export const DELEGATED_LABEL = "lead-delegated";
 export interface CoLeadLoadRow { name: string; netid: string; open: number; blocked: number; }
 
 /**
- * Co-leads' load: the OTHER leads (roster `lead`, minus the current lead), each with their open assigned count
- * across ALL projects + how many are blocked. Pure — so a lead sees who's slammed before delegating more.
- * `leadIdent` is the current lead's identifier (config.branchOwner), matched against a member's github OR
- * netid — branchOwner is a netid for some teams (`tpl52`), a github login for others (`tpl52-tech`).
+ * The current lead's co-leads: the OTHER leads (roster `lead`, minus the lead whose github OR netid matches
+ * `leadIdent` = config.branchOwner, case-insensitive — branchOwner is a netid for some teams (`tpl52`), a
+ * github login for others (`tpl52-tech`)). The one home for "who is a co-lead", shared by the load panel and
+ * the draft's assignable-people list.
  */
-export function coLeadLoadRows(issues: LinearIssue[], roster: Member[], leadIdent?: string): CoLeadLoadRow[] {
+export function coLeads(roster: Member[], leadIdent?: string): Member[] {
   const self = (leadIdent ?? "").toLowerCase();
-  return roster
-    .filter((m) => m.lead && m.github.toLowerCase() !== self && m.netid.toLowerCase() !== self)
-    .map((m) => {
-      const ids = new Set(m.linearIds);
-      const open = issues.filter((i) => i.assignee != null && ids.has(i.assignee) && !isTerminalState(i.stateType));
-      return { name: firstName(m), netid: m.netid, open: open.length, blocked: open.filter((i) => i.blockedBy.length > 0).length };
-    });
+  return roster.filter((m) => m.lead && m.github.toLowerCase() !== self && m.netid.toLowerCase() !== self);
+}
+
+/** Co-leads' load: each co-lead's open assigned count across ALL projects + how many are blocked. Pure — so a
+ *  lead sees who's slammed before delegating more. */
+export function coLeadLoadRows(issues: LinearIssue[], roster: Member[], leadIdent?: string): CoLeadLoadRow[] {
+  return coLeads(roster, leadIdent).map((m) => {
+    const ids = new Set(m.linearIds);
+    const open = issues.filter((i) => i.assignee != null && ids.has(i.assignee) && !isTerminalState(i.stateType));
+    return { name: firstName(m), netid: m.netid, open: open.length, blocked: open.filter((i) => i.blockedBy.length > 0).length };
+  });
 }
 
 /** One row of the DELEGATED panel. */
@@ -126,16 +130,25 @@ export function deskBoard(issues: LinearIssue[], roster: Member[], leadIdent?: s
 // --- delegation (PRD §9): capture a task → a Lead Ops issue assigned to a member, + a Slack DM ---------
 
 /**
+ * Find a roster member by netid, GitHub login, full name, or email (case-insensitive), or null. The
+ * non-throwing core both resolveDelegate (which throws) and the draft's assignee resolver build on, so
+ * "how do we match a name" lives in one place.
+ */
+export function findMember(roster: Member[], who: string): Member | null {
+  const q = who.trim().toLowerCase();
+  return roster.find((r) =>
+    r.netid.toLowerCase() === q ||
+    r.github.toLowerCase() === q ||
+    r.name.toLowerCase() === q ||
+    r.emails.some((e) => e.toLowerCase() === q)) ?? null;
+}
+
+/**
  * Resolve a delegate from the roster by netid, GitHub login, email, or full name (case-insensitive).
  * Throws when `who` matches nobody — delegation must never silently drop a task on no one.
  */
 export function resolveDelegate(roster: Member[], who: string): Member {
-  const q = who.trim().toLowerCase();
-  const m = roster.find((r) =>
-    r.netid.toLowerCase() === q ||
-    r.github.toLowerCase() === q ||
-    r.name.toLowerCase() === q ||
-    r.emails.some((e) => e.toLowerCase() === q));
+  const m = findMember(roster, who);
   if (!m) throw new Error(`lead-desk: no roster member matches "${who}" (try a netid, GitHub login, email, or full name)`);
   return m;
 }

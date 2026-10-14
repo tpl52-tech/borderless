@@ -812,7 +812,9 @@
 
   // ---- VERIFY: open fix/blocked tickets from finished QA verdicts (idempotent; the button always writes) ----
   const vQf = $("v-qafix"), vqfCards = $("vqf-cards"), vqfMeta = $("vqf-meta");
-  const QF_ACTION = { created: ["created", "s-green"], "would-create": ["would create", "s-amber"], "skipped-exists": ["already created", "s-dim"], "skipped-no-parent": ["skipped", "s-amber"], error: ["error", "s-pink"] };
+  // The button always writes, so the sweep never returns the dry-run `would-create` action — the renderer handles
+  // only the write-mode outcomes (an unknown action still falls back gracefully below).
+  const QF_ACTION = { created: ["created", "s-green"], "skipped-exists": ["already created", "s-dim"], "skipped-no-parent": ["skipped", "s-amber"], error: ["error", "s-pink"] };
   const QF_KIND = { fix: "s-pink", blocked: "s-amber" };
 
   const qfCardHtml = (r) => {

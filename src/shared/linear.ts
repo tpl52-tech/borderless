@@ -335,3 +335,80 @@ export function parseIssueCommentsPage(json: unknown): { bodies: string[]; next:
   const next = conn?.pageInfo?.hasNextPage ? (conn.pageInfo.endCursor ?? null) : null;
   return { bodies, next };
 }
+
+// --- QA-fix sweep (PRD §13): a failed Cue QA verdict → a fix ticket under the feature ticket -----------------
+
+/**
+ * One feature ticket's children's descriptions — the idempotency source for the QA-fix sweep. A fix/blocked
+ * ticket is created non-idempotently (unlike a state move), so "already created" can't rest on a separate marker
+ * comment that a partial failure might strand: the marker (`fixMarker(verdictAt)`) lives in the fix ticket's own
+ * description, and the dedupe scans the parent's existing children for it. PAGINATED (`$after`) so the set never
+ * silently truncates; the live caller loops until `next` is null.
+ */
+export const ISSUE_CHILDREN_QUERY = `
+query BorderlessIssueChildren($id: String!, $after: String) {
+  issue(id: $id) {
+    children(first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { description }
+    }
+  }
+}`;
+
+/** Parse one page of {@link ISSUE_CHILDREN_QUERY}: the child descriptions on this page + the next cursor. */
+export function parseIssueChildrenPage(json: unknown): { descriptions: string[]; next: string | null } {
+  const conn = (json as { data?: { issue?: { children?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }; nodes?: Array<{ description?: string | null }> } } } } | null)?.data?.issue?.children;
+  const descriptions = (conn?.nodes ?? []).map((n) => n.description).filter((d): d is string => typeof d === "string");
+  const next = conn?.pageInfo?.hasNextPage ? (conn.pageInfo.endCursor ?? null) : null;
+  return { descriptions, next };
+}
+
+/**
+ * A team's UNSTARTED + BACKLOG workflow states — so a feature ticket whose QA failed can be moved back out of
+ * Verifying. The caller prefers the one named "Todo", else the first `unstarted`, else the first `backlog`
+ * (see {@link pickTodoState}), so the `type` is kept here (unlike {@link WORKFLOW_STATES_QUERY}, which filters
+ * to one type up front).
+ */
+export const TODO_STATES_QUERY = `
+query BorderlessTodoStates($teamKey: String!) {
+  workflowStates(filter: { team: { key: { eq: $teamKey } }, type: { in: ["unstarted", "backlog"] } }, first: 20) {
+    nodes { id name type }
+  }
+}`;
+
+/** One workflow state with its type, from {@link TODO_STATES_QUERY}. */
+export interface TypedWorkflowState { id: string; name: string; type: string }
+
+/** Parse {@link TODO_STATES_QUERY} → the team's unstarted/backlog states (may be empty if none/misconfigured). */
+export function parseTodoStates(json: unknown): TypedWorkflowState[] {
+  const nodes = (json as { data?: { workflowStates?: { nodes?: Array<{ id?: string; name?: string; type?: string }> } } } | null)?.data?.workflowStates?.nodes ?? [];
+  return nodes
+    .filter((n): n is { id: string; name?: string; type?: string } => typeof n.id === "string")
+    .map((n) => ({ id: n.id, name: typeof n.name === "string" ? n.name : "", type: typeof n.type === "string" ? n.type : "" }));
+}
+
+/** Pick the state to move a QA-failed feature ticket to: the one named "Todo", else the first unstarted, else the first backlog. Pure. */
+export function pickTodoState(states: readonly TypedWorkflowState[]): TypedWorkflowState | null {
+  return states.find((s) => s.name.trim().toLowerCase() === "todo")
+    ?? states.find((s) => s.type === "unstarted")
+    ?? states.find((s) => s.type === "backlog")
+    ?? states[0] ?? null;
+}
+
+/** The team id + the `qa-fix` / `qa-blocked` label ids (null ⇒ not created yet; the caller makes it on first use). */
+export const QA_FIX_TARGETS_QUERY = `
+query BorderlessQaFixTargets($teamKey: String!, $fix: String!, $blocked: String!) {
+  teams(filter: { key: { eq: $teamKey } }, first: 1) { nodes { id } }
+  fix: issueLabels(filter: { name: { eq: $fix } }, first: 1) { nodes { id } }
+  blocked: issueLabels(filter: { name: { eq: $blocked } }, first: 1) { nodes { id } }
+}`;
+
+export interface QaFixTargets { teamId: string; fixLabelId: string | null; blockedLabelId: string | null }
+
+/** Parse {@link QA_FIX_TARGETS_QUERY}; throws if the team is missing, leaves missing labels null (created on first use). */
+export function parseQaFixTargets(json: unknown, teamKey: string): QaFixTargets {
+  const data = (json as { data?: { teams?: { nodes?: Array<{ id?: string }> }; fix?: { nodes?: Array<{ id?: string }> }; blocked?: { nodes?: Array<{ id?: string }> } } } | null)?.data;
+  const teamId = data?.teams?.nodes?.[0]?.id;
+  if (!teamId) throw new Error(`qa-fix: no Linear team with key "${teamKey}"`);
+  return { teamId, fixLabelId: data?.fix?.nodes?.[0]?.id ?? null, blockedLabelId: data?.blocked?.nodes?.[0]?.id ?? null };
+}

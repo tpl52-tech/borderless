@@ -95,29 +95,47 @@ export function parseQaRunsRows(raw: unknown): QaVerdictRow[] {
   return out;
 }
 
+/** A run's step tally + the notes on its failed steps (blank notes and passing-step notes dropped). */
+export interface StepSummary {
+  passed: number;
+  failed: number;
+  failNotes: Array<{ step: string; note: string }>;
+}
+
+/**
+ * Summarize a recorded run: how many steps passed/failed, and the non-blank notes on the FAILED steps only
+ * (a passing step's note is noise here). Pure — the single source both the verdict comment (verify-qa-sync) and
+ * the fix-ticket body (verify-qa-fix) read, so the two never drift.
+ */
+export function summarizeSteps(run: QaRun): StepSummary {
+  const steps = run.steps ?? {};
+  const notes = run.notes ?? {};
+  const passed = Object.values(steps).filter((s) => s === "pass").length;
+  const failed = Object.values(steps).filter((s) => s === "fail").length;
+  const failNotes = Object.keys(steps)
+    .filter((k) => steps[k] === "fail")
+    .filter((k) => (notes[k] ?? "").trim())
+    .map((k) => ({ step: k, note: notes[k]!.trim() }));
+  return { passed, failed, failNotes };
+}
+
 /** Build the Linear comment body recording a verdict — a human-readable summary plus the idempotency ref. Pure. */
 export function buildVerdictComment(row: QaVerdictRow): string {
   const { run, verdict, verdictAt } = row;
   const head = verdict === "pass" ? "✅ PASS" : verdict === "fail" ? "❌ FAIL" : "⛔ BLOCKED";
   const who = testerLabel(run.verdictBy);
   const when = new Date(verdictAt).toISOString().slice(0, 10);
-  const steps = run.steps ?? {};
-  const passed = Object.values(steps).filter((s) => s === "pass").length;
-  const failed = Object.values(steps).filter((s) => s === "fail").length;
+  const { passed, failed, failNotes } = summarizeSteps(run);
 
   const lines: string[] = [];
   lines.push(`**Manual QA verdict: ${head}** — recorded by ${who} · ${when}`);
   lines.push("");
   lines.push(`Steps recorded: ${passed} passed, ${failed} failed.`);
 
-  const notes = run.notes ?? {};
-  const noted = Object.keys(steps)
-    .filter((k) => steps[k] === "fail")
-    .filter((k) => (notes[k] ?? "").trim());
-  if (noted.length) {
+  if (failNotes.length) {
     lines.push("");
     lines.push("Notes on failed steps:");
-    for (const k of noted) lines.push(`- Step ${k}: ${notes[k]!.trim()}`);
+    for (const { step, note } of failNotes) lines.push(`- Step ${step}: ${note}`);
   }
 
   lines.push("");

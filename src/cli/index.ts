@@ -37,6 +37,7 @@ import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 import type { VerifyQaResult } from "../shared/verify-qa.ts";
 import type { VerifyQaSyncResult } from "../shared/verify-qa-sync.ts";
+import type { VerifyQaFixResult } from "../shared/verify-qa-fix.ts";
 
 const SUBCOMMANDS = [
   "setup", "daemon", "autonomy", "monitor", "history", "worktree", "pr", "issue", "awake",
@@ -247,6 +248,26 @@ export async function main(argv: string[]): Promise<void> {
           console.log(`  ${mark}  ${r.ticketKey}  [${r.verdict}]${done}  ${tail}`);
         }
         if (!wrote) console.log("\n(dry run — re-run with --write to post these to Linear)");
+      });
+      return;
+    }
+    // `ao verify qa-fix [--write]` — turn each FINISHED Cue QA verdict into follow-up work: a FAIL → a `qa-fix`
+    // ticket under the feature ticket (+ move the feature ticket to Todo); a BLOCKED → a `qa-blocked` ticket.
+    // Unassigned (triage), idempotent. Dry run by default.
+    if (rest[0] === "qa-fix") {
+      const write = rest.includes("--write");
+      await withDaemon("verify", async (client) => {
+        const { results, configured, wrote } = await client.request<VerifyQaFixResult>("verify.qa-fix", { write });
+        if (!configured) { console.log("verify qa-fix: set `linearApiKey` + `linearTeamKeys` + `verifyApp` in ~/.borderless/config.json"); return; }
+        if (results.length === 0) { console.log("verify qa-fix: no failed or blocked tester verdicts to act on"); return; }
+        for (const r of results) {
+          const mark = r.action === "created" ? "✓ created" : r.action === "would-create" ? "• would create" : r.action === "error" ? "✗ error"
+            : r.action === "skipped-exists" ? "· already created" : "· skipped";
+          const moved = r.movedParent ? (r.action === "would-create" ? " + would move feature to Todo" : " + moved feature to Todo") : "";
+          const tail = r.fixKey ? `→ ${r.fixKey}${r.url ? ` ${r.url}` : ""}` : r.detail ? `(${r.detail})` : "";
+          console.log(`  ${mark}  ${r.subKey}  [${r.kind}]${r.parentKey ? ` under ${r.parentKey}` : ""}${moved}  ${tail}`);
+        }
+        if (!wrote) console.log("\n(dry run — re-run with --write to create these in Linear)");
       });
       return;
     }

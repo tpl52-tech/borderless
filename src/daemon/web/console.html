@@ -389,6 +389,12 @@
             <button class="btn xs o-green" id="v-qa" title="Push Cue QA tester verdicts back to their Linear manual-qa sub-issues (comment + move to Done on a pass)">&#8635; Sync to Linear</button></div>
           <div class="pb" id="vqa-cards"><p class="note">the screen-testable half: tester verdicts recorded in <b style="color:var(--green)">Cue QA</b> live in Supabase until they&rsquo;re pushed. Press Sync to carry each one back to its Linear manual-qa sub-issue as a comment, and move the passes to <b style="color:var(--green)">Done</b>. Idempotent &mdash; a re-click never double-posts.</p></div>
         </div>
+
+        <div class="panel p" style="margin-top:1rem">
+          <div class="ph pink"><span>QA_FIXES <span class="ph-meta" id="vqf-meta">&mdash;</span></span>
+            <button class="btn xs o-pink" id="v-qafix" title="Open a fix ticket for each failed QA verdict (and move the feature ticket to Todo); a needs-info ticket for each blocked one">&#9654; Create fix tickets</button></div>
+          <div class="pb" id="vqf-cards"><p class="note">turn finished QA results into work: each <b style="color:var(--pink)">failed</b> verdict opens a <b style="color:var(--green)">qa-fix</b> child of its feature ticket (and moves that feature ticket back to Todo); each <b style="color:var(--amber)">blocked</b> one opens a <b style="color:var(--amber)">qa-blocked</b> needs-info ticket. Unassigned, idempotent.</p></div>
+        </div>
       </section>
 
       <!-- ============ ASK AO (plain chat, not the TUI) ============ -->
@@ -802,5 +808,37 @@
       vqaMeta.textContent = rows.length ? `${synced} SYNCED${toDone ? ` · ${toDone}→DONE` : ""}` : "NONE";
       vqaCards.innerHTML = rows.length ? rows.map(qaCardHtml).join("") : `<p class="note">no tester verdicts recorded yet in Cue QA</p>`;
     } catch { vqaCards.innerHTML = `<p class="note s-pink">sync failed &mdash; is the daemon configured (linearApiKey + verifyApp)?</p>`; }
+  }));
+
+  // ---- VERIFY: open fix/blocked tickets from finished QA verdicts (idempotent; the button always writes) ----
+  const vQf = $("v-qafix"), vqfCards = $("vqf-cards"), vqfMeta = $("vqf-meta");
+  const QF_ACTION = { created: ["created", "s-green"], "would-create": ["would create", "s-amber"], "skipped-exists": ["already created", "s-dim"], "skipped-no-parent": ["skipped", "s-amber"], error: ["error", "s-pink"] };
+  const QF_KIND = { fix: "s-pink", blocked: "s-amber" };
+
+  const qfCardHtml = (r) => {
+    const [label, cls] = QF_ACTION[r.action] || [r.action, "s-ink"];
+    const moved = r.movedParent ? " &rarr; feature to Todo" : "";
+    const made = r.fixKey ? (r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.fixKey)}</a>` : esc(r.fixKey)) : "";
+    const under = r.parentKey ? ` under <b>${esc(r.parentKey)}</b>` : "";
+    const tail = made ? ` &rarr; ${made}` : r.detail ? ` <span class="muted">${esc(r.detail)}</span>` : "";
+    return `<div class="row-card"><div class="rc-top"><span class="st ${cls}">${label}${moved}</span> <b>${esc(r.subKey)}</b> <span class="vr-verd ${QF_KIND[r.kind] || "s-ink"}">${esc(r.kind)}</span>${under}${tail}</div></div>`;
+  };
+
+  vQf.addEventListener("click", () => withBusy(vQf, "⟳ creating…", async () => {
+    vqfCards.innerHTML = `<p class="note">opening fix tickets from failed/blocked QA…</p>`;
+    try {
+      const res = await fetch("/api/verify/qa-fix", { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      if (data.configured === false) {
+        vqfMeta.textContent = "NOT CONFIGURED";
+        vqfCards.innerHTML = `<p class="note">set <b>linearApiKey</b> + <b>linearTeamKeys</b> + <b>verifyApp</b> in ~/.borderless/config.json</p>`;
+        return;
+      }
+      const rows = data.results || [];
+      const made = rows.filter((r) => r.action === "created").length;
+      vqfMeta.textContent = rows.length ? `${made} CREATED` : "NONE";
+      vqfCards.innerHTML = rows.length ? rows.map(qfCardHtml).join("") : `<p class="note">no failed or blocked QA verdicts to act on</p>`;
+    } catch { vqfCards.innerHTML = `<p class="note s-pink">create failed &mdash; is the daemon configured (linearApiKey + verifyApp)?</p>`; }
   }));
 </script>

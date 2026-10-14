@@ -9,7 +9,7 @@
  */
 
 import {
-  parseQaRunsRows, buildVerdictComment, decideWriteback, type QaWritebackResult,
+  parseQaRunsRows, buildVerdictComment, decideWriteback, testerLabel, type QaWritebackResult,
 } from "../shared/verify-qa-sync.ts";
 
 export interface QaWritebackDeps {
@@ -25,6 +25,10 @@ export interface QaWritebackDeps {
   postComment: (issueId: string, body: string) => Promise<string | null>;
   /** Move the sub-issue to the given workflow state (Done). */
   setState: (issueId: string, stateId: string) => Promise<void>;
+  /** The Linear user id the tester (verdictBy) resolves to via the roster, or null when unknown (left unassigned). */
+  assigneeForTester: (verdictBy: string | undefined) => string | null;
+  /** Assign the sub-issue to the given Linear user (marks the manual QA as performed by that tester). */
+  setAssignee: (issueId: string, userId: string) => Promise<void>;
   /** false ⇒ dry run: decide only, never read comments beyond dedupe, never write. */
   write: boolean;
 }
@@ -66,8 +70,12 @@ export async function runQaWriteback(deps: QaWritebackDeps): Promise<QaWriteback
         if (stateId) { await deps.setState(issue.id, stateId); movedToDone = true; }
         else detail = "no Done workflow state found to move to — commented only";
       }
+      // Attribute the manual QA: assign the sub-issue to the tester who recorded the verdict (idempotent — the
+      // same assignee re-set is a no-op). Done before the marker comment, so a failure retries without stranding.
+      const assigneeId = deps.assigneeForTester(row.run.verdictBy);
+      if (assigneeId) await deps.setAssignee(issue.id, assigneeId);
       const url = await deps.postComment(issue.id, buildVerdictComment(row));
-      results.push({ ticketKey: row.ticketKey, verdict: row.verdict, action: "synced", movedToDone, url, ...(detail ? { detail } : {}) });
+      results.push({ ticketKey: row.ticketKey, verdict: row.verdict, action: "synced", movedToDone, url, ...(assigneeId ? { assignedTo: testerLabel(row.run.verdictBy) } : {}), ...(detail ? { detail } : {}) });
     } catch (err) {
       results.push({ ticketKey: row.ticketKey, verdict: row.verdict, action: "error", detail: err instanceof Error ? err.message : String(err) });
     }

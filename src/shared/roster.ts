@@ -79,6 +79,19 @@ export function memberByGithub(login: string): Member | undefined {
   return byGithub.get(login.toLowerCase());
 }
 
+/**
+ * The canonical Linear user id for a Cue QA tester, matched by the tester's first name (e.g. "renee" → Renee
+ * Gowda → her Linear id). Returns the member's FIRST linearId — their primary account (Dana Ryu's two ids
+ * collapse to one member, so "dana" resolves unambiguously). null when no single roster member has that first
+ * name, so a verdict by an unknown tester is simply left unassigned (the writeback comment still credits them).
+ */
+export function testerLinearId(testerId: string | undefined): string | null {
+  const key = (testerId ?? "").trim().toLowerCase();
+  if (!key) return null;
+  const matches = ROSTER.filter((m) => firstName(m).toLowerCase() === key);
+  return matches.length === 1 ? (matches[0]!.linearIds[0] ?? null) : null;
+}
+
 /** Emails to try, in order, against slack.users.lookupByEmail for a Linear user. */
 export function slackLookupEmails(linearId: string): string[] {
   return byLinearId.get(linearId)?.emails ?? [];

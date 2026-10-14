@@ -310,7 +310,10 @@ export function startDaemon(home = stateHome()): Daemon {
   if (config.linearApiKey && teamKey && config.verifyApp) {
     const linear = httpLinearClient(config.linearApiKey);
     const verifyApp = config.verifyApp;
-    runVerifyQaSync = async (write = false) => {
+    // singleFlight keyed on the mode: concurrent write runs — the Sync button racing `ao verify qa-sync --write`,
+    // or two browser tabs — join ONE run instead of both reading comment bodies before either writes its marker
+    // (which would TOCTOU into a duplicate comment). A dry run keys separately so it never joins a write.
+    runVerifyQaSync = singleFlight(async (write = false) => {
       let doneStateIdOnce: Promise<string | null> | null = null; // resolve the Done state at most once per run
       const results = await runQaWriteback({
         readVerdicts: () => readQaRuns(verifyApp),
@@ -325,7 +328,7 @@ export function startDaemon(home = stateHome()): Daemon {
         write,
       });
       return { results, configured: true, wrote: write };
-    };
+    }, (write = false) => (write ? "write" : "dry"));
   }
   const sweepCwd = localCwdFor(config.repo);
   if (config.repo && config.branchOwner && sweepCwd) {

@@ -35,7 +35,9 @@ export interface WebServerDeps {
   verifyRun: () => Promise<VerifyRunResult>;
   /** PRD §13: the screen-testable counterpart — carry Cue QA tester verdicts (Supabase) back to their Linear
    *  manual-qa sub-issues: a comment per verdict + move to Done on a pass. The browser button always writes
-   *  (there is no dry mode from the UI); idempotent on the per-verdict ref marker, so a re-click never double-posts. */
+   *  (there is no dry mode from the UI). Idempotent on the per-verdict ref marker (a re-click after the run is a
+   *  no-op), and concurrent triggers — a second tab, or the Sync button racing `ao verify qa-sync --write` — are
+   *  deduped onto one run upstream (singleFlight), so neither path double-posts. */
   runQaSync: () => Promise<VerifyQaSyncResult>;
   /** PRD §4/§11: run the In-Review sweep from the browser SWEEP button — sync + re-review + enqueue + kick the
    *  engine; the fixer/reviewer agents run server-side in the daemon. Deduped (singleFlight) upstream. */

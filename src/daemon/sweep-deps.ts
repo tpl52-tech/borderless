@@ -284,12 +284,6 @@ export function workerSeed(job: SweepJob, feedback: WorkerFeedback, ctx: WorkerS
   return warning ? `${body}\n\n${warning}` : body;
 }
 
-/**
- * The rescue implement instruction. A spawned worker can't read Linear, so the acceptance criteria (the
- * ticket's synced description) are embedded inline. Falls back to the prior "from its acceptance criteria"
- * phrasing when the description is unknown. (The worktree is already on the canonical ticket branch — the
- * spawn derives it from the ticket key in this seed — so the PR opens where readHeadPr looks.)
- */
 /** Trim + cap an acceptance-criteria block for embedding in a seed (keeps a huge description from bloating it). */
 function clampAcceptance(acceptance: string | null | undefined): string | null {
   const ac = acceptance?.trim();
@@ -297,6 +291,12 @@ function clampAcceptance(acceptance: string | null | undefined): string | null {
   return ac.length > MAX_ACCEPTANCE ? ac.slice(0, MAX_ACCEPTANCE) + "\n…(truncated)" : ac;
 }
 
+/**
+ * The rescue implement instruction. A spawned worker can't read Linear, so the acceptance criteria (the
+ * ticket's synced description) are embedded inline. Falls back to the prior "from its acceptance criteria"
+ * phrasing when the description is unknown. (The worktree is already on the canonical ticket branch — the
+ * spawn derives it from the ticket key in this seed — so the PR opens where readHeadPr looks.)
+ */
 function rescueSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
   const ac = clampAcceptance(ctx.acceptance);
   const criteria = ac ? `Acceptance criteria:\n${ac}` : "Implement it from its acceptance criteria.";

@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import {
-  fixMarker, shouldMoveParent, shouldCloseFeature, buildFixTitle, buildFixBody, buildFixTicketInput, decideFix, actionableVerdicts,
+  fixMarker, shouldCloseFeature, buildFixTitle, buildFixBody, buildFixTicketInput, decideFix, actionableVerdicts,
   QA_FIX_LABEL, QA_BLOCKED_LABEL,
 } from "../src/shared/verify-qa-fix.ts";
 import type { QaVerdictRow } from "../src/shared/verify-qa-sync.ts";
@@ -9,25 +9,13 @@ const AT = 1760054400000;
 const row = (verdict: QaVerdictRow["verdict"], run: Partial<QaVerdictRow["run"]> = {}): QaVerdictRow =>
   ({ ticketKey: "COR-91", verdict, verdictAt: AT, run: { verdict, verdictBy: "dana", verdictAt: AT, ...run } });
 
-describe("shouldMoveParent", () => {
-  test("moves an active feature ticket (started / triage), never a settled or already-out-of-lane one", () => {
-    expect(shouldMoveParent("started")).toBe(true);
-    expect(shouldMoveParent("triage")).toBe(true);
-    expect(shouldMoveParent("unstarted")).toBe(false); // already Todo
-    expect(shouldMoveParent("backlog")).toBe(false);
-    expect(shouldMoveParent("completed")).toBe(false); // never resurrect a Done feature
-    expect(shouldMoveParent("canceled")).toBe(false);
-    expect(shouldMoveParent(null)).toBe(false);
-  });
-});
-
 describe("shouldCloseFeature", () => {
-  test("closes an open feature on a pass, never one already completed/canceled", () => {
+  test("closes an open feature on a pass, never one already completed/canceled or of unknown state", () => {
     expect(shouldCloseFeature("started")).toBe(true);
     expect(shouldCloseFeature("unstarted")).toBe(true); // Todo but QA-verified → Done
     expect(shouldCloseFeature("backlog")).toBe(true);
     expect(shouldCloseFeature("triage")).toBe(true);
-    expect(shouldCloseFeature(null)).toBe(false); // unknown state → cautious, symmetric with shouldMoveParent
+    expect(shouldCloseFeature(null)).toBe(false); // unknown state → cautious
     expect(shouldCloseFeature("completed")).toBe(false);
     expect(shouldCloseFeature("canceled")).toBe(false);
   });
@@ -71,6 +59,11 @@ describe("buildFixTicketInput", () => {
     expect(input).toMatchObject({ teamId: "t1", projectId: "p1", parentId: "u17", labelIds: ["lfix"], title: "T", description: "D", assigneeId: null });
   });
 
+  test("opens in the given Todo state when one is passed, else the team default (omitted)", () => {
+    expect(buildFixTicketInput({ ...base, stateId: "todo-1" }).stateId).toBe("todo-1");
+    expect(buildFixTicketInput(base).stateId).toBeUndefined();
+  });
+
   test("inherits a real priority, omits None/absent", () => {
     expect(buildFixTicketInput({ ...base, parentPriority: 2 }).priority).toBe(2);
     expect(buildFixTicketInput({ ...base, parentPriority: 0 }).priority).toBeUndefined(); // 0 = None
@@ -79,28 +72,22 @@ describe("buildFixTicketInput", () => {
 });
 
 describe("decideFix", () => {
-  test("a fail → a fix ticket that moves an active feature ticket", () => {
-    expect(decideFix(row("fail"), { childDescriptions: [], parentStateType: "started" }))
-      .toEqual({ alreadyExists: false, kind: "fix", moveParent: true });
+  test("a fail → a fix ticket (the feature ticket is not moved)", () => {
+    expect(decideFix(row("fail"), { childDescriptions: [] })).toEqual({ alreadyExists: false, kind: "fix" });
   });
 
-  test("a blocked → a blocked ticket that never moves the feature ticket", () => {
-    expect(decideFix(row("blocked"), { childDescriptions: [], parentStateType: "started" }))
-      .toEqual({ alreadyExists: false, kind: "blocked", moveParent: false });
-  });
-
-  test("a fail whose feature ticket is already settled → still a fix ticket, but no move", () => {
-    expect(decideFix(row("fail"), { childDescriptions: [], parentStateType: "completed" }).moveParent).toBe(false);
+  test("a blocked → a blocked ticket", () => {
+    expect(decideFix(row("blocked"), { childDescriptions: [] })).toEqual({ alreadyExists: false, kind: "blocked" });
   });
 
   test("idempotent: a child already carrying this verdict's marker → alreadyExists", () => {
     const bodies = [`some fix ticket\n_ref ${fixMarker(AT)}_`];
-    expect(decideFix(row("fail"), { childDescriptions: bodies, parentStateType: "started" }).alreadyExists).toBe(true);
+    expect(decideFix(row("fail"), { childDescriptions: bodies }).alreadyExists).toBe(true);
   });
 
   test("a different verdict instance (new verdictAt) is NOT considered existing", () => {
     const bodies = [`_ref ${fixMarker(AT - 1)}_`];
-    expect(decideFix(row("fail"), { childDescriptions: bodies, parentStateType: "started" }).alreadyExists).toBe(false);
+    expect(decideFix(row("fail"), { childDescriptions: bodies }).alreadyExists).toBe(false);
   });
 });
 

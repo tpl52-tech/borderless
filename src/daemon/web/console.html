@@ -392,8 +392,8 @@
 
         <div class="panel p" style="margin-top:1rem">
           <div class="ph pink"><span>QA_FIXES <span class="ph-meta" id="vqf-meta">&mdash;</span></span>
-            <button class="btn xs o-pink" id="v-qafix" title="Drive each feature ticket from its QA verdict: a failed one opens a qa-fix ticket (+ feature → Todo), a blocked one opens a needs-info ticket, a passed one moves the feature to Done">&#9654; Apply QA results</button></div>
-          <div class="pb" id="vqf-cards"><p class="note">turn finished QA results into action: each <b style="color:var(--pink)">failed</b> verdict opens a <b style="color:var(--green)">qa-fix</b> child of its feature ticket (and moves that feature ticket back to Todo); each <b style="color:var(--amber)">blocked</b> one opens a <b style="color:var(--amber)">qa-blocked</b> needs-info ticket; each <b style="color:var(--green)">passed</b> one moves its feature ticket to <b style="color:var(--green)">Done</b>. Unassigned, idempotent.</p></div>
+            <button class="btn xs o-pink" id="v-qafix" title="Drive each feature ticket from its QA verdict: a failed one opens a qa-fix Todo ticket (the feature ticket stays put), a blocked one opens a needs-info ticket, a passed one moves the feature to Done">&#9654; Apply QA results</button></div>
+          <div class="pb" id="vqf-cards"><p class="note">turn finished QA results into action: each <b style="color:var(--pink)">failed</b> verdict opens a <b style="color:var(--green)">qa-fix</b> <b style="color:var(--amber)">Todo</b> child of its feature ticket (the feature ticket itself stays put); each <b style="color:var(--amber)">blocked</b> one opens a <b style="color:var(--amber)">qa-blocked</b> needs-info ticket; each <b style="color:var(--green)">passed</b> one moves its feature ticket to <b style="color:var(--green)">Done</b>. Unassigned, idempotent.</p></div>
         </div>
       </section>
 
@@ -819,11 +819,10 @@
 
   const qfCardHtml = (r) => {
     const [label, cls] = QF_ACTION[r.action] || [r.action, "s-ink"];
-    const moved = r.movedParent ? " &rarr; feature to Todo" : "";
     const made = r.fixKey ? (r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.fixKey)}</a>` : esc(r.fixKey)) : "";
     const under = r.parentKey ? ` under <b>${esc(r.parentKey)}</b>` : "";
     const tail = made ? ` &rarr; ${made}` : r.detail ? ` <span class="muted">${esc(r.detail)}</span>` : "";
-    return `<div class="row-card"><div class="rc-top"><span class="st ${cls}">${label}${moved}</span> <b>${esc(r.subKey)}</b> <span class="vr-verd ${QF_KIND[r.kind] || "s-ink"}">${esc(r.kind)}</span>${under}${tail}</div></div>`;
+    return `<div class="row-card"><div class="rc-top"><span class="st ${cls}">${label}</span> <b>${esc(r.subKey)}</b> <span class="vr-verd ${QF_KIND[r.kind] || "s-ink"}">${esc(r.kind)}</span>${under}${tail}</div></div>`;
   };
 
   vQf.addEventListener("click", () => withBusy(vQf, "⟳ creating…", async () => {

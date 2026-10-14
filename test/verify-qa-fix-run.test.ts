@@ -43,35 +43,35 @@ function deps(over: Partial<QaFixDeps> & {
 }
 
 describe("runQaFixSweep", () => {
-  test("a FAIL opens a qa-fix child of the feature ticket and moves it to Todo", async () => {
+  test("a FAIL opens a qa-fix child in Todo state; the feature ticket stays put", async () => {
     const h = deps();
     const [r] = await runQaFixSweep(h.deps);
-    expect(r).toMatchObject({ subKey: "COR-91", parentKey: "COR-17", kind: "fix", action: "created", movedParent: true, fixKey: "COR-120" });
+    expect(r).toMatchObject({ subKey: "COR-91", parentKey: "COR-17", kind: "fix", action: "created", fixKey: "COR-120" });
     expect(h.created).toHaveLength(1);
-    expect(h.created[0]).toMatchObject({ teamId: "t1", projectId: "p1", parentId: "u17", labelIds: ["lfix"], assigneeId: null });
+    expect(h.created[0]).toMatchObject({ teamId: "t1", projectId: "p1", parentId: "u17", labelIds: ["lfix"], assigneeId: null, stateId: "todo-state" });
     expect(h.created[0]!.description).toContain(fixMarker(AT));
-    expect(h.states).toEqual([{ issueId: "u17", stateId: "todo-state" }]);
+    expect(h.states).toHaveLength(0); // the feature ticket is NOT moved on a fail
   });
 
-  test("move happens BEFORE create (idempotent move first, then the non-idempotent create)", async () => {
+  test("the only writes are the create then the best-effort breadcrumb — no feature-ticket move", async () => {
     const h = deps();
     await runQaFixSweep(h.deps);
-    expect(h.order).toEqual(["move", "create", "comment"]);
+    expect(h.order).toEqual(["create", "comment"]);
   });
 
-  test("a BLOCKED opens a qa-blocked child and never moves the feature ticket", async () => {
+  test("a BLOCKED opens a qa-blocked Todo child and never moves the feature ticket", async () => {
     const h = deps({ raw: [rawRow("COR-95", "blocked")] });
     const [r] = await runQaFixSweep(h.deps);
     expect(r).toMatchObject({ kind: "blocked", action: "created" });
-    expect(r.movedParent).toBeFalsy();
     expect(h.created[0]!.labelIds).toEqual(["lblk"]);
+    expect(h.created[0]!.stateId).toBe("todo-state");
     expect(h.states).toHaveLength(0);
   });
 
-  test("dry run plans would-create (+ the intended move) without writing", async () => {
+  test("dry run plans would-create without writing", async () => {
     const h = deps({ write: false });
     const [r] = await runQaFixSweep(h.deps);
-    expect(r).toMatchObject({ action: "would-create", movedParent: true });
+    expect(r.action).toBe("would-create");
     expect(h.created).toHaveLength(0);
     expect(h.states).toHaveLength(0);
   });
@@ -111,20 +111,21 @@ describe("runQaFixSweep", () => {
     });
   });
 
-  test("a FAIL with no resolvable Todo state still opens the fix ticket, with a detail note", async () => {
+  test("a FAIL with no resolvable Todo state still opens the fix ticket, in the team default state, with a note", async () => {
     const h = deps({ todo: null });
     const [r] = await runQaFixSweep(h.deps);
-    expect(r).toMatchObject({ action: "created", movedParent: false });
+    expect(r.action).toBe("created");
     expect(r.detail).toContain("no Todo workflow state");
     expect(h.created).toHaveLength(1);
+    expect(h.created[0]!.stateId).toBeUndefined(); // opened in the team default state
     expect(h.states).toHaveLength(0);
   });
 
-  test("a failed create still moved the feature (move-first) but posts NO breadcrumb, and surfaces an error", async () => {
+  test("a failed create surfaces an error and posts NO breadcrumb — nothing stranded, no feature move", async () => {
     const h = deps({ createIssue: async () => { throw new Error("Linear 500"); } });
     const [r] = await runQaFixSweep(h.deps);
     expect(r).toMatchObject({ action: "error", detail: "Linear 500" });
-    expect(h.states).toHaveLength(1); // moved first (idempotent) — a re-run re-moves and retries the create
+    expect(h.states).toHaveLength(0); // the feature ticket is never moved on a fail
     expect(h.comments).toHaveLength(0);
   });
 
@@ -199,21 +200,21 @@ describe("runQaFixSweep", () => {
       expect(r.action).toBe("verified");
     });
 
-    test("a PASS does NOT close a feature with a sibling FAIL in the same run — the fail wins → Todo, not Done", async () => {
+    test("a PASS does NOT close a feature with a sibling FAIL in the same run — the feature stays put, never Done", async () => {
       // COR-91 (pass) and COR-95 (fail) both hang under u17.
       const h = deps({ raw: [rawRow("COR-91", "pass"), rawRow("COR-95", "fail")] });
       const results = await runQaFixSweep(h.deps);
       expect(results.find((r) => r.subKey === "COR-91")!).toMatchObject({ action: "skipped-verified" });
       expect(results.find((r) => r.subKey === "COR-91")!.detail).toContain("failing/blocked");
-      expect(results.find((r) => r.subKey === "COR-95")!.action).toBe("created");
-      expect(h.states).toEqual([{ issueId: "u17", stateId: "todo-state" }]); // only the fail's Todo move, never a close
+      expect(results.find((r) => r.subKey === "COR-95")!.action).toBe("created"); // the fail's Todo fix ticket
+      expect(h.states).toHaveLength(0); // the feature is never moved: no close to Done, and a fail doesn't move it
     });
 
-    test("deterministic regardless of row order: the fail still wins when it comes first", async () => {
+    test("deterministic regardless of row order: the pass still defers when the fail comes first", async () => {
       const h = deps({ raw: [rawRow("COR-95", "fail"), rawRow("COR-91", "pass")] });
       const results = await runQaFixSweep(h.deps);
       expect(results.find((r) => r.subKey === "COR-91")!.action).toBe("skipped-verified");
-      expect(h.states).toEqual([{ issueId: "u17", stateId: "todo-state" }]);
+      expect(h.states).toHaveLength(0);
     });
   });
 });

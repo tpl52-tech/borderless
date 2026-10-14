@@ -15,6 +15,7 @@ import { parseCreateRequest, type DeskCreateRequest, type DeskCreateResult } fro
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 import type { VerifyQaSyncResult } from "../shared/verify-qa-sync.ts";
+import type { VerifyQaFixResult } from "../shared/verify-qa-fix.ts";
 import type { Store } from "./store.ts";
 
 export interface WebServerDeps {
@@ -39,6 +40,10 @@ export interface WebServerDeps {
    *  no-op), and concurrent triggers — a second tab, or the Sync button racing `ao verify qa-sync --write` — are
    *  deduped onto one run upstream (singleFlight), so neither path double-posts. */
   runQaSync: () => Promise<VerifyQaSyncResult>;
+  /** PRD §13: the QA-fix sweep — turn FINISHED Cue QA verdicts (FAIL/BLOCKED) into follow-up tickets under the
+   *  feature ticket. The browser button always writes; idempotent (the marker lives in each created ticket's body)
+   *  and deduped onto one run upstream (singleFlight). */
+  runQaFix: () => Promise<VerifyQaFixResult>;
   /** PRD §4/§11: run the In-Review sweep from the browser SWEEP button — sync + re-review + enqueue + kick the
    *  engine; the fixer/reviewer agents run server-side in the daemon. Deduped (singleFlight) upstream. */
   runInReviewSweep: () => Promise<InReviewSweepResult>;
@@ -83,6 +88,9 @@ export function startWebServer(deps: WebServerDeps): WebServer {
       }
       if (pathname === "/api/verify/qa-sync" && req.method === "POST") {
         return Response.json(await deps.runQaSync()); // push Cue QA verdicts → Linear (comment + Done on a pass); idempotent
+      }
+      if (pathname === "/api/verify/qa-fix" && req.method === "POST") {
+        return Response.json(await deps.runQaFix()); // open fix/blocked tickets from failed/blocked QA verdicts; idempotent
       }
       if (pathname === "/api/sweep" && req.method === "POST") {
         return Response.json(await deps.runInReviewSweep()); // enqueue + drive the In-Review sweep (agents run server-side)

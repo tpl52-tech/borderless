@@ -33,6 +33,8 @@ import { runAutoAdvance } from "./verify-advance-run.ts";
 import type { VerifyRunRow } from "../shared/verify-verdict.ts";
 import { runQaSubIssues } from "./verify-qa-run.ts";
 import { runQaWriteback } from "./verify-qa-sync-run.ts";
+import { runQaFixSweep } from "./verify-qa-fix-run.ts";
+import { QA_FIX_LABEL, QA_BLOCKED_LABEL } from "../shared/verify-qa-fix.ts";
 import { QA_LABEL, qaRunsheetPrompt } from "../shared/verify-qa.ts";
 import { openCatalogDb } from "./verify-db.ts";
 import { openAppSession, readQaRuns } from "./verify-session.ts";
@@ -40,7 +42,7 @@ import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
 import { startWebServer, type WebServer } from "./web.ts";
-import { httpLinearClient, syncLinearIssues, fetchQaChildParentKeys, fetchIssueCommentBodies, resolveDoneStateId } from "./linear.ts";
+import { httpLinearClient, syncLinearIssues, fetchQaChildParentKeys, fetchIssueCommentBodies, resolveDoneStateId, fetchIssueChildDescriptions, resolveTodoStateId, resolveQaFixTargets } from "./linear.ts";
 import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate, ISSUE_LABEL_CREATE_MUTATION, parseLabelCreate, DESK_TARGETS_QUERY, parseDeskTargets } from "../shared/linear.ts";
 import { runDeskCreate, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import { verifyRow, type VerifyRow } from "../shared/verify.ts";
@@ -199,6 +201,9 @@ export function startDaemon(home = stateHome()): Daemon {
   // linearApiKey + a team key (the writes + the Done-state lookup) AND verifyApp (the Supabase read); absent any →
   // a no-op. Independent of the dev repo — wired below, outside the repo guard. Dry run by default.
   let runVerifyQaSync: UdsServerDeps["verifyQaSync"] = async () => ({ results: [], configured: false, wrote: false });
+  // PRD §13: the QA-fix sweep — turn FINISHED QA verdicts into follow-up tickets. Same config needs as the
+  // writeback (linearApiKey + team + verifyApp); a no-op otherwise. Wired below, inside that same guard.
+  let runVerifyQaFix: UdsServerDeps["verifyQaFix"] = async () => ({ results: [], configured: false, wrote: false });
   // The local working copy configured for a repo — the checkout a sweep/verify agent spawns its worktree from.
   const localCwdFor = (r: string | undefined) => (r ? config.profiles.find((pr) => pr.repo === r && pr.localCwd)?.localCwd : undefined);
   const teamKey = (config.linearTeamKeys ?? [])[0]; // single-team org: Linear targets/writes resolve on this team
@@ -325,6 +330,35 @@ export function startDaemon(home = stateHome()): Daemon {
         doneStateId: () => (doneStateIdOnce ??= resolveDoneStateId(linear, teamKey)),
         postComment: async (issueId, body) => parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId, body } })).url,
         setState: async (issueId, stateId) => { parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id: issueId, input: { stateId } })); },
+        write,
+      });
+      return { results, configured: true, wrote: write };
+    }, (write = false) => (write ? "write" : "dry"));
+
+    // The QA-fix sweep: a FAIL → a `qa-fix` child of the feature ticket (and the feature ticket moves to Todo);
+    // a BLOCKED → a `qa-blocked` child (feature ticket left in place). Unassigned (triage), idempotent on a marker
+    // in the created ticket's body. The team/labels + Todo state are each resolved at most once per run, lazily.
+    runVerifyQaFix = singleFlight(async (write = false) => {
+      let todoOnce: Promise<string | null> | null = null;
+      let doneOnce: Promise<string | null> | null = null;
+      let targetsOnce: Promise<{ teamId: string; fixLabelId: string; blockedLabelId: string }> | null = null;
+      const results = await runQaFixSweep({
+        readVerdicts: () => readQaRuns(verifyApp),
+        subIssueByKey: (key) => {
+          const i = store.getLinearIssueByIdentifier(key);
+          return i ? { id: i.id, parentId: i.parentId } : undefined;
+        },
+        parentByUuid: (uuid) => {
+          const p = store.getLinearIssue(uuid);
+          return p ? { id: p.id, identifier: p.identifier, title: p.title, projectId: p.projectId, stateType: p.stateType, priority: p.priority } : undefined;
+        },
+        childDescriptions: (parentUuid) => fetchIssueChildDescriptions(linear, parentUuid),
+        targets: () => (targetsOnce ??= resolveQaFixTargets(linear, teamKey, QA_FIX_LABEL, QA_BLOCKED_LABEL)),
+        todoStateId: () => (todoOnce ??= resolveTodoStateId(linear, teamKey)),
+        doneStateId: () => (doneOnce ??= resolveDoneStateId(linear, teamKey)),
+        createIssue: async (input) => { const c = parseIssueCreate(await linear.query(ISSUE_CREATE_MUTATION, { input })); return { ticketKey: c.ticketKey, url: c.url }; },
+        setState: async (issueId, stateId) => { parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id: issueId, input: { stateId } })); },
+        postComment: async (issueId, body) => parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId, body } })).url,
         write,
       });
       return { results, configured: true, wrote: write };
@@ -506,13 +540,13 @@ export function startDaemon(home = stateHome()): Daemon {
   // or a button + a terminal `ao sweep` at once, must join one run, never spawn a duplicate agent fleet.
   const scanInReview = singleFlight(scanInReviewImpl, (stateName) => stateName ?? "In Review");
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, verifyQa: runVerifyQa, verifyQaSync: runVerifyQaSync });
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, verifyQa: runVerifyQa, verifyQaSync: runVerifyQaSync, verifyQaFix: runVerifyQaFix });
 
   // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only. It is
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runInReviewSweep: () => scanInReview("In Review"), deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runQaFix: () => runVerifyQaFix(true), runInReviewSweep: () => scanInReview("In Review"), deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

@@ -383,6 +383,12 @@
             <button class="btn xs o-pink" id="v-run" title="Run the structural backend checks over the read-only DB role (live)">&#9654; Run checks</button></div>
           <div class="pb" id="vr-cards"><p class="note">press Run checks to verify the invisible backend properties against the database &mdash; each ticket gets <b style="color:var(--green)">verified</b> / <b style="color:var(--amber)">needs_human</b> + evidence.</p></div>
         </div>
+
+        <div class="panel g" style="margin-top:1rem">
+          <div class="ph"><span>QA_VERDICTS <span class="ph-meta" id="vqa-meta">&mdash;</span></span>
+            <button class="btn xs o-green" id="v-qa" title="Push Cue QA tester verdicts back to their Linear manual-qa sub-issues (comment + move to Done on a pass)">&#8635; Sync to Linear</button></div>
+          <div class="pb" id="vqa-cards"><p class="note">the screen-testable half: tester verdicts recorded in <b style="color:var(--green)">Cue QA</b> live in Supabase until they&rsquo;re pushed. Press Sync to carry each one back to its Linear manual-qa sub-issue as a comment, and move the passes to <b style="color:var(--green)">Done</b>. Idempotent &mdash; a re-click never double-posts.</p></div>
+        </div>
       </section>
 
       <!-- ============ ASK AO (plain chat, not the TUI) ============ -->
@@ -763,5 +769,36 @@
         ? `<p class="note">no verify DB configured &mdash; set <b>verifyDbUrl</b> (a read-only Postgres role) in ~/.borderless/config.json</p>`
         : rows.length ? advNote + rows.map(verifyCardHtml).join("") : `<p class="note">nothing in Verifying</p>`;
     } catch { vrCards.innerHTML = `<p class="note s-pink">run failed &mdash; is the daemon configured (repo + verifyDbUrl)?</p>`; }
+  }));
+
+  // ---- VERIFY: push Cue QA tester verdicts back to their Linear sub-issues (comment + Done on a pass; idempotent) ----
+  const vQa = $("v-qa"), vqaCards = $("vqa-cards"), vqaMeta = $("vqa-meta");
+  const QA_ACTION = { synced: ["synced", "s-green"], "would-sync": ["would sync", "s-amber"], "skipped-synced": ["already synced", "s-dim"], "skipped-unsynced": ["skipped", "s-amber"], error: ["error", "s-pink"] };
+  const QA_VERDICT = { pass: "s-green", fail: "s-pink", blocked: "s-amber" };
+
+  const qaCardHtml = (r) => {
+    const [label, cls] = QA_ACTION[r.action] || [r.action, "s-ink"];
+    const done = r.movedToDone ? (r.action === "synced" ? " &rarr; Done" : " &rarr; would move to Done") : "";
+    const tail = r.detail ? esc(r.detail) : r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">comment</a>` : "";
+    return `<div class="row-card"><div class="rc-top"><span class="st ${cls}">${label}${done}</span> <b>${esc(r.ticketKey)}</b> <span class="vr-verd ${QA_VERDICT[r.verdict] || "s-ink"}">${esc(r.verdict)}</span>${tail ? ` <span class="muted">${tail}</span>` : ""}</div></div>`;
+  };
+
+  vQa.addEventListener("click", () => withBusy(vQa, "⟳ syncing…", async () => {
+    vqaCards.innerHTML = `<p class="note">pushing tester verdicts to Linear…</p>`;
+    try {
+      const res = await fetch("/api/verify/qa-sync", { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      if (data.configured === false) {
+        vqaMeta.textContent = "NOT CONFIGURED";
+        vqaCards.innerHTML = `<p class="note">set <b>linearApiKey</b> + <b>linearTeamKeys</b> + <b>verifyApp</b> in ~/.borderless/config.json</p>`;
+        return;
+      }
+      const rows = data.results || [];
+      const synced = rows.filter((r) => r.action === "synced").length;
+      const toDone = rows.filter((r) => r.action === "synced" && r.movedToDone).length;
+      vqaMeta.textContent = rows.length ? `${synced} SYNCED${toDone ? ` · ${toDone}→DONE` : ""}` : "NONE";
+      vqaCards.innerHTML = rows.length ? rows.map(qaCardHtml).join("") : `<p class="note">no tester verdicts recorded yet in Cue QA</p>`;
+    } catch { vqaCards.innerHTML = `<p class="note s-pink">sync failed &mdash; is the daemon configured (linearApiKey + verifyApp)?</p>`; }
   }));
 </script>

@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import {
-  ROSTER, buildRosterIndexes, memberByLinearId, memberByGithub, slackLookupEmails, testerLinearId,
+  ROSTER, buildRosterIndexes, memberByLinearId, memberByGithub, slackLookupEmails, testerLinearId, testerMember,
 } from "../src/shared/roster.ts";
 
 const DANA_ER559 = "21964707-6acc-493e-80d5-af0a402af210";
@@ -72,6 +72,13 @@ describe("roster (lead-console PRD §5)", () => {
       expect(testerLinearId("ghost")).toBeNull();
       expect(testerLinearId("")).toBeNull();
       expect(testerLinearId(undefined)).toBeNull();
+    });
+
+    test("testerMember is the single source — id and display name come from one member", () => {
+      const m = testerMember("dana");
+      expect(m!.name).toBe("Dana Ryu");
+      expect(m!.linearIds[0]).toBe(DANA_ER559); // the id testerLinearId returns
+      expect(testerMember("ghost")).toBeNull();
     });
   });
 });

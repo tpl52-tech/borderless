@@ -7,7 +7,7 @@ const rawRow = (ticket_id: string, verdict: string, over: Record<string, unknown
   ({ ticket_id, run: { verdict, verdictBy: "renee", verdictAt: AT, ...over } });
 
 function deps(over: Partial<QaWritebackDeps> & {
-  raw?: unknown; store?: Record<string, { id: string; stateType: string | null }>; comments?: Record<string, string[]>; done?: string | null; assignee?: string | null;
+  raw?: unknown; store?: Record<string, { id: string; stateType: string | null }>; comments?: Record<string, string[]>; done?: string | null; tester?: { userId: string; name: string } | null;
 } = {}): { deps: QaWritebackDeps; comments: Array<{ id: string; body: string }>; states: Array<{ id: string; stateId: string }>; assigned: Array<{ id: string; userId: string }> } {
   const commented: Array<{ id: string; body: string }> = [];
   const states: Array<{ id: string; stateId: string }> = [];
@@ -23,7 +23,7 @@ function deps(over: Partial<QaWritebackDeps> & {
       doneStateId: over.doneStateId ?? (async () => (over.done === undefined ? "done-state" : over.done)),
       postComment: over.postComment ?? (async (id, body) => { commented.push({ id, body }); return `http://c/${commented.length}`; }),
       setState: over.setState ?? (async (id, stateId) => { states.push({ id, stateId }); }),
-      assigneeForTester: over.assigneeForTester ?? (() => over.assignee ?? null),
+      resolveTester: over.resolveTester ?? (() => over.tester ?? null),
       setAssignee: over.setAssignee ?? (async (id, userId) => { assigned.push({ id, userId }); }),
       write: over.write ?? true,
     },
@@ -103,28 +103,44 @@ describe("runQaWriteback", () => {
   });
 
   describe("tester attribution", () => {
-    test("assigns the sub-issue to the resolved tester and notes it by display name", async () => {
-      const h = deps({ raw: [rawRow("COR-96", "pass", { verdictBy: "renee" })], assignee: "u-renee" });
+    const renee = { userId: "u-renee", name: "Renee" };
+
+    test("assigns the sub-issue to the resolved tester and credits the roster display name", async () => {
+      const h = deps({ raw: [rawRow("COR-96", "pass", { verdictBy: "renee" })], tester: renee });
       const [r] = await runQaWriteback(h.deps);
       expect(h.assigned).toEqual([{ id: "u96", userId: "u-renee" }]);
       expect(r.assignedTo).toBe("Renee");
     });
 
+    test("attributes a FAIL verdict too — the tester performed the QA either way", async () => {
+      const h = deps({ raw: [rawRow("COR-96", "fail", { verdictBy: "renee" })], tester: renee });
+      const [r] = await runQaWriteback(h.deps);
+      expect(h.assigned).toEqual([{ id: "u96", userId: "u-renee" }]);
+      expect(r).toMatchObject({ verdict: "fail", action: "synced", assignedTo: "Renee" });
+    });
+
     test("leaves it unassigned (no setAssignee, no assignedTo) when the tester doesn't resolve", async () => {
-      const h = deps({ raw: [rawRow("COR-96", "pass", { verdictBy: "ghost" })], assignee: null });
+      const h = deps({ raw: [rawRow("COR-96", "pass", { verdictBy: "ghost" })], tester: null });
       const [r] = await runQaWriteback(h.deps);
       expect(h.assigned).toHaveLength(0);
       expect(r.assignedTo).toBeUndefined();
     });
 
+    test("a failed setAssignee degrades to a per-row error (never sinks the run)", async () => {
+      const h = deps({ raw: [rawRow("COR-96", "pass")], tester: renee, setAssignee: async () => { throw new Error("assign 500"); } });
+      const [r] = await runQaWriteback(h.deps);
+      expect(r).toMatchObject({ action: "error", detail: "assign 500" });
+      expect(h.comments).toHaveLength(0); // marker not posted → next run retries (assignment is idempotent)
+    });
+
     test("a dry run assigns nothing", async () => {
-      const h = deps({ raw: [rawRow("COR-96", "pass")], assignee: "u-renee", write: false });
+      const h = deps({ raw: [rawRow("COR-96", "pass")], tester: renee, write: false });
       await runQaWriteback(h.deps);
       expect(h.assigned).toHaveLength(0);
     });
 
     test("an already-synced verdict is not re-assigned", async () => {
-      const h = deps({ comments: { u96: [`ref ${verdictMarker(AT)}`] }, assignee: "u-renee" });
+      const h = deps({ comments: { u96: [`ref ${verdictMarker(AT)}`] }, tester: renee });
       await runQaWriteback(h.deps);
       expect(h.assigned).toHaveLength(0);
     });

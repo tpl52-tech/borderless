@@ -290,36 +290,41 @@ export function workerSeed(job: SweepJob, feedback: WorkerFeedback, ctx: WorkerS
  * phrasing when the description is unknown. (The worktree is already on the canonical ticket branch — the
  * spawn derives it from the ticket key in this seed — so the PR opens where readHeadPr looks.)
  */
+/** Trim + cap an acceptance-criteria block for embedding in a seed (keeps a huge description from bloating it). */
+function clampAcceptance(acceptance: string | null | undefined): string | null {
+  const ac = acceptance?.trim();
+  if (!ac) return null;
+  return ac.length > MAX_ACCEPTANCE ? ac.slice(0, MAX_ACCEPTANCE) + "\n…(truncated)" : ac;
+}
+
 function rescueSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
-  const ac = ctx.acceptance?.trim();
-  const criteria = ac
-    ? `Acceptance criteria:\n${ac.length > MAX_ACCEPTANCE ? ac.slice(0, MAX_ACCEPTANCE) + "\n…(truncated)" : ac}`
-    : "Implement it from its acceptance criteria.";
+  const ac = clampAcceptance(ctx.acceptance);
+  const criteria = ac ? `Acceptance criteria:\n${ac}` : "Implement it from its acceptance criteria.";
   return [`Implement Linear ticket ${job.ticketKey}.`, criteria, "Then open a PR."].join("\n\n");
 }
 
-/** The independent-reviewer prompt: a fresh session with no stake, writing a parseable verdict file. */
 /**
  * The independent-reviewer prompt. Both kinds verify the ticket's acceptance criteria against the PR —
  * COMPLETENESS is a gate dimension, not just correctness: an unmet or only-partially-met criterion (a required
- * section/state/field/behavior that's missing) is a BLOCKING finding, so a clean-but-incomplete PR is sent back,
- * not merged. In-review additionally guards against a regression of the author's original behavior. The ACs are
- * embedded because a spawned reviewer has no Linear access to read them. `acceptance` is the ticket's synced
- * description (null when unknown → the reviewer flags that completeness couldn't be confirmed).
+ * section/state/field/behavior that's missing) is a BLOCKING (🔴) finding, so a clean-but-incomplete PR is sent
+ * back, not merged. The PRESERVATION line keeps its per-kind meaning the gate reads (sweep-gate.ts): for
+ * in_review, "proven" = no regression of the author's original behavior; for rescue, "proven" = every acceptance
+ * criterion affirmatively satisfied. The ACs are embedded because a spawned reviewer has no Linear access;
+ * `acceptance` is the ticket's synced description (null → the reviewer flags completeness couldn't be confirmed).
  */
 export function reviewerSeed(job: SweepJob, acceptance: string | null): string {
-  const ac = acceptance?.trim();
-  const regression = job.kind === "in_review"
-    ? " Also assess whether the final diff preserves the author's original behavior (no regression)."
-    : "";
+  const ac = clampAcceptance(acceptance);
+  const preservation = job.kind === "rescue"
+    ? "For PRESERVATION, report 'proven' only if EVERY acceptance criterion is affirmatively satisfied, with evidence."
+    : "For PRESERVATION, report 'proven' only if the final diff preserves the author's original behavior (no regression).";
   return [
     `You are an INDEPENDENT reviewer of PR #${job.prNumber} for ${job.ticketKey}. You did not write it.`,
     "Verify the PR satisfies EVERY acceptance criterion below. An unmet or only-partially-met criterion — a",
     "required section, screen, state, field, or behavior that is missing — is itself a BLOCKING (🔴) finding;",
-    "NEVER pass an incomplete implementation as done." + regression,
-    "Find every other blocking (🔴) issue too.",
+    "NEVER pass an incomplete implementation as done. Find every other blocking (🔴) issue too.",
+    preservation,
     ac
-      ? `\nAcceptance criteria for ${job.ticketKey} — check each one against the PR:\n${ac.length > MAX_ACCEPTANCE ? ac.slice(0, MAX_ACCEPTANCE) + "\n…(truncated)" : ac}`
+      ? `\nAcceptance criteria for ${job.ticketKey} — check each one against the PR:\n${ac}`
       : `\n(No acceptance criteria were available — you could not confirm completeness; flag that and treat it as blocking.)`,
     "",
     "Then write your verdict to the file $AO_SESSION_DIR/verdict.txt as EXACTLY these three lines, nothing else:",

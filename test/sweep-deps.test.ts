@@ -251,19 +251,22 @@ describe("reviewerSeed (acceptance-criteria completeness is a gate dimension)", 
     gate: null, reason: null, createdAt: 0, updatedAt: 0, ...over,
   });
 
-  test("embeds the ACs and makes an unmet criterion blocking; in-review also checks regression", () => {
+  const MARKERS = ["RED FINDINGS:", "PRESERVATION: proven | unproven", "JUDGMENT:"];
+
+  test("embeds the ACs, makes an unmet criterion blocking, keeps all 3 verdict markers; in-review PRESERVATION = no regression", () => {
     const s = reviewerSeed(job(), "- [ ] Recommended/Deals section\n- [ ] New Additions section");
     expect(s).toContain("PR #22 for COR-19");
     expect(s).toContain("NEVER pass an incomplete implementation");
     expect(s).toContain("Recommended/Deals section"); // the ACs are embedded for the reviewer to check
-    expect(s).toContain("no regression");              // in-review guards the author's original behavior
-    expect(s).toContain("RED FINDINGS:");
+    expect(s).toContain("no regression");              // in-review PRESERVATION guards the original behavior
+    for (const m of MARKERS) expect(s).toContain(m);
   });
 
-  test("rescue checks completeness but NOT regression (no original behavior to preserve)", () => {
+  test("rescue PRESERVATION = every AC affirmatively satisfied (NOT regression); 3 markers intact", () => {
     const s = reviewerSeed(job({ kind: "rescue" }), "- [ ] build it");
-    expect(s).toContain("EVERY acceptance criterion");
-    expect(s).not.toContain("no regression");
+    expect(s).toContain("EVERY acceptance criterion is affirmatively satisfied"); // the gate reads this as 'acceptance-proven'
+    expect(s).not.toContain("no regression");          // rescue has no original behavior to preserve
+    for (const m of MARKERS) expect(s).toContain(m);
   });
 
   test("no/blank ACs → flags that completeness couldn't be confirmed and treats it as blocking", () => {

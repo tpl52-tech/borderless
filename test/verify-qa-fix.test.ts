@@ -27,7 +27,7 @@ describe("shouldCloseFeature", () => {
     expect(shouldCloseFeature("unstarted")).toBe(true); // Todo but QA-verified → Done
     expect(shouldCloseFeature("backlog")).toBe(true);
     expect(shouldCloseFeature("triage")).toBe(true);
-    expect(shouldCloseFeature(null)).toBe(true);
+    expect(shouldCloseFeature(null)).toBe(false); // unknown state → cautious, symmetric with shouldMoveParent
     expect(shouldCloseFeature("completed")).toBe(false);
     expect(shouldCloseFeature("canceled")).toBe(false);
   });

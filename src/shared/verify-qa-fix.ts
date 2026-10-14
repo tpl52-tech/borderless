@@ -94,9 +94,9 @@ export function shouldMoveParent(parentStateType: string | null): boolean {
 /** State types from which a PASS should NOT move the feature ticket to Done: it's already closed. */
 const CLOSED_STATE_TYPES = new Set(["completed", "canceled"]);
 
-/** Close the feature ticket on a pass unless it's already completed/canceled (moving to Done is idempotent otherwise). Pure. */
+/** Close the feature ticket on a pass only when it has a known, non-closed state — symmetric with {@link shouldMoveParent}'s caution on an unknown state. Pure. */
 export function shouldCloseFeature(parentStateType: string | null): boolean {
-  return parentStateType == null || !CLOSED_STATE_TYPES.has(parentStateType);
+  return parentStateType != null && !CLOSED_STATE_TYPES.has(parentStateType);
 }
 
 /** The fix/blocked ticket title. Pure. */

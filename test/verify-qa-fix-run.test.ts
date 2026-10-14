@@ -146,7 +146,15 @@ describe("runQaFixSweep", () => {
   });
 
   test("the __probe row is dropped; real verdicts (incl. PASS) are processed", async () => {
-    const h = deps({ raw: [{ ticket_id: "__probe", run: { verdict: "fail", verdictAt: AT } }, rawRow("COR-91", "fail"), rawRow("COR-95", "pass")] });
+    // distinct parents so the within-run fail-wins gate doesn't couple the two
+    const h = deps({
+      raw: [{ ticket_id: "__probe", run: { verdict: "fail", verdictAt: AT } }, rawRow("COR-91", "fail"), rawRow("COR-95", "pass")],
+      subs: { "COR-91": { id: "u91", parentId: "u17" }, "COR-95": { id: "u95", parentId: "u18" } },
+      parents: {
+        u17: { id: "u17", identifier: "COR-17", title: "A", projectId: "p1", stateType: "started", priority: 0 },
+        u18: { id: "u18", identifier: "COR-18", title: "B", projectId: "p1", stateType: "started", priority: 0 },
+      },
+    });
     const results = await runQaFixSweep(h.deps);
     expect(results.map((r) => `${r.subKey}:${r.action}`)).toEqual(["COR-91:created", "COR-95:verified"]);
   });
@@ -189,6 +197,23 @@ describe("runQaFixSweep", () => {
       const h = deps({ raw: [rawRow("COR-91", "pass")], ...passParent("started", null) });
       const [r] = await runQaFixSweep(h.deps);
       expect(r.action).toBe("verified");
+    });
+
+    test("a PASS does NOT close a feature with a sibling FAIL in the same run — the fail wins → Todo, not Done", async () => {
+      // COR-91 (pass) and COR-95 (fail) both hang under u17.
+      const h = deps({ raw: [rawRow("COR-91", "pass"), rawRow("COR-95", "fail")] });
+      const results = await runQaFixSweep(h.deps);
+      expect(results.find((r) => r.subKey === "COR-91")!).toMatchObject({ action: "skipped-verified" });
+      expect(results.find((r) => r.subKey === "COR-91")!.detail).toContain("failing/blocked");
+      expect(results.find((r) => r.subKey === "COR-95")!.action).toBe("created");
+      expect(h.states).toEqual([{ issueId: "u17", stateId: "todo-state" }]); // only the fail's Todo move, never a close
+    });
+
+    test("deterministic regardless of row order: the fail still wins when it comes first", async () => {
+      const h = deps({ raw: [rawRow("COR-95", "fail"), rawRow("COR-91", "pass")] });
+      const results = await runQaFixSweep(h.deps);
+      expect(results.find((r) => r.subKey === "COR-91")!.action).toBe("skipped-verified");
+      expect(h.states).toEqual([{ issueId: "u17", stateId: "todo-state" }]);
     });
   });
 });

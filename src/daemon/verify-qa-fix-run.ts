@@ -48,6 +48,15 @@ export interface QaFixDeps {
 /** Run the QA-fix sweep: read the verdicts, then drive each feature ticket — FAIL/BLOCKED opens a ticket, PASS closes it. */
 export async function runQaFixSweep(deps: QaFixDeps): Promise<QaFixResult[]> {
   const rows = actionableVerdicts(await deps.readVerdicts());
+  // Parents that have a FAIL/BLOCKED in THIS run — a sibling PASS must not close them (the fail/blocked outcome,
+  // Todo + a qa-fix ticket, wins). Precomputed so the PASS path is deterministic regardless of row order: without
+  // this, a parent with both a pass and a fail would end Done or Todo depending on which Supabase row came first.
+  const parentsWithOpenWork = new Set<string>();
+  for (const row of rows) {
+    if (row.verdict === "pass") continue;
+    const sub = deps.subIssueByKey(row.ticketKey);
+    if (sub?.parentId) parentsWithOpenWork.add(sub.parentId);
+  }
   const results: QaFixResult[] = [];
   for (const row of rows) {
     const kind: QaFixKind = row.verdict === "fail" ? "fix" : row.verdict === "blocked" ? "blocked" : "pass";
@@ -68,6 +77,10 @@ export async function runQaFixSweep(deps: QaFixDeps): Promise<QaFixResult[]> {
     try {
       // PASS → close the feature ticket (QA verified it). No ticket, no dedupe — a move to Done is idempotent.
       if (row.verdict === "pass") {
+        if (parentsWithOpenWork.has(sub.parentId)) {
+          results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind: "pass", action: "skipped-verified", detail: "a failing/blocked QA item under this feature is being handled this run" });
+          continue;
+        }
         if (!shouldCloseFeature(parent.stateType)) {
           results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind: "pass", action: "skipped-verified", detail: "feature ticket already closed" });
           continue;

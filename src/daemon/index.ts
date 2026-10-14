@@ -310,7 +310,10 @@ export function startDaemon(home = stateHome()): Daemon {
   if (config.linearApiKey && teamKey && config.verifyApp) {
     const linear = httpLinearClient(config.linearApiKey);
     const verifyApp = config.verifyApp;
-    runVerifyQaSync = async (write = false) => {
+    // singleFlight keyed on the mode: concurrent write runs — the Sync button racing `ao verify qa-sync --write`,
+    // or two browser tabs — join ONE run instead of both reading comment bodies before either writes its marker
+    // (which would TOCTOU into a duplicate comment). A dry run keys separately so it never joins a write.
+    runVerifyQaSync = singleFlight(async (write = false) => {
       let doneStateIdOnce: Promise<string | null> | null = null; // resolve the Done state at most once per run
       const results = await runQaWriteback({
         readVerdicts: () => readQaRuns(verifyApp),
@@ -325,7 +328,7 @@ export function startDaemon(home = stateHome()): Daemon {
         write,
       });
       return { results, configured: true, wrote: write };
-    };
+    }, (write = false) => (write ? "write" : "dry"));
   }
   const sweepCwd = localCwdFor(config.repo);
   if (config.repo && config.branchOwner && sweepCwd) {
@@ -509,7 +512,7 @@ export function startDaemon(home = stateHome()): Daemon {
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runInReviewSweep: () => scanInReview("In Review"), deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runInReviewSweep: () => scanInReview("In Review"), deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

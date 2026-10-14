@@ -14,6 +14,7 @@ import { parseDraftAnswers, type DeskDraftResponse, type DraftAnswer } from "../
 import { parseCreateRequest, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
+import type { VerifyQaSyncResult } from "../shared/verify-qa-sync.ts";
 import type { Store } from "./store.ts";
 
 export interface WebServerDeps {
@@ -32,6 +33,12 @@ export interface WebServerDeps {
   verifyScan: () => Promise<VerifyScanResult>;
   /** PRD §13 V2b: run the structural checks over the read-only DB role → a verdict per Verifying ticket. */
   verifyRun: () => Promise<VerifyRunResult>;
+  /** PRD §13: the screen-testable counterpart — carry Cue QA tester verdicts (Supabase) back to their Linear
+   *  manual-qa sub-issues: a comment per verdict + move to Done on a pass. The browser button always writes
+   *  (there is no dry mode from the UI). Idempotent on the per-verdict ref marker (a re-click after the run is a
+   *  no-op), and concurrent triggers — a second tab, or the Sync button racing `ao verify qa-sync --write` — are
+   *  deduped onto one run upstream (singleFlight), so neither path double-posts. */
+  runQaSync: () => Promise<VerifyQaSyncResult>;
   /** PRD §4/§11: run the In-Review sweep from the browser SWEEP button — sync + re-review + enqueue + kick the
    *  engine; the fixer/reviewer agents run server-side in the daemon. Deduped (singleFlight) upstream. */
   runInReviewSweep: () => Promise<InReviewSweepResult>;
@@ -73,6 +80,9 @@ export function startWebServer(deps: WebServerDeps): WebServer {
       }
       if (pathname === "/api/verify/run" && req.method === "POST") {
         return Response.json(await deps.verifyRun()); // executes the catalog checks over the read-only role
+      }
+      if (pathname === "/api/verify/qa-sync" && req.method === "POST") {
+        return Response.json(await deps.runQaSync()); // push Cue QA verdicts → Linear (comment + Done on a pass); idempotent
       }
       if (pathname === "/api/sweep" && req.method === "POST") {
         return Response.json(await deps.runInReviewSweep()); // enqueue + drive the In-Review sweep (agents run server-side)

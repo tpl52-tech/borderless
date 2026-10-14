@@ -3,10 +3,10 @@
  * of verify-qa-sync.ts: that carries a verdict back onto the manual-QA sub-issue (comment; Done on a pass); this
  * takes the actionable verdicts — a FAIL or a BLOCKED — and shapes a new ticket for the dev team.
  *
- *   FAIL    → a `qa-fix`-labelled ticket (the failed steps + tester notes) hung under the feature ticket, and the
- *             feature ticket is moved back out of Verifying (→ Todo).
- *   BLOCKED → a separate `qa-blocked` ("needs-info / unblock") ticket under the feature ticket; the feature ticket
- *             is left in place (blocked ≠ failed — a human decides what unblocks it).
+ *   FAIL    → a `qa-fix`-labelled ticket (the failed steps + tester notes), created with status Todo, hung under
+ *             the feature ticket. The feature ticket itself is left in place (it stays in Verifying as the umbrella).
+ *   BLOCKED → a separate `qa-blocked` ("needs-info / unblock") Todo ticket under the feature ticket; the feature
+ *             ticket is left in place (blocked ≠ failed — a human decides what unblocks it).
  *   PASS    → the feature ticket is moved to Done (QA verified it); no ticket is created. (verify-qa-sync
  *             separately moves the manual-QA SUB-issue to Done; this closes the parent feature ticket.)
  *
@@ -52,8 +52,6 @@ export interface QaFixResult {
   /** The created fix/blocked ticket's key (on `created`). */
   fixKey?: string;
   url?: string | null;
-  /** true when the feature ticket was moved back out of Verifying (→ Todo) — only ever for a `fix`. */
-  movedParent?: boolean;
   detail?: string;
 }
 
@@ -70,8 +68,6 @@ export interface FixDecision {
   /** A child of the feature ticket already carries this verdict's marker — nothing to do. */
   alreadyExists: boolean;
   kind: QaFixKind;
-  /** Move the feature ticket back out of Verifying — only for a `fix`, and only when it's still active. */
-  moveParent: boolean;
 }
 
 /**
@@ -83,18 +79,10 @@ export function fixMarker(verdictAt: number): string {
   return `ao-qa-fix:${verdictAt}`;
 }
 
-/** The feature-ticket state types from which a QA fail should NOT drag it to Todo: already settled or already out of the active lane. */
-const SETTLED_STATE_TYPES = new Set(["backlog", "unstarted", "completed", "canceled"]);
-
-/** Move the feature ticket on a fail only while it's still active (a `started`/`triage` state, e.g. Verifying) — never resurrect a Done/Canceled ticket or re-move one already in Todo. Pure. */
-export function shouldMoveParent(parentStateType: string | null): boolean {
-  return parentStateType != null && !SETTLED_STATE_TYPES.has(parentStateType);
-}
-
 /** State types from which a PASS should NOT move the feature ticket to Done: it's already closed. */
 const CLOSED_STATE_TYPES = new Set(["completed", "canceled"]);
 
-/** Close the feature ticket on a pass only when it has a known, non-closed state — symmetric with {@link shouldMoveParent}'s caution on an unknown state. Pure. */
+/** Close the feature ticket on a pass only when it has a known, non-closed state (cautious on an unknown/null state). Pure. */
 export function shouldCloseFeature(parentStateType: string | null): boolean {
   return parentStateType != null && !CLOSED_STATE_TYPES.has(parentStateType);
 }
@@ -133,7 +121,7 @@ export function buildFixBody(kind: QaFixKind, row: QaVerdictRow, links: { parent
   return lines.join("\n");
 }
 
-/** Shape the Linear issueCreate input for a QA-fix/blocked ticket: an unassigned, labelled child in the feature ticket's project, inheriting its priority. Pure. */
+/** Shape the Linear issueCreate input for a QA-fix/blocked ticket: an unassigned, labelled, Todo-status child in the feature ticket's project, inheriting its priority. Pure. */
 export function buildFixTicketInput(args: {
   teamId: string;
   projectId: string;
@@ -143,29 +131,32 @@ export function buildFixTicketInput(args: {
   description: string;
   /** The feature ticket's Linear priority (0..4); inherited when set (>0), else left at the team default (None). */
   parentPriority?: number | null;
+  /** The workflow-state id the new ticket opens in (the team's Todo state); omitted ⇒ the team default state. */
+  stateId?: string;
 }): IssueCreateInput {
   const base = buildQaSubIssueInput({
     teamId: args.teamId, projectId: args.projectId, parentId: args.parentId,
     labelId: args.labelId, title: args.title, description: args.description,
   });
+  const withState = args.stateId ? { ...base, stateId: args.stateId } : base;
   return typeof args.parentPriority === "number" && args.parentPriority > 0
-    ? { ...base, priority: args.parentPriority }
-    : base;
+    ? { ...withState, priority: args.parentPriority }
+    : withState;
 }
 
 /**
  * Decide what one actionable verdict needs. Idempotent on the marker: if a child of the feature ticket already
- * carries it, skip entirely. A FAIL becomes a fix ticket and moves the feature ticket out of an active lane; a
- * BLOCKED becomes a needs-info ticket and never moves the feature ticket. Pure.
+ * carries it, skip entirely. A FAIL becomes a `fix` ticket, a BLOCKED a `blocked` (needs-info) ticket; neither
+ * moves the feature ticket (it stays in place). Pure.
  */
 export function decideFix(
   row: QaVerdictRow,
-  ctx: { childDescriptions: readonly string[]; parentStateType: string | null },
+  ctx: { childDescriptions: readonly string[] },
 ): FixDecision {
   const kind: QaFixKind = row.verdict === "fail" ? "fix" : "blocked";
   const marker = fixMarker(row.verdictAt);
   const alreadyExists = ctx.childDescriptions.some((d) => d.includes(marker));
-  return { alreadyExists, kind, moveParent: kind === "fix" && shouldMoveParent(ctx.parentStateType) };
+  return { alreadyExists, kind };
 }
 
 /** The verdicts the QA-fix sweep drives the feature ticket from: every recorded one — a FAIL/BLOCKED opens a ticket, a PASS closes the feature ticket. (Equivalent to the parsed rows; a named seam the runner reads through.) */

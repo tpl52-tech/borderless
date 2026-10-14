@@ -1,17 +1,18 @@
 /**
  * QA-fix sweep runner (PRD §13) — the thin live orchestration over the verify-qa-fix brain: read the tester
- * verdicts Cue QA saved to Supabase, and for each actionable one (a FAIL or a BLOCKED) open the follow-up ticket
- * under its feature ticket. Idempotent, and safe-by-default (a dry run plans without writing).
+ * verdicts Cue QA saved to Supabase, and drive each feature ticket. A FAIL/BLOCKED opens a follow-up ticket (in
+ * the team's Todo state) under the feature ticket, which itself stays put; a PASS closes the feature ticket (→
+ * Done). Idempotent, and safe-by-default (a dry run plans without writing).
  *
  * All I/O is injected (the Supabase read, two store lookups, the children-descriptions read, the team/label +
- * Todo-state resolution, and the three writes), so the control flow is unit-tested with fakes; index.ts wires
- * the live ones.
+ * Todo/Done-state resolution, and the three writes), so the control flow is unit-tested with fakes; index.ts
+ * wires the live ones.
  *
- * Ordering matters because a create is NOT idempotent. Per actionable verdict, in WRITE mode: move the feature
- * ticket to Todo FIRST (a `setState` is idempotent, so a later failure just re-moves it), then create the ticket
- * (whose description carries the `fixMarker` — the create is the dedupe artifact, so a create that succeeds can
- * never be re-made), then drop a best-effort breadcrumb comment on the sub-issue LAST (non-fatal: the ticket
- * already exists, and the dedupe reads the feature ticket's children, not this comment).
+ * Idempotency, since a create is NOT idempotent: the `fixMarker` lives in the created ticket's description, and
+ * the dedupe scans the feature ticket's children for it — the create is the dedupe artifact, so a create that
+ * succeeds can never be re-made and a create that fails strands nothing. The breadcrumb comment on the sub-issue
+ * is a best-effort LAST step (non-fatal: the dedupe reads the children, not this comment). The PASS close is a
+ * plain idempotent `setState` (no artifact), gated so a feature with a failing sibling this run is not closed.
  */
 
 import {
@@ -25,19 +26,19 @@ export interface QaFixDeps {
   readVerdicts: () => Promise<unknown>;
   /** The synced manual-QA sub-issue by key → its UUID + its parent feature ticket's UUID; undefined ⇒ not in the store. */
   subIssueByKey: (key: string) => { id: string; parentId: string | null } | undefined;
-  /** The feature ticket by UUID → the fields needed to file + move it; undefined ⇒ not in the store. */
+  /** The feature ticket by UUID → the fields needed to file the fix + close it; undefined ⇒ not in the store. */
   parentByUuid: (uuid: string) => { id: string; identifier: string; title: string; projectId: string | null; stateType: string | null; priority: number | null } | undefined;
   /** The feature ticket's existing children's descriptions (the idempotency source — a child carries the marker). */
   childDescriptions: (parentUuid: string) => Promise<string[]>;
   /** The team id + the `qa-fix` / `qa-blocked` label ids (resolved/created once, lazily). */
   targets: () => Promise<{ teamId: string; fixLabelId: string; blockedLabelId: string }>;
-  /** The team's "Todo" workflow-state id (resolved once, lazily); null ⇒ none to move the feature ticket to. */
+  /** The team's "Todo" workflow-state id — the state a new fix/blocked ticket OPENS in (resolved once, lazily); null ⇒ the team default state. */
   todoStateId: () => Promise<string | null>;
   /** The team's "Done" workflow-state id (where a QA-passed feature ticket moves; resolved once, lazily); null ⇒ none. */
   doneStateId: () => Promise<string | null>;
   /** Create the fix/blocked ticket → its key + url. */
   createIssue: (input: IssueCreateInput) => Promise<{ ticketKey: string; url: string | null }>;
-  /** Move the feature ticket to the given workflow state (Todo). */
+  /** Move the feature ticket to the given workflow state (Done, on a PASS). */
   setState: (issueId: string, stateId: string) => Promise<void>;
   /** Best-effort breadcrumb on the sub-issue pointing at the new ticket (non-authoritative; failure is non-fatal). */
   postComment: (issueId: string, body: string) => Promise<string | null>;
@@ -105,25 +106,20 @@ export async function runQaFixSweep(deps: QaFixDeps): Promise<QaFixResult[]> {
         continue;
       }
       const descriptions = await deps.childDescriptions(parent.id);
-      const decision = decideFix(row, { childDescriptions: descriptions, parentStateType: parent.stateType });
+      const decision = decideFix(row, { childDescriptions: descriptions });
       if (decision.alreadyExists) {
         results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind, action: "skipped-exists" });
         continue;
       }
       if (!deps.write) {
-        results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind, action: "would-create", movedParent: decision.moveParent });
+        results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind, action: "would-create" });
         continue;
       }
 
-      // Move FIRST (idempotent), then create (the dedupe artifact), then breadcrumb (best-effort) — see header.
-      let movedParent = false;
-      let detail: string | undefined;
-      if (decision.moveParent) {
-        const stateId = await deps.todoStateId();
-        if (stateId) { await deps.setState(parent.id, stateId); movedParent = true; }
-        else detail = "no Todo workflow state found — ticket opened, feature ticket not moved";
-      }
-
+      // The fix/blocked ticket is the actionable item, so it opens in the team's Todo state; the feature ticket
+      // itself is NOT moved (it stays in Verifying as the umbrella). Create is the dedupe artifact (its body holds
+      // the marker), so a failed create strands nothing; the breadcrumb on the sub-issue is a best-effort last step.
+      const todoId = await deps.todoStateId();
       const t = await deps.targets();
       const labelId = decision.kind === "fix" ? t.fixLabelId : t.blockedLabelId;
       const input = buildFixTicketInput({
@@ -131,6 +127,7 @@ export async function runQaFixSweep(deps: QaFixDeps): Promise<QaFixResult[]> {
         title: buildFixTitle(decision.kind, parent.title),
         description: buildFixBody(decision.kind, row, { parentKey: parent.identifier, subKey: row.ticketKey }),
         parentPriority: parent.priority,
+        stateId: todoId ?? undefined,
       });
       const created = await deps.createIssue(input);
 
@@ -138,7 +135,7 @@ export async function runQaFixSweep(deps: QaFixDeps): Promise<QaFixResult[]> {
         await deps.postComment(sub.id, `Opened **${created.ticketKey}** from this QA ${decision.kind === "fix" ? "fail" : "block"} — ao.`);
       } catch { /* non-fatal: the ticket (the dedupe artifact) exists; the breadcrumb is a convenience */ }
 
-      results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind: decision.kind, action: "created", fixKey: created.ticketKey, url: created.url, movedParent, ...(detail ? { detail } : {}) });
+      results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind: decision.kind, action: "created", fixKey: created.ticketKey, url: created.url, ...(todoId ? {} : { detail: "no Todo workflow state found — opened in the team default state" }) });
     } catch (err) {
       results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind, action: "error", detail: err instanceof Error ? err.message : String(err) });
     }

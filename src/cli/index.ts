@@ -269,9 +269,8 @@ export async function main(argv: string[]): Promise<void> {
             : r.action === "skipped-exists" ? "· already created"
             : r.action === "skipped-verified" ? "· already verified"
             : "· skipped";
-          const moved = r.movedParent ? (r.action === "would-create" ? " + would move feature to Todo" : " + moved feature to Todo") : "";
           const tail = r.fixKey ? `→ ${r.fixKey}${r.url ? ` ${r.url}` : ""}` : r.detail ? `(${r.detail})` : "";
-          console.log(`  ${mark}  ${r.subKey}  [${r.kind}]${r.parentKey ? ` under ${r.parentKey}` : ""}${moved}  ${tail}`);
+          console.log(`  ${mark}  ${r.subKey}  [${r.kind}]${r.parentKey ? ` under ${r.parentKey}` : ""}  ${tail}`);
         }
         if (!wrote) console.log("\n(dry run — re-run with --write to apply these in Linear)");
       });

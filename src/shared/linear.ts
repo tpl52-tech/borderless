@@ -243,6 +243,8 @@ export interface IssueCreateInput {
   parentId?: string;
   /** Optional: label UUIDs to attach on create (the manual-QA child gets the `manual-qa` label). */
   labelIds?: string[];
+  /** Optional: the workflow-state id to open the issue in (a qa-fix ticket opens in Todo); omitted ⇒ the team default. */
+  stateId?: string;
 }
 
 export interface CreatedIssue { id: string; ticketKey: string; url: string | null; }

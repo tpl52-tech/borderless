@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { checkStates, parseReviewVerdict, needsHydration, isRestingWithPr, reReviewAdvancedPrs, workerSeed } from "../src/daemon/sweep-deps.ts";
+import { checkStates, parseReviewVerdict, needsHydration, isRestingWithPr, reReviewAdvancedPrs, workerSeed, reviewerSeed } from "../src/daemon/sweep-deps.ts";
 import type { Store } from "../src/daemon/store.ts";
 import type { SweepJob } from "../src/shared/types.ts";
 import type { WorkerFeedback } from "../src/daemon/sweep-engine.ts";
@@ -241,5 +241,40 @@ describe("workerSeed (PRD §5/§4 — rescue embeds the ACs; in-review drives th
     const fix = workerSeed(job({ kind: "in_review", prNumber: 7 }), fb, { territory });
     expect(fix).toContain("Drive PR #7");
     expect(fix).toContain("ConditionStars — owned by COR-54");
+  });
+});
+
+describe("reviewerSeed (acceptance-criteria completeness is a gate dimension)", () => {
+  const job = (over: Partial<SweepJob> = {}): SweepJob => ({
+    id: "j", kind: "in_review", ticketId: "t", ticketKey: "COR-19", assignee: null,
+    prNumber: 22, headSha: "h", sessionId: null, state: "reviewing", cycles: 0,
+    gate: null, reason: null, createdAt: 0, updatedAt: 0, ...over,
+  });
+
+  test("embeds the ACs and makes an unmet criterion blocking; in-review also checks regression", () => {
+    const s = reviewerSeed(job(), "- [ ] Recommended/Deals section\n- [ ] New Additions section");
+    expect(s).toContain("PR #22 for COR-19");
+    expect(s).toContain("NEVER pass an incomplete implementation");
+    expect(s).toContain("Recommended/Deals section"); // the ACs are embedded for the reviewer to check
+    expect(s).toContain("no regression");              // in-review guards the author's original behavior
+    expect(s).toContain("RED FINDINGS:");
+  });
+
+  test("rescue checks completeness but NOT regression (no original behavior to preserve)", () => {
+    const s = reviewerSeed(job({ kind: "rescue" }), "- [ ] build it");
+    expect(s).toContain("EVERY acceptance criterion");
+    expect(s).not.toContain("no regression");
+  });
+
+  test("no/blank ACs → flags that completeness couldn't be confirmed and treats it as blocking", () => {
+    expect(reviewerSeed(job(), null)).toContain("could not confirm completeness");
+    expect(reviewerSeed(job(), "   ")).toContain("could not confirm completeness");
+  });
+
+  test("truncates a pathologically long AC block", () => {
+    const s = reviewerSeed(job(), "x".repeat(5000));
+    expect(s).toContain("…(truncated)");
+    expect(s).not.toContain("x".repeat(4001)); // the AC block is capped at MAX_ACCEPTANCE (4000)
+    expect(s.length).toBeLessThan(5200);        // 4000 capped AC + the prompt boilerplate
   });
 });

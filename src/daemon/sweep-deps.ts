@@ -251,7 +251,7 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
       // read its verdict.txt, then kill + reap — all in the shared helper (fails closed on a missing file).
       const { sessionId, raw } = await runEphemeralInspector(
         { manager: cfg.manager, tracker: cfg.tracker, repo: cfg.repo, taskId: cfg.taskId, cwd: cfg.cwd, home: cfg.home, deadlineMs: deadline },
-        reviewerSeed(job), "verdict.txt",
+        reviewerSeed(job, cfg.acceptanceFor?.(job.ticketId) ?? null), "verdict.txt",
       );
       return parseReviewVerdict(raw, sessionId);
     },
@@ -299,15 +299,31 @@ function rescueSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
 }
 
 /** The independent-reviewer prompt: a fresh session with no stake, writing a parseable verdict file. */
-function reviewerSeed(job: SweepJob): string {
-  const preservation = job.kind === "rescue"
-    ? "whether each acceptance criterion is satisfied, with evidence"
-    : "whether the final diff preserves the author's original behavior (no regression)";
+/**
+ * The independent-reviewer prompt. Both kinds verify the ticket's acceptance criteria against the PR —
+ * COMPLETENESS is a gate dimension, not just correctness: an unmet or only-partially-met criterion (a required
+ * section/state/field/behavior that's missing) is a BLOCKING finding, so a clean-but-incomplete PR is sent back,
+ * not merged. In-review additionally guards against a regression of the author's original behavior. The ACs are
+ * embedded because a spawned reviewer has no Linear access to read them. `acceptance` is the ticket's synced
+ * description (null when unknown → the reviewer flags that completeness couldn't be confirmed).
+ */
+export function reviewerSeed(job: SweepJob, acceptance: string | null): string {
+  const ac = acceptance?.trim();
+  const regression = job.kind === "in_review"
+    ? " Also assess whether the final diff preserves the author's original behavior (no regression)."
+    : "";
   return [
     `You are an INDEPENDENT reviewer of PR #${job.prNumber} for ${job.ticketKey}. You did not write it.`,
-    `Assess ${preservation}, and find every blocking (🔴) issue.`,
+    "Verify the PR satisfies EVERY acceptance criterion below. An unmet or only-partially-met criterion — a",
+    "required section, screen, state, field, or behavior that is missing — is itself a BLOCKING (🔴) finding;",
+    "NEVER pass an incomplete implementation as done." + regression,
+    "Find every other blocking (🔴) issue too.",
+    ac
+      ? `\nAcceptance criteria for ${job.ticketKey} — check each one against the PR:\n${ac.length > MAX_ACCEPTANCE ? ac.slice(0, MAX_ACCEPTANCE) + "\n…(truncated)" : ac}`
+      : `\n(No acceptance criteria were available — you could not confirm completeness; flag that and treat it as blocking.)`,
+    "",
     "Then write your verdict to the file $AO_SESSION_DIR/verdict.txt as EXACTLY these three lines, nothing else:",
-    "RED FINDINGS: <count>",
+    "RED FINDINGS: <count — include every unmet acceptance criterion>",
     "PRESERVATION: proven | unproven",
     "JUDGMENT: <a no-clearly-better-option decision only the lead can make, or 'none'>",
   ].join("\n");

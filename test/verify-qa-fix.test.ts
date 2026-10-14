@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import {
-  fixMarker, shouldMoveParent, buildFixTitle, buildFixBody, buildFixTicketInput, decideFix, actionableVerdicts,
+  fixMarker, shouldMoveParent, shouldCloseFeature, buildFixTitle, buildFixBody, buildFixTicketInput, decideFix, actionableVerdicts,
   QA_FIX_LABEL, QA_BLOCKED_LABEL,
 } from "../src/shared/verify-qa-fix.ts";
 import type { QaVerdictRow } from "../src/shared/verify-qa-sync.ts";
@@ -18,6 +18,18 @@ describe("shouldMoveParent", () => {
     expect(shouldMoveParent("completed")).toBe(false); // never resurrect a Done feature
     expect(shouldMoveParent("canceled")).toBe(false);
     expect(shouldMoveParent(null)).toBe(false);
+  });
+});
+
+describe("shouldCloseFeature", () => {
+  test("closes an open feature on a pass, never one already completed/canceled", () => {
+    expect(shouldCloseFeature("started")).toBe(true);
+    expect(shouldCloseFeature("unstarted")).toBe(true); // Todo but QA-verified → Done
+    expect(shouldCloseFeature("backlog")).toBe(true);
+    expect(shouldCloseFeature("triage")).toBe(true);
+    expect(shouldCloseFeature(null)).toBe(true);
+    expect(shouldCloseFeature("completed")).toBe(false);
+    expect(shouldCloseFeature("canceled")).toBe(false);
   });
 });
 
@@ -93,14 +105,14 @@ describe("decideFix", () => {
 });
 
 describe("actionableVerdicts", () => {
-  test("keeps FAIL + BLOCKED, drops PASS and the __probe row", () => {
+  test("keeps every real verdict (FAIL + PASS + BLOCKED), drops the __probe row", () => {
     const rows = actionableVerdicts([
       { ticket_id: "COR-91", run: { verdict: "fail", verdictAt: AT } },
       { ticket_id: "COR-94", run: { verdict: "pass", verdictAt: AT } },
       { ticket_id: "COR-95", run: { verdict: "blocked", verdictAt: AT } },
       { ticket_id: "__probe", run: { verdict: "fail", verdictAt: AT } },
     ]);
-    expect(rows.map((r) => `${r.ticketKey}:${r.verdict}`)).toEqual(["COR-91:fail", "COR-95:blocked"]);
+    expect(rows.map((r) => `${r.ticketKey}:${r.verdict}`)).toEqual(["COR-91:fail", "COR-94:pass", "COR-95:blocked"]);
   });
 });
 

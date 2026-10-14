@@ -259,15 +259,21 @@ export async function main(argv: string[]): Promise<void> {
       await withDaemon("verify", async (client) => {
         const { results, configured, wrote } = await client.request<VerifyQaFixResult>("verify.qa-fix", { write });
         if (!configured) { console.log("verify qa-fix: set `linearApiKey` + `linearTeamKeys` + `verifyApp` in ~/.borderless/config.json"); return; }
-        if (results.length === 0) { console.log("verify qa-fix: no failed or blocked tester verdicts to act on"); return; }
+        if (results.length === 0) { console.log("verify qa-fix: no tester verdicts to act on yet"); return; }
         for (const r of results) {
-          const mark = r.action === "created" ? "✓ created" : r.action === "would-create" ? "• would create" : r.action === "error" ? "✗ error"
-            : r.action === "skipped-exists" ? "· already created" : "· skipped";
+          const mark = r.action === "created" ? "✓ created"
+            : r.action === "verified" ? "✓ verified → Done"
+            : r.action === "would-create" ? "• would create"
+            : r.action === "would-verify" ? "• would verify → Done"
+            : r.action === "error" ? "✗ error"
+            : r.action === "skipped-exists" ? "· already created"
+            : r.action === "skipped-verified" ? "· already verified"
+            : "· skipped";
           const moved = r.movedParent ? (r.action === "would-create" ? " + would move feature to Todo" : " + moved feature to Todo") : "";
           const tail = r.fixKey ? `→ ${r.fixKey}${r.url ? ` ${r.url}` : ""}` : r.detail ? `(${r.detail})` : "";
           console.log(`  ${mark}  ${r.subKey}  [${r.kind}]${r.parentKey ? ` under ${r.parentKey}` : ""}${moved}  ${tail}`);
         }
-        if (!wrote) console.log("\n(dry run — re-run with --write to create these in Linear)");
+        if (!wrote) console.log("\n(dry run — re-run with --write to apply these in Linear)");
       });
       return;
     }

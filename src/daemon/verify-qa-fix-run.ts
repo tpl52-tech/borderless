@@ -15,13 +15,13 @@
  */
 
 import {
-  actionableVerdicts, decideFix, buildFixTitle, buildFixBody, buildFixTicketInput,
+  actionableVerdicts, decideFix, shouldCloseFeature, buildFixTitle, buildFixBody, buildFixTicketInput,
   type QaFixResult, type QaFixKind,
 } from "../shared/verify-qa-fix.ts";
 import type { IssueCreateInput } from "../shared/linear.ts";
 
 export interface QaFixDeps {
-  /** Read the raw `qa_runs` rows from Supabase. Filtered to FAIL/BLOCKED here. */
+  /** Read the raw `qa_runs` rows from Supabase. Parsed to every recorded verdict here. */
   readVerdicts: () => Promise<unknown>;
   /** The synced manual-QA sub-issue by key → its UUID + its parent feature ticket's UUID; undefined ⇒ not in the store. */
   subIssueByKey: (key: string) => { id: string; parentId: string | null } | undefined;
@@ -33,6 +33,8 @@ export interface QaFixDeps {
   targets: () => Promise<{ teamId: string; fixLabelId: string; blockedLabelId: string }>;
   /** The team's "Todo" workflow-state id (resolved once, lazily); null ⇒ none to move the feature ticket to. */
   todoStateId: () => Promise<string | null>;
+  /** The team's "Done" workflow-state id (where a QA-passed feature ticket moves; resolved once, lazily); null ⇒ none. */
+  doneStateId: () => Promise<string | null>;
   /** Create the fix/blocked ticket → its key + url. */
   createIssue: (input: IssueCreateInput) => Promise<{ ticketKey: string; url: string | null }>;
   /** Move the feature ticket to the given workflow state (Todo). */
@@ -43,12 +45,12 @@ export interface QaFixDeps {
   write: boolean;
 }
 
-/** Run the QA-fix sweep: read the verdicts, then open a fix/blocked ticket for each un-actioned FAIL/BLOCKED. */
+/** Run the QA-fix sweep: read the verdicts, then drive each feature ticket — FAIL/BLOCKED opens a ticket, PASS closes it. */
 export async function runQaFixSweep(deps: QaFixDeps): Promise<QaFixResult[]> {
   const rows = actionableVerdicts(await deps.readVerdicts());
   const results: QaFixResult[] = [];
   for (const row of rows) {
-    const kind: QaFixKind = row.verdict === "fail" ? "fix" : "blocked";
+    const kind: QaFixKind = row.verdict === "fail" ? "fix" : row.verdict === "blocked" ? "blocked" : "pass";
     const sub = deps.subIssueByKey(row.ticketKey);
     if (!sub) {
       results.push({ subKey: row.ticketKey, kind, action: "skipped-no-parent", detail: "no synced sub-issue in the store — run `ao sync`?" });
@@ -59,11 +61,36 @@ export async function runQaFixSweep(deps: QaFixDeps): Promise<QaFixResult[]> {
       continue;
     }
     const parent = deps.parentByUuid(sub.parentId);
-    if (!parent || !parent.projectId) {
-      results.push({ subKey: row.ticketKey, kind, action: "skipped-no-parent", detail: parent ? "feature ticket has no project to file the fix under" : "feature ticket not synced — run `ao sync`?" });
+    if (!parent) {
+      results.push({ subKey: row.ticketKey, kind, action: "skipped-no-parent", detail: "feature ticket not synced — run `ao sync`?" });
       continue;
     }
     try {
+      // PASS → close the feature ticket (QA verified it). No ticket, no dedupe — a move to Done is idempotent.
+      if (row.verdict === "pass") {
+        if (!shouldCloseFeature(parent.stateType)) {
+          results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind: "pass", action: "skipped-verified", detail: "feature ticket already closed" });
+          continue;
+        }
+        if (!deps.write) {
+          results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind: "pass", action: "would-verify" });
+          continue;
+        }
+        const doneId = await deps.doneStateId();
+        if (!doneId) {
+          results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind: "pass", action: "skipped-verified", detail: "no Done workflow state found to move to" });
+          continue;
+        }
+        await deps.setState(parent.id, doneId);
+        results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind: "pass", action: "verified" });
+        continue;
+      }
+
+      // FAIL / BLOCKED → open a follow-up ticket, which must be filed under a project.
+      if (!parent.projectId) {
+        results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind, action: "skipped-no-parent", detail: "feature ticket has no project to file the fix under" });
+        continue;
+      }
       const descriptions = await deps.childDescriptions(parent.id);
       const decision = decideFix(row, { childDescriptions: descriptions, parentStateType: parent.stateType });
       if (decision.alreadyExists) {

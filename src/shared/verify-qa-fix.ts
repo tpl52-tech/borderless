@@ -7,7 +7,8 @@
  *             feature ticket is moved back out of Verifying (→ Todo).
  *   BLOCKED → a separate `qa-blocked` ("needs-info / unblock") ticket under the feature ticket; the feature ticket
  *             is left in place (blocked ≠ failed — a human decides what unblocks it).
- *   PASS    → nothing here (verify-qa-sync already moved it to Done).
+ *   PASS    → the feature ticket is moved to Done (QA verified it); no ticket is created. (verify-qa-sync
+ *             separately moves the manual-QA SUB-issue to Done; this closes the parent feature ticket.)
  *
  * Both new tickets are UNASSIGNED (triage). Idempotency is non-trivial because a create is NOT idempotent (unlike
  * a state move): re-running must not make a second ticket. So the `fixMarker(verdictAt)` lives in the created
@@ -25,11 +26,20 @@ import type { IssueCreateInput } from "./linear.ts";
 export const QA_FIX_LABEL = "qa-fix";
 export const QA_BLOCKED_LABEL = "qa-blocked";
 
-/** A failed verdict → a `fix` ticket; a blocked verdict → a `blocked` (needs-info) ticket. */
-export type QaFixKind = "fix" | "blocked";
+/** A failed verdict → a `fix` ticket; a blocked verdict → a `blocked` (needs-info) ticket; a passed verdict closes the feature ticket. */
+export type QaFixKind = "fix" | "blocked" | "pass";
 
-/** What happened to one actionable verdict: a ticket created, planned (dry), skipped (already made / no parent), or errored. */
-export type QaFixAction = "created" | "would-create" | "skipped-exists" | "skipped-no-parent" | "error";
+/**
+ * What happened to one actionable verdict:
+ * - create path (FAIL/BLOCKED): `created` / `would-create` (dry) / `skipped-exists` (ticket already made).
+ * - verify path (PASS): `verified` (feature ticket moved to Done) / `would-verify` (dry) / `skipped-verified`
+ *   (already closed, or no Done state).
+ * - common: `skipped-no-parent` (no feature ticket to act on) / `error`.
+ */
+export type QaFixAction =
+  | "created" | "would-create" | "skipped-exists"
+  | "verified" | "would-verify" | "skipped-verified"
+  | "skipped-no-parent" | "error";
 
 /** One verdict's QA-fix outcome — the wire shape `ao verify qa-fix` renders. */
 export interface QaFixResult {
@@ -79,6 +89,14 @@ const SETTLED_STATE_TYPES = new Set(["backlog", "unstarted", "completed", "cance
 /** Move the feature ticket on a fail only while it's still active (a `started`/`triage` state, e.g. Verifying) — never resurrect a Done/Canceled ticket or re-move one already in Todo. Pure. */
 export function shouldMoveParent(parentStateType: string | null): boolean {
   return parentStateType != null && !SETTLED_STATE_TYPES.has(parentStateType);
+}
+
+/** State types from which a PASS should NOT move the feature ticket to Done: it's already closed. */
+const CLOSED_STATE_TYPES = new Set(["completed", "canceled"]);
+
+/** Close the feature ticket on a pass unless it's already completed/canceled (moving to Done is idempotent otherwise). Pure. */
+export function shouldCloseFeature(parentStateType: string | null): boolean {
+  return parentStateType == null || !CLOSED_STATE_TYPES.has(parentStateType);
 }
 
 /** The fix/blocked ticket title. Pure. */
@@ -150,9 +168,9 @@ export function decideFix(
   return { alreadyExists, kind, moveParent: kind === "fix" && shouldMoveParent(ctx.parentStateType) };
 }
 
-/** The actionable verdicts for the QA-fix sweep: the FAILs and BLOCKEDs (a PASS is verify-qa-sync's job). */
+/** The verdicts the QA-fix sweep drives the feature ticket from: every recorded one — a FAIL/BLOCKED opens a ticket, a PASS closes the feature ticket. (Equivalent to the parsed rows; a named seam the runner reads through.) */
 export function actionableVerdicts(raw: unknown): QaVerdictRow[] {
-  return parseQaRunsRows(raw).filter((r) => r.verdict === "fail" || r.verdict === "blocked");
+  return parseQaRunsRows(raw);
 }
 
 /** Re-exported so the runner builds its deps against one QaRun shape. */

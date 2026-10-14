@@ -392,8 +392,8 @@
 
         <div class="panel p" style="margin-top:1rem">
           <div class="ph pink"><span>QA_FIXES <span class="ph-meta" id="vqf-meta">&mdash;</span></span>
-            <button class="btn xs o-pink" id="v-qafix" title="Open a fix ticket for each failed QA verdict (and move the feature ticket to Todo); a needs-info ticket for each blocked one">&#9654; Create fix tickets</button></div>
-          <div class="pb" id="vqf-cards"><p class="note">turn finished QA results into work: each <b style="color:var(--pink)">failed</b> verdict opens a <b style="color:var(--green)">qa-fix</b> child of its feature ticket (and moves that feature ticket back to Todo); each <b style="color:var(--amber)">blocked</b> one opens a <b style="color:var(--amber)">qa-blocked</b> needs-info ticket. Unassigned, idempotent.</p></div>
+            <button class="btn xs o-pink" id="v-qafix" title="Drive each feature ticket from its QA verdict: a failed one opens a qa-fix ticket (+ feature → Todo), a blocked one opens a needs-info ticket, a passed one moves the feature to Done">&#9654; Apply QA results</button></div>
+          <div class="pb" id="vqf-cards"><p class="note">turn finished QA results into action: each <b style="color:var(--pink)">failed</b> verdict opens a <b style="color:var(--green)">qa-fix</b> child of its feature ticket (and moves that feature ticket back to Todo); each <b style="color:var(--amber)">blocked</b> one opens a <b style="color:var(--amber)">qa-blocked</b> needs-info ticket; each <b style="color:var(--green)">passed</b> one moves its feature ticket to <b style="color:var(--green)">Done</b>. Unassigned, idempotent.</p></div>
         </div>
       </section>
 
@@ -812,10 +812,10 @@
 
   // ---- VERIFY: open fix/blocked tickets from finished QA verdicts (idempotent; the button always writes) ----
   const vQf = $("v-qafix"), vqfCards = $("vqf-cards"), vqfMeta = $("vqf-meta");
-  // The button always writes, so the sweep never returns the dry-run `would-create` action — the renderer handles
-  // only the write-mode outcomes (an unknown action still falls back gracefully below).
-  const QF_ACTION = { created: ["created", "s-green"], "skipped-exists": ["already created", "s-dim"], "skipped-no-parent": ["skipped", "s-amber"], error: ["error", "s-pink"] };
-  const QF_KIND = { fix: "s-pink", blocked: "s-amber" };
+  // The button always writes, so the sweep never returns the dry-run `would-create`/`would-verify` actions — the
+  // renderer handles only the write-mode outcomes (an unknown action still falls back gracefully below).
+  const QF_ACTION = { created: ["created", "s-green"], verified: ["verified → Done", "s-green"], "skipped-exists": ["already created", "s-dim"], "skipped-verified": ["already verified", "s-dim"], "skipped-no-parent": ["skipped", "s-amber"], error: ["error", "s-pink"] };
+  const QF_KIND = { fix: "s-pink", blocked: "s-amber", pass: "s-green" };
 
   const qfCardHtml = (r) => {
     const [label, cls] = QF_ACTION[r.action] || [r.action, "s-ink"];
@@ -827,7 +827,7 @@
   };
 
   vQf.addEventListener("click", () => withBusy(vQf, "⟳ creating…", async () => {
-    vqfCards.innerHTML = `<p class="note">opening fix tickets from failed/blocked QA…</p>`;
+    vqfCards.innerHTML = `<p class="note">applying QA results to Linear…</p>`;
     try {
       const res = await fetch("/api/verify/qa-fix", { method: "POST" });
       if (!res.ok) throw new Error(String(res.status));
@@ -839,8 +839,9 @@
       }
       const rows = data.results || [];
       const made = rows.filter((r) => r.action === "created").length;
-      vqfMeta.textContent = rows.length ? `${made} CREATED` : "NONE";
-      vqfCards.innerHTML = rows.length ? rows.map(qfCardHtml).join("") : `<p class="note">no failed or blocked QA verdicts to act on</p>`;
+      const verified = rows.filter((r) => r.action === "verified").length;
+      vqfMeta.textContent = rows.length ? ([made ? `${made} CREATED` : "", verified ? `${verified} VERIFIED` : ""].filter(Boolean).join(" · ") || "NO CHANGES") : "NONE";
+      vqfCards.innerHTML = rows.length ? rows.map(qfCardHtml).join("") : `<p class="note">no tester verdicts to act on yet</p>`;
     } catch { vqfCards.innerHTML = `<p class="note s-pink">create failed &mdash; is the daemon configured (linearApiKey + verifyApp)?</p>`; }
   }));
 </script>

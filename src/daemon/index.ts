@@ -340,6 +340,7 @@ export function startDaemon(home = stateHome()): Daemon {
     // in the created ticket's body. The team/labels + Todo state are each resolved at most once per run, lazily.
     runVerifyQaFix = singleFlight(async (write = false) => {
       let todoOnce: Promise<string | null> | null = null;
+      let doneOnce: Promise<string | null> | null = null;
       let targetsOnce: Promise<{ teamId: string; fixLabelId: string; blockedLabelId: string }> | null = null;
       const results = await runQaFixSweep({
         readVerdicts: () => readQaRuns(verifyApp),
@@ -354,6 +355,7 @@ export function startDaemon(home = stateHome()): Daemon {
         childDescriptions: (parentUuid) => fetchIssueChildDescriptions(linear, parentUuid),
         targets: () => (targetsOnce ??= resolveQaFixTargets(linear, teamKey, QA_FIX_LABEL, QA_BLOCKED_LABEL)),
         todoStateId: () => (todoOnce ??= resolveTodoStateId(linear, teamKey)),
+        doneStateId: () => (doneOnce ??= resolveDoneStateId(linear, teamKey)),
         createIssue: async (input) => { const c = parseIssueCreate(await linear.query(ISSUE_CREATE_MUTATION, { input })); return { ticketKey: c.ticketKey, url: c.url }; },
         setState: async (issueId, stateId) => { parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id: issueId, input: { stateId } })); },
         postComment: async (issueId, body) => parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId, body } })).url,

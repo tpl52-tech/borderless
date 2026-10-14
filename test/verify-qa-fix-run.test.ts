@@ -15,6 +15,7 @@ function deps(over: Partial<QaFixDeps> & {
   parents?: Record<string, Parent>;
   children?: Record<string, string[]>;
   todo?: string | null;
+  done?: string | null;
 } = {}): { deps: QaFixDeps; created: IssueCreateInput[]; states: Array<{ issueId: string; stateId: string }>; comments: Array<{ issueId: string; body: string }>; order: string[] } {
   const created: IssueCreateInput[] = [];
   const states: Array<{ issueId: string; stateId: string }> = [];
@@ -32,6 +33,7 @@ function deps(over: Partial<QaFixDeps> & {
       childDescriptions: over.childDescriptions ?? (async (u) => children[u] ?? []),
       targets: over.targets ?? (async () => ({ teamId: "t1", fixLabelId: "lfix", blockedLabelId: "lblk" })),
       todoStateId: over.todoStateId ?? (async () => (over.todo === undefined ? "todo-state" : over.todo)),
+      doneStateId: over.doneStateId ?? (async () => (over.done === undefined ? "done-state" : over.done)),
       createIssue: over.createIssue ?? (async (input) => { created.push(input); order.push("create"); return { ticketKey: `COR-${119 + created.length}`, url: `http://i/${created.length}` }; }),
       setState: over.setState ?? (async (issueId, stateId) => { states.push({ issueId, stateId }); order.push("move"); }),
       postComment: over.postComment ?? (async (issueId, body) => { comments.push({ issueId, body }); order.push("comment"); return "http://c/1"; }),
@@ -143,9 +145,50 @@ describe("runQaFixSweep", () => {
     expect(results[1]!.action).toBe("created");
   });
 
-  test("PASS verdicts and the __probe row never reach a Linear call", async () => {
-    const h = deps({ raw: [{ ticket_id: "__probe", run: { verdict: "fail", verdictAt: AT } }, rawRow("COR-94", "pass"), rawRow("COR-91", "fail")] });
+  test("the __probe row is dropped; real verdicts (incl. PASS) are processed", async () => {
+    const h = deps({ raw: [{ ticket_id: "__probe", run: { verdict: "fail", verdictAt: AT } }, rawRow("COR-91", "fail"), rawRow("COR-95", "pass")] });
     const results = await runQaFixSweep(h.deps);
-    expect(results.map((r) => r.subKey)).toEqual(["COR-91"]);
+    expect(results.map((r) => `${r.subKey}:${r.action}`)).toEqual(["COR-91:created", "COR-95:verified"]);
+  });
+
+  describe("PASS → feature ticket to Done", () => {
+    const passParent = (stateType: string | null, projectId: string | null = "p1") =>
+      ({ parents: { u17: { id: "u17", identifier: "COR-17", title: "Search", projectId, stateType, priority: 0 } } });
+
+    test("a PASS moves the feature ticket to Done (verified), creates no ticket", async () => {
+      const h = deps({ raw: [rawRow("COR-91", "pass")] });
+      const [r] = await runQaFixSweep(h.deps);
+      expect(r).toMatchObject({ subKey: "COR-91", parentKey: "COR-17", kind: "pass", action: "verified" });
+      expect(h.states).toEqual([{ issueId: "u17", stateId: "done-state" }]);
+      expect(h.created).toHaveLength(0);
+    });
+
+    test("a PASS whose feature ticket is already closed → skipped-verified, no move", async () => {
+      const h = deps({ raw: [rawRow("COR-91", "pass")], ...passParent("completed") });
+      const [r] = await runQaFixSweep(h.deps);
+      expect(r.action).toBe("skipped-verified");
+      expect(h.states).toHaveLength(0);
+    });
+
+    test("dry run plans a PASS as would-verify without moving", async () => {
+      const h = deps({ raw: [rawRow("COR-91", "pass")], write: false });
+      const [r] = await runQaFixSweep(h.deps);
+      expect(r.action).toBe("would-verify");
+      expect(h.states).toHaveLength(0);
+    });
+
+    test("a PASS with no resolvable Done state → skipped-verified with a note", async () => {
+      const h = deps({ raw: [rawRow("COR-91", "pass")], done: null });
+      const [r] = await runQaFixSweep(h.deps);
+      expect(r).toMatchObject({ action: "skipped-verified" });
+      expect(r.detail).toContain("no Done workflow state");
+      expect(h.states).toHaveLength(0);
+    });
+
+    test("a PASS needs only the feature ticket, not a project (unlike a fix)", async () => {
+      const h = deps({ raw: [rawRow("COR-91", "pass")], ...passParent("started", null) });
+      const [r] = await runQaFixSweep(h.deps);
+      expect(r.action).toBe("verified");
+    });
   });
 });

@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import {
-  evaluateGate, nextSweepAction, dangerousTiers, MAX_CYCLES,
+  evaluateGate, nextSweepAction, dangerousTiers, buildsFromScratch, MAX_CYCLES,
   type GateInput, type GateBlocker, type GateResult, type SweepDecisionInput,
 } from "../src/shared/sweep-gate.ts";
 
@@ -20,6 +20,7 @@ describe("evaluateGate (PRD §4)", () => {
     expect(evaluateGate(gate({ preservationProven: null })).blockers).toContain("regression-unproven");
     expect(evaluateGate(gate({ preservationProven: false })).blockers).toContain("regression-unproven");
     expect(evaluateGate(gate({ kind: "rescue", preservationProven: null })).blockers).toContain("acceptance-unproven");
+    expect(evaluateGate(gate({ kind: "fix", preservationProven: null })).blockers).toContain("acceptance-unproven");
   });
 
   test("CI: a failure blocks as ci-failing; pending/missing only as ci-pending", () => {
@@ -44,6 +45,14 @@ describe("evaluateGate (PRD §4)", () => {
     const r = evaluateGate({ kind: "in_review", preservationProven: null, checks: {}, reviewerRedFindings: null });
     expect(r.pass).toBe(false);
     expect(r.blockers.sort()).toEqual(["ci-pending", "regression-unproven", "reviewer-unrun"].sort() as GateBlocker[]);
+  });
+});
+
+describe("buildsFromScratch (rescue + fix build from nothing; in_review drives an author's PR)", () => {
+  test("rescue + fix are from-scratch; in_review is not", () => {
+    expect(buildsFromScratch("rescue")).toBe(true);
+    expect(buildsFromScratch("fix")).toBe(true);
+    expect(buildsFromScratch("in_review")).toBe(false);
   });
 });
 

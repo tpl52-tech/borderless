@@ -20,10 +20,20 @@ export type RequiredCheck = (typeof REQUIRED_CHECKS)[number];
 
 export type CheckState = "success" | "pending" | "failure" | "missing";
 
+/**
+ * Does this sweep kind BUILD the change from nothing (rescue, qa-fix) rather than drive an author's existing
+ * PR (in_review)? A build-from-scratch kind bootstraps a worker with no PR, and must prove EVERY acceptance
+ * criterion satisfied (not merely "no regression") before it can be ready. One predicate so the engine, the
+ * gate, and the worker/reviewer seeds all agree on what "from scratch" means.
+ */
+export function buildsFromScratch(kind: SweepKind): boolean {
+  return kind !== "in_review";
+}
+
 /** Why a job is not yet ready-to-merge. Empty iff the gate passes. */
 export type GateBlocker =
   | "regression-unproven" // in_review: the no-regression diff isn't proven
-  | "acceptance-unproven" // rescue: acceptance criteria not shown satisfied
+  | "acceptance-unproven" // rescue/fix (build-from-scratch): acceptance criteria not shown satisfied
   | "ci-failing" // a required check failed
   | "ci-pending" // a required check is still pending/missing
   | "reviewer-unrun" // the independent reviewer hasn't run on this head
@@ -31,7 +41,7 @@ export type GateBlocker =
 
 export interface GateInput {
   kind: SweepKind;
-  /** in_review: the no-regression proof; rescue: acceptance-criteria satisfied. null = not yet established. */
+  /** in_review: the no-regression proof; rescue/fix: acceptance-criteria satisfied. null = not yet established. */
   preservationProven: boolean | null;
   /** Observed state of each required check; an absent name reads as "missing". */
   checks: Partial<Record<RequiredCheck, CheckState>>;
@@ -48,9 +58,9 @@ export interface GateResult {
 export function evaluateGate(input: GateInput): GateResult {
   const blockers: GateBlocker[] = [];
 
-  // 1. Behavior preservation — no-regression (in_review) or acceptance criteria (rescue, PRD §5).
+  // 1. Behavior preservation — no-regression (in_review) or acceptance criteria (rescue/fix, PRD §5).
   if (input.preservationProven !== true) {
-    blockers.push(input.kind === "rescue" ? "acceptance-unproven" : "regression-unproven");
+    blockers.push(buildsFromScratch(input.kind) ? "acceptance-unproven" : "regression-unproven");
   }
 
   // 2. CI — every required check must be success. A failure is terminal-until-fixed; anything

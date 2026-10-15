@@ -16,7 +16,7 @@ import type { SessionManager } from "./session-manager.ts";
 import type { StatusTracker } from "./monitors/status.ts";
 import type { SweepJob, SweepState } from "../shared/types.ts";
 import type { CheckState, RequiredCheck } from "../shared/sweep-gate.ts";
-import { REQUIRED_CHECKS } from "../shared/sweep-gate.ts";
+import { REQUIRED_CHECKS, buildsFromScratch } from "../shared/sweep-gate.ts";
 import type { SweepEngineDeps, ReviewVerdict, WorkerResult, WorkerFeedback, PollResult } from "./sweep-engine.ts";
 import { territoryWarning, type Territory } from "../shared/collision.ts";
 import { fetchPr, listPrsForBranch, prFiles } from "./github.ts";
@@ -271,9 +271,7 @@ const MAX_ACCEPTANCE = 4000; // keep a pathologically long description from bloa
 /** The fixer/implementer prompt. in_review fixes the PR; rescue implements the ticket from scratch. Both get
  *  the collision guard's preventive territory warning, so the worker avoids a teammate's deliverable up front. */
 export function workerSeed(job: SweepJob, feedback: WorkerFeedback, ctx: WorkerSeedContext = {}): string {
-  const head = job.kind === "rescue"
-    ? rescueSeedHead(job, ctx)
-    : `Drive PR #${job.prNumber} for ${job.ticketKey} to a mergeable state.`;
+  const head = workerSeedHead(job, ctx);
   let body = head;
   if (!feedback.initial && feedback.review) {
     const findings = feedback.review.redFindings > 0 ? `${feedback.review.redFindings} blocking review finding(s)` : "the review feedback";
@@ -304,17 +302,41 @@ function rescueSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
 }
 
 /**
- * The independent-reviewer prompt. Both kinds verify the ticket's acceptance criteria against the PR —
+ * The qa-fix implement instruction. A qa-fix ticket is a tester's FAIL verdict turned into a follow-up: its
+ * synced description is the failed steps + the tester's notes on what went wrong. A spawned worker can't read
+ * Linear, so that body is embedded inline as the criteria to satisfy. (Like rescue, the worktree is already on
+ * the canonical ticket branch — the spawn derives it from the ticket key — so the PR opens where readHeadPr looks.)
+ */
+function fixSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
+  const ac = clampAcceptance(ctx.acceptance);
+  const criteria = ac
+    ? `A tester's QA found this feature failing. These are the failed steps + notes — fix the code so every one passes:\n${ac}`
+    : "A tester's QA found this feature failing; implement the fix from its acceptance criteria.";
+  return [`Resolve qa-fix ticket ${job.ticketKey}.`, criteria, "Then open a PR."].join("\n\n");
+}
+
+/** The fixer/implementer opening line per kind: in_review drives the author's existing PR, rescue implements the
+ *  ticket from scratch, fix resolves a tester's qa-fix follow-up (both build-from-scratch kinds embed the ACs). */
+function workerSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
+  switch (job.kind) {
+    case "in_review": return `Drive PR #${job.prNumber} for ${job.ticketKey} to a mergeable state.`;
+    case "rescue": return rescueSeedHead(job, ctx);
+    case "fix": return fixSeedHead(job, ctx);
+  }
+}
+
+/**
+ * The independent-reviewer prompt. Every kind verifies the ticket's acceptance criteria against the PR —
  * COMPLETENESS is a gate dimension, not just correctness: an unmet or only-partially-met criterion (a required
  * section/state/field/behavior that's missing) is a BLOCKING (🔴) finding, so a clean-but-incomplete PR is sent
  * back, not merged. The PRESERVATION line keeps its per-kind meaning the gate reads (sweep-gate.ts): for
- * in_review, "proven" = no regression of the author's original behavior; for rescue, "proven" = every acceptance
+ * in_review, "proven" = no regression of the author's original behavior; for rescue/fix, "proven" = every acceptance
  * criterion affirmatively satisfied. The ACs are embedded because a spawned reviewer has no Linear access;
  * `acceptance` is the ticket's synced description (null → the reviewer flags completeness couldn't be confirmed).
  */
 export function reviewerSeed(job: SweepJob, acceptance: string | null): string {
   const ac = clampAcceptance(acceptance);
-  const preservation = job.kind === "rescue"
+  const preservation = buildsFromScratch(job.kind)
     ? "For PRESERVATION, report 'proven' only if EVERY acceptance criterion is affirmatively satisfied, with evidence."
     : "For PRESERVATION, report 'proven' only if the final diff preserves the author's original behavior (no regression).";
   return [

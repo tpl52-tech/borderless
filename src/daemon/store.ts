@@ -22,6 +22,8 @@ import type {
   SweepJob, SweepEvent, SweepKind, SweepState, SweepEventKind, LinearIssue,
 } from "../shared/types.ts";
 import { isLeadOps } from "../shared/lead-desk.ts";
+import { LEAD_LEVEL } from "../shared/types.ts";
+import { QA_FIX_LABEL } from "../shared/verify-qa-fix.ts";
 
 export const PRAGMAS = ["PRAGMA journal_mode = WAL", "PRAGMA foreign_keys = ON"];
 
@@ -233,7 +235,7 @@ export const MIGRATIONS: string[] = [
   `
   CREATE TABLE IF NOT EXISTS sweep_job (
     id          TEXT PRIMARY KEY,
-    kind        TEXT NOT NULL,                      -- 'in_review' | 'rescue'
+    kind        TEXT NOT NULL,                      -- 'in_review' | 'rescue' | 'fix'
     ticket_id   TEXT NOT NULL,
     ticket_key  TEXT NOT NULL,
     assignee    TEXT,
@@ -899,6 +901,32 @@ export class Store {
       if (active) continue;
       created.push(this.createSweepJob({
         kind: "in_review", ticketId: iss.id, ticketKey: iss.identifier, assignee: iss.assignee,
+      }));
+    }
+    return created;
+  }
+
+  /**
+   * Enqueue a fix sweep job for every `qa-fix` ticket still sitting unimplemented in Todo — a tester's FAIL
+   * verdict turned into a follow-up (PRD §13). Mirrors enqueueInReviewSweeps, but BUILDS from scratch like a
+   * rescue: it selects only the UNSTARTED qa-fix tickets a human hasn't picked up (an In-Review one is the
+   * in-review sweep's job; a started one a human owns), skips `lead-level` + Lead Ops (the same
+   * build-from-scratch exclusions as rescue), and skips a ticket that already has an active fix job.
+   * Idempotent — safe to run on every sweep trigger. Returns the jobs it created.
+   */
+  enqueueFixSweeps(leadOpsProject?: string): SweepJob[] {
+    const created: SweepJob[] = [];
+    for (const iss of this.listLinearIssues()) {
+      if (!iss.labels.includes(QA_FIX_LABEL)) continue;   // only tester-failure follow-ups
+      if (iss.stateType !== "unstarted") continue;        // only unimplemented Todo items (not started/in-review/done)
+      if (iss.labels.includes(LEAD_LEVEL)) continue;      // lead-level stays off the auto-builder (as with rescue)
+      if (isLeadOps(iss, leadOpsProject)) continue;       // lead-desk tasks are human to-dos, not agent work (PRD §9)
+      const active = this.db.query(
+        `SELECT 1 FROM sweep_job WHERE kind = 'fix' AND ticket_id = ? AND state NOT IN ('merged', 'failed') LIMIT 1`,
+      ).get(iss.id);
+      if (active) continue;
+      created.push(this.createSweepJob({
+        kind: "fix", ticketId: iss.id, ticketKey: iss.identifier, assignee: iss.assignee,
       }));
     }
     return created;

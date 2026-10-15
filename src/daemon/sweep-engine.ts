@@ -20,7 +20,7 @@
 import type { Store } from "./store.ts";
 import type { SweepJob, SweepKind, SweepState } from "../shared/types.ts";
 import {
-  evaluateGate, nextSweepAction, dangerousTiers,
+  evaluateGate, nextSweepAction, dangerousTiers, buildsFromScratch,
   MAX_CYCLES, type CheckState, type RequiredCheck, type GateBlocker, type DangerTier,
 } from "../shared/sweep-gate.ts";
 import { detectCollisions, collisionEscalation, type TicketOwner, type Territory } from "../shared/collision.ts";
@@ -35,7 +35,7 @@ export interface PollResult {
 export interface ReviewVerdict {
   sessionId: string;
   redFindings: number; // 🔴 blocking findings
-  preservationProven: boolean; // no-regression (in_review) / acceptance criteria (rescue)
+  preservationProven: boolean; // no-regression (in_review) / acceptance criteria (rescue/fix)
   judgmentCall: string | null; // a no-clearly-better-option decision only the lead can make
 }
 
@@ -48,14 +48,14 @@ export interface WorkerResult {
 
 /** Context handed to a worker spawn. */
 export interface WorkerFeedback {
-  initial: boolean; // the first build (e.g. a rescue with no PR yet) vs a fix cycle
+  initial: boolean; // the first build (a build-from-scratch kind with no PR yet) vs a later fix→review iteration
   blockers: GateBlocker[]; // what the gate is unhappy about
   review: ReviewVerdict | null; // the last reviewer verdict, so the fixer can address the findings
 }
 
 /** The engine's only I/O — real in the daemon (3c), faked in tests. */
 export interface SweepEngineDeps {
-  /** Spawn the fixer (in_review) / implementer (rescue); await it finishing + pushing; return new head/PR.
+  /** Spawn the fixer (in_review) / implementer (rescue, fix); await it finishing + pushing; return new head/PR.
    *  `territory` = the deliverables other active tickets own, so the worker's seed can warn it off them. */
   spawnWorker(job: SweepJob, feedback: WorkerFeedback, territory: Territory): Promise<WorkerResult>;
   /** Poll CI for the job's current head: required-check states + the PR's changed paths. */
@@ -77,7 +77,7 @@ export interface SweepEngineDeps {
 
 export type SweepOutcome = "ready" | "needs_human" | "failed";
 
-const WORKER_STATE: Record<SweepKind, SweepState> = { in_review: "fixing", rescue: "implementing" };
+const WORKER_STATE: Record<SweepKind, SweepState> = { in_review: "fixing", rescue: "implementing", fix: "implementing" };
 
 /** Compose the escalation reason the gate uses to stop for a human (null = keep self-resolving). */
 function deriveEscalation(tiers: DangerTier[], judgmentCall: string | null, collisions: TicketOwner[]): string | null {
@@ -130,11 +130,11 @@ export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngin
 
   try {
     for (let iter = 0; iter < safetyMax; iter++) {
-      // No PR/head yet. Only a rescue builds from scratch; an in-review sweep must arrive with its PR
-      // (hydrated by the wiring), so with no PR there is nothing to drive — stop for a human rather than
-      // "implement" an existing PR blindly. Honor the cap for the rescue bootstrap too.
+      // No PR/head yet. Only a build-from-scratch kind (rescue, qa-fix) can bootstrap one; an in-review sweep
+      // must arrive with its PR (hydrated by the wiring), so with no PR there is nothing to drive — stop for a
+      // human rather than "implement" an existing PR blindly. Honor the cap for the bootstrap too.
       if (!hasHead) {
-        if (seed.kind !== "rescue") return finish("needs_human", "in-review sweep has no PR to drive");
+        if (!buildsFromScratch(seed.kind)) return finish("needs_human", "in-review sweep has no PR to drive");
         if (cycles >= MAX_CYCLES) return finish("needs_human", "8-cycle cap reached before a PR existed");
         const built = await runWorker({ initial: true, blockers: [], review: null });
         cycles++;

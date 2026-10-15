@@ -22,6 +22,9 @@ import type {
   SweepJob, SweepEvent, SweepKind, SweepState, SweepEventKind, LinearIssue,
 } from "../shared/types.ts";
 import { isLeadOps } from "../shared/lead-desk.ts";
+import { LEAD_LEVEL } from "../shared/types.ts";
+import { QA_FIX_LABEL } from "../shared/verify-qa-fix.ts";
+import { SweepJobStore } from "./sweep-store.ts";
 
 export const PRAGMAS = ["PRAGMA journal_mode = WAL", "PRAGMA foreign_keys = ON"];
 
@@ -233,7 +236,7 @@ export const MIGRATIONS: string[] = [
   `
   CREATE TABLE IF NOT EXISTS sweep_job (
     id          TEXT PRIMARY KEY,
-    kind        TEXT NOT NULL,                      -- 'in_review' | 'rescue'
+    kind        TEXT NOT NULL,                      -- 'in_review' | 'rescue' | 'fix'
     ticket_id   TEXT NOT NULL,
     ticket_key  TEXT NOT NULL,
     assignee    TEXT,
@@ -377,30 +380,11 @@ function rowToLinearIssue(r: Row): LinearIssue {
   };
 }
 
-function rowToSweepJob(r: Row): SweepJob {
-  return {
-    id: r.id, kind: r.kind as SweepKind, ticketId: r.ticket_id, ticketKey: r.ticket_key,
-    assignee: r.assignee ?? null, prNumber: r.pr_number ?? null, headSha: r.head_sha ?? null,
-    sessionId: r.session_id ?? null,
-    state: r.state as SweepState, cycles: r.cycles,
-    gate: r.gate == null ? null : JSON.parse(r.gate), reason: r.reason ?? null,
-    createdAt: r.created_at, updatedAt: r.updated_at,
-  };
-}
-
-function rowToSweepEvent(r: Row): SweepEvent {
-  return {
-    id: r.id, jobId: r.job_id, at: r.at, event: r.event as SweepEventKind,
-    detail: r.detail == null ? null : JSON.parse(r.detail),
-  };
-}
-
-export class Store {
-  readonly db: Database;
-
+export class Store extends SweepJobStore {
   constructor(path: string) {
-    this.db = new Database(path, { create: true });
-    migrate(this.db);
+    const db = new Database(path, { create: true });
+    migrate(db);
+    super(db);
   }
 
   close(): void {
@@ -779,65 +763,8 @@ export class Store {
     }));
   }
 
-  // ---- AO Lead Console sweeps (lead-console PRD §4-§5) ----
-
-  createSweepJob(p: {
-    kind: SweepKind; ticketId: string; ticketKey: string;
-    assignee?: string | null; prNumber?: number | null; headSha?: string | null;
-  }): SweepJob {
-    const now = Date.now();
-    const id = crypto.randomUUID();
-    this.db.run(
-      `INSERT INTO sweep_job (id, kind, ticket_id, ticket_key, assignee, pr_number, head_sha, state, cycles, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)`,
-      [id, p.kind, p.ticketId, p.ticketKey, p.assignee ?? null, p.prNumber ?? null, p.headSha ?? null, now, now],
-    );
-    return this.getSweepJob(id)!;
-  }
-
-  getSweepJob(id: string): SweepJob | null {
-    const row = this.db.query("SELECT * FROM sweep_job WHERE id = ?").get(id) as Row | null;
-    return row ? rowToSweepJob(row) : null;
-  }
-
-  listSweepJobs(filter: { kind?: SweepKind; state?: SweepState } = {}): SweepJob[] {
-    const where: string[] = [];
-    const vals: any[] = [];
-    if (filter.kind) { where.push("kind = ?"); vals.push(filter.kind); }
-    if (filter.state) { where.push("state = ?"); vals.push(filter.state); }
-    const sql = `SELECT * FROM sweep_job ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY created_at ASC`;
-    return (this.db.query(sql).all(...vals) as Row[]).map(rowToSweepJob);
-  }
-
-  /** Patch a job's mutable fields (state, cycles, pr, head, session, gate, reason); bumps updated_at. */
-  transitionSweepJob(id: string, patch: {
-    state?: SweepState; cycles?: number; prNumber?: number | null;
-    headSha?: string | null; sessionId?: string | null; gate?: unknown; reason?: string | null;
-  }): SweepJob {
-    const sets: string[] = ["updated_at = ?"];
-    const vals: any[] = [Date.now()];
-    if (patch.state !== undefined)     { sets.push("state = ?");      vals.push(patch.state); }
-    if (patch.cycles !== undefined)    { sets.push("cycles = ?");     vals.push(patch.cycles); }
-    if (patch.prNumber !== undefined)  { sets.push("pr_number = ?");  vals.push(patch.prNumber); }
-    if (patch.headSha !== undefined)   { sets.push("head_sha = ?");   vals.push(patch.headSha); }
-    if (patch.sessionId !== undefined) { sets.push("session_id = ?"); vals.push(patch.sessionId); }
-    if (patch.gate !== undefined)      { sets.push("gate = ?");       vals.push(patch.gate === null ? null : JSON.stringify(patch.gate)); }
-    if (patch.reason !== undefined)    { sets.push("reason = ?");     vals.push(patch.reason); }
-    this.db.run(`UPDATE sweep_job SET ${sets.join(", ")} WHERE id = ?`, [...vals, id]);
-    return this.getSweepJob(id)!;
-  }
-
-  recordSweepEvent(jobId: string, event: SweepEventKind, detail?: unknown): SweepEvent {
-    this.db.run(
-      "INSERT INTO sweep_event (job_id, at, event, detail) VALUES (?, ?, ?, ?)",
-      [jobId, Date.now(), event, detail === undefined ? null : JSON.stringify(detail)],
-    );
-    return rowToSweepEvent(this.db.query("SELECT * FROM sweep_event WHERE rowid = last_insert_rowid()").get() as Row);
-  }
-
-  listSweepEvents(jobId: string): SweepEvent[] {
-    return (this.db.query("SELECT * FROM sweep_event WHERE job_id = ? ORDER BY at ASC, id ASC").all(jobId) as Row[]).map(rowToSweepEvent);
-  }
+  // Sweep job + event CRUD (createSweepJob/getSweepJob/listSweepJobs/transitionSweepJob/recordSweepEvent/
+  // listSweepEvents) lives in the SweepJobStore base class this extends — see ./sweep-store.ts.
 
   // ---- Linear issue sync + in-review enqueue (first live slice, PRD §4) ----
 
@@ -899,6 +826,32 @@ export class Store {
       if (active) continue;
       created.push(this.createSweepJob({
         kind: "in_review", ticketId: iss.id, ticketKey: iss.identifier, assignee: iss.assignee,
+      }));
+    }
+    return created;
+  }
+
+  /**
+   * Enqueue a fix sweep job for every `qa-fix` ticket still sitting unimplemented in Todo — a tester's FAIL
+   * verdict turned into a follow-up (PRD §13). Mirrors enqueueInReviewSweeps, but BUILDS from scratch like a
+   * rescue: it selects only the UNSTARTED qa-fix tickets a human hasn't picked up (an In-Review one is the
+   * in-review sweep's job; a started one a human owns), skips `lead-level` + Lead Ops (the same
+   * build-from-scratch exclusions as rescue), and skips a ticket that already has an active fix job.
+   * Idempotent — safe to run on every sweep trigger. Returns the jobs it created.
+   */
+  enqueueFixSweeps(leadOpsProject?: string): SweepJob[] {
+    const created: SweepJob[] = [];
+    for (const iss of this.listLinearIssues()) {
+      if (!iss.labels.includes(QA_FIX_LABEL)) continue;   // only tester-failure follow-ups
+      if (iss.stateType !== "unstarted") continue;        // only unimplemented Todo items (not started/in-review/done)
+      if (iss.labels.includes(LEAD_LEVEL)) continue;      // lead-level stays off the auto-builder (as with rescue)
+      if (isLeadOps(iss, leadOpsProject)) continue;       // lead-desk tasks are human to-dos, not agent work (PRD §9)
+      const active = this.db.query(
+        `SELECT 1 FROM sweep_job WHERE kind = 'fix' AND ticket_id = ? AND state NOT IN ('merged', 'failed') LIMIT 1`,
+      ).get(iss.id);
+      if (active) continue;
+      created.push(this.createSweepJob({
+        kind: "fix", ticketId: iss.id, ticketKey: iss.identifier, assignee: iss.assignee,
       }));
     }
     return created;

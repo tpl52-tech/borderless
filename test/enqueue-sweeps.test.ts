@@ -43,3 +43,38 @@ describe("enqueueInReviewSweeps (first live slice: linear_issues -> sweep_job)",
     expect(s.enqueueInReviewSweeps().map((j) => j.ticketKey)).toEqual(["COR-9"]);
   });
 });
+
+describe("enqueueFixSweeps (qa-fix Todo tickets → build-from-scratch jobs)", () => {
+  test("one job per unstarted qa-fix ticket; skips non-qa-fix, started, done; idempotent; re-eligible when terminal", () => {
+    const s = new Store(":memory:");
+    s.upsertLinearIssue({ id: "f1", identifier: "COR-100", stateName: "Todo", stateType: "unstarted", labels: ["qa-fix"], assignee: "dana" });
+    s.upsertLinearIssue({ id: "f2", identifier: "COR-101", stateName: "Todo", stateType: "unstarted", labels: ["qa-fix"] });
+    s.upsertLinearIssue({ id: "nf", identifier: "COR-7", stateName: "Todo", stateType: "unstarted", labels: ["feature"] });       // not qa-fix
+    s.upsertLinearIssue({ id: "started", identifier: "COR-8", stateName: "In Progress", stateType: "started", labels: ["qa-fix"] }); // a human owns it
+    s.upsertLinearIssue({ id: "done", identifier: "COR-9", stateName: "Done", stateType: "completed", labels: ["qa-fix"] });         // terminal
+
+    const first = s.enqueueFixSweeps();
+    expect(first.map((j) => j.ticketKey).sort()).toEqual(["COR-100", "COR-101"]);
+    expect(first.every((j) => j.kind === "fix" && j.state === "queued")).toBe(true);
+
+    expect(s.enqueueFixSweeps().length).toBe(0); // idempotent — active fix jobs already exist
+
+    s.transitionSweepJob(first[0]!.id, { state: "merged" });
+    expect(s.enqueueFixSweeps().map((j) => j.ticketKey)).toEqual([first[0]!.ticketKey]); // terminal → eligible again
+  });
+
+  test("skips lead-level (stays off the auto-builder, as with rescue) and Lead Ops", () => {
+    const s = new Store(":memory:");
+    s.upsertLinearIssue({ id: "lead", identifier: "COR-100", stateName: "Todo", stateType: "unstarted", labels: ["qa-fix", "lead-level"] });
+    s.upsertLinearIssue({ id: "ops", identifier: "COR-101", stateName: "Todo", stateType: "unstarted", labels: ["qa-fix"], projectName: "Lead Ops" });
+    s.upsertLinearIssue({ id: "ok", identifier: "COR-102", stateName: "Todo", stateType: "unstarted", labels: ["qa-fix"] });
+    expect(s.enqueueFixSweeps("Lead Ops").map((j) => j.ticketKey)).toEqual(["COR-102"]);
+  });
+
+  test("the fix dedup is scoped to kind=fix: an in-review job on the same ticket doesn't block the fix job", () => {
+    const s = new Store(":memory:");
+    s.upsertLinearIssue({ id: "t", identifier: "COR-100", stateName: "Todo", stateType: "unstarted", labels: ["qa-fix"] });
+    s.createSweepJob({ kind: "in_review", ticketId: "t", ticketKey: "COR-100" });
+    expect(s.enqueueFixSweeps().map((j) => j.ticketKey)).toEqual(["COR-100"]);
+  });
+});

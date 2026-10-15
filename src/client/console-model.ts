@@ -85,14 +85,15 @@ export function stateTone(state: SweepState): Tone {
   }
 }
 
-/** Foreground tone for a sweep kind (rescue reads pink, in-review reads muted — the mock's k-rescue/k-review). */
+/** Foreground tone for a sweep kind (rescue + qa-fix read pink, in-review reads muted — the mock's k-rescue/k-review). */
 export function kindTone(kind: SweepKind): Tone {
-  return kind === "rescue" ? "pink" : "ink2";
+  return kind === "in_review" ? "ink2" : "pink"; // build-from-scratch (rescue/fix) → pink; a driven in-review PR → muted
 }
 
-/** How a kind is spelled in the queue table. */
+/** How a kind is spelled in the queue table (a total Record so a new SweepKind is a compile error until added). */
+const KIND_LABEL: Record<SweepKind, string> = { in_review: "review", rescue: "rescue", fix: "fix" };
 export function kindLabel(kind: SweepKind): string {
-  return kind === "rescue" ? "rescue" : "review";
+  return KIND_LABEL[kind];
 }
 
 // --- nav / cursor / attach / ask-editor ------------------------------------------------------------------

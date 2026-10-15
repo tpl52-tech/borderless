@@ -187,7 +187,7 @@ describe("parseReviewVerdict (reviewer output → verdict)", () => {
   });
 });
 
-describe("workerSeed (PRD §5/§4 — rescue embeds the ACs; in-review drives the PR)", () => {
+describe("workerSeed (PRD §5/§4 — rescue/fix embed the ACs; in-review drives the PR)", () => {
   const job = (over: Partial<SweepJob> = {}): SweepJob => ({
     id: "j1", kind: "rescue", ticketId: "t1", ticketKey: "COR-9", assignee: null,
     prNumber: null, headSha: null, sessionId: null, state: "queued", cycles: 0,
@@ -217,6 +217,20 @@ describe("workerSeed (PRD §5/§4 — rescue embeds the ACs; in-review drives th
   test("in-review drives the existing PR and ignores the rescue ACs", () => {
     const seed = workerSeed(job({ kind: "in_review", prNumber: 7 }), initial, { acceptance: "ignored" });
     expect(seed).toBe("Drive PR #7 for COR-9 to a mergeable state.");
+  });
+
+  test("fix frames the tester's QA failure, embeds the failed-steps body, and asks for a PR", () => {
+    const seed = workerSeed(job({ kind: "fix", ticketKey: "COR-100" }), initial, { acceptance: "Step 3: price shows below the stars but Figma shows it above" });
+    expect(seed).toContain("Resolve qa-fix ticket COR-100.");
+    expect(seed).toContain("A tester's QA found this feature failing");
+    expect(seed).toContain("Step 3: price shows below the stars");
+    expect(seed).toContain("Then open a PR.");
+  });
+
+  test("fix falls back to acceptance-criteria phrasing when no body is known", () => {
+    const seed = workerSeed(job({ kind: "fix" }), initial, { acceptance: null });
+    expect(seed).toContain("implement the fix from its acceptance criteria");
+    expect(seed).toContain("Then open a PR.");
   });
 
   test("a fix cycle appends the findings + gate blockers to the head", () => {
@@ -266,6 +280,13 @@ describe("reviewerSeed (acceptance-criteria completeness is a gate dimension)", 
     const s = reviewerSeed(job({ kind: "rescue" }), "- [ ] build it");
     expect(s).toContain("EVERY acceptance criterion is affirmatively satisfied"); // the gate reads this as 'acceptance-proven'
     expect(s).not.toContain("no regression");          // rescue has no original behavior to preserve
+    for (const m of MARKERS) expect(s).toContain(m);
+  });
+
+  test("fix PRESERVATION = every AC satisfied (build-from-scratch, like rescue); 3 markers intact", () => {
+    const s = reviewerSeed(job({ kind: "fix" }), "- [ ] price renders above the stars");
+    expect(s).toContain("EVERY acceptance criterion is affirmatively satisfied");
+    expect(s).not.toContain("no regression"); // a qa-fix has no prior behavior to preserve; completeness is the bar
     for (const m of MARKERS) expect(s).toContain(m);
   });
 

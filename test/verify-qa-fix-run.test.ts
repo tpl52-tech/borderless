@@ -1,13 +1,13 @@
 import { test, expect, describe } from "bun:test";
 import { runQaFixSweep, type QaFixDeps } from "../src/daemon/verify-qa-fix-run.ts";
-import { fixMarker } from "../src/shared/verify-qa-fix.ts";
+import { fixMarker, type Difficulty } from "../src/shared/verify-qa-fix.ts";
 import type { IssueCreateInput } from "../src/shared/linear.ts";
 
 const AT = 1760054400000;
 const rawRow = (ticket_id: string, verdict: string, over: Record<string, unknown> = {}) =>
   ({ ticket_id, run: { verdict, verdictBy: "dana", verdictAt: AT, ...over } });
 
-type Parent = { id: string; identifier: string; title: string; projectId: string | null; stateType: string | null; priority: number | null };
+type Parent = { id: string; identifier: string; title: string; description?: string | null; projectId: string | null; stateType: string | null; priority: number | null };
 
 function deps(over: Partial<QaFixDeps> & {
   raw?: unknown;
@@ -16,24 +16,27 @@ function deps(over: Partial<QaFixDeps> & {
   children?: Record<string, string[]>;
   todo?: string | null;
   done?: string | null;
+  difficulty?: Difficulty;
 } = {}): { deps: QaFixDeps; created: IssueCreateInput[]; states: Array<{ issueId: string; stateId: string }>; comments: Array<{ issueId: string; body: string }>; order: string[] } {
   const created: IssueCreateInput[] = [];
   const states: Array<{ issueId: string; stateId: string }> = [];
   const comments: Array<{ issueId: string; body: string }> = [];
   const order: string[] = [];
   const subs = over.subs ?? { "COR-91": { id: "u91", parentId: "u17" }, "COR-95": { id: "u95", parentId: "u17" } };
-  const parents = over.parents ?? { u17: { id: "u17", identifier: "COR-17", title: "Search", projectId: "p1", stateType: "started", priority: 0 } };
+  const parents = over.parents ?? { u17: { id: "u17", identifier: "COR-17", title: "Search", description: "acceptance criteria", projectId: "p1", stateType: "started", priority: 0 } };
   const children = over.children ?? {};
+  const DIFFS = { easy: "l-easy", medium: "l-medium", hard: "l-hard" };
   return {
     created, states, comments, order,
     deps: {
       readVerdicts: over.readVerdicts ?? (async () => over.raw ?? [rawRow("COR-91", "fail")]),
       subIssueByKey: over.subIssueByKey ?? ((k) => subs[k]),
-      parentByUuid: over.parentByUuid ?? ((u) => parents[u]),
+      parentByUuid: over.parentByUuid ?? ((u) => { const p = parents[u]; return p ? { ...p, description: p.description ?? null } : undefined; }),
       childDescriptions: over.childDescriptions ?? (async (u) => children[u] ?? []),
-      targets: over.targets ?? (async () => ({ teamId: "t1", fixLabelId: "lfix", blockedLabelId: "lblk" })),
+      targets: over.targets ?? (async () => ({ teamId: "t1", fixLabelId: "lfix", blockedLabelId: "lblk", difficultyLabelIds: DIFFS })),
       todoStateId: over.todoStateId ?? (async () => (over.todo === undefined ? "todo-state" : over.todo)),
       doneStateId: over.doneStateId ?? (async () => (over.done === undefined ? "done-state" : over.done)),
+      assessDifficulty: over.assessDifficulty ?? (async () => over.difficulty ?? "medium"),
       createIssue: over.createIssue ?? (async (input) => { created.push(input); order.push("create"); return { ticketKey: `COR-${119 + created.length}`, url: `http://i/${created.length}` }; }),
       setState: over.setState ?? (async (issueId, stateId) => { states.push({ issueId, stateId }); order.push("move"); }),
       postComment: over.postComment ?? (async (issueId, body) => { comments.push({ issueId, body }); order.push("comment"); return "http://c/1"; }),
@@ -43,14 +46,21 @@ function deps(over: Partial<QaFixDeps> & {
 }
 
 describe("runQaFixSweep", () => {
-  test("a FAIL opens a qa-fix child in Todo state; the feature ticket stays put", async () => {
-    const h = deps();
+  test("a FAIL opens a qa-fix child in Todo state, rated + difficulty-labelled; the feature ticket stays put", async () => {
+    const h = deps(); // default assessment = medium
     const [r] = await runQaFixSweep(h.deps);
-    expect(r).toMatchObject({ subKey: "COR-91", parentKey: "COR-17", kind: "fix", action: "created", fixKey: "COR-120" });
+    expect(r).toMatchObject({ subKey: "COR-91", parentKey: "COR-17", kind: "fix", action: "created", fixKey: "COR-120", difficulty: "medium" });
     expect(h.created).toHaveLength(1);
-    expect(h.created[0]).toMatchObject({ teamId: "t1", projectId: "p1", parentId: "u17", labelIds: ["lfix"], assigneeId: null, stateId: "todo-state" });
+    expect(h.created[0]).toMatchObject({ teamId: "t1", projectId: "p1", parentId: "u17", labelIds: ["lfix", "l-medium"], assigneeId: null, stateId: "todo-state" });
     expect(h.created[0]!.description).toContain(fixMarker(AT));
     expect(h.states).toHaveLength(0); // the feature ticket is NOT moved on a fail
+  });
+
+  test("the difficulty label matches the assessment (hard → the hard label)", async () => {
+    const h = deps({ difficulty: "hard" });
+    const [r] = await runQaFixSweep(h.deps);
+    expect(r.difficulty).toBe("hard");
+    expect(h.created[0]!.labelIds).toEqual(["lfix", "l-hard"]);
   });
 
   test("the only writes are the create then the best-effort breadcrumb — no feature-ticket move", async () => {
@@ -59,11 +69,14 @@ describe("runQaFixSweep", () => {
     expect(h.order).toEqual(["create", "comment"]);
   });
 
-  test("a BLOCKED opens a qa-blocked Todo child and never moves the feature ticket", async () => {
-    const h = deps({ raw: [rawRow("COR-95", "blocked")] });
+  test("a BLOCKED opens a qa-blocked Todo child, with NO difficulty (label or field), and never moves the feature", async () => {
+    let assessed = false;
+    const h = deps({ raw: [rawRow("COR-95", "blocked")], assessDifficulty: async () => { assessed = true; return "hard"; } });
     const [r] = await runQaFixSweep(h.deps);
     expect(r).toMatchObject({ kind: "blocked", action: "created" });
-    expect(h.created[0]!.labelIds).toEqual(["lblk"]);
+    expect(r.difficulty).toBeUndefined();
+    expect(h.created[0]!.labelIds).toEqual(["lblk"]); // only the kind label — no difficulty label
+    expect(assessed).toBe(false); // difficulty isn't even assessed for a blocked ticket
     expect(h.created[0]!.stateId).toBe("todo-state");
     expect(h.states).toHaveLength(0);
   });

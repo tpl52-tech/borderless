@@ -211,7 +211,7 @@ export async function reReviewAdvancedPrs(
     // sweep; an unchanged or unknown head means the human hasn't pushed → still resting on them.
     if (res.status !== "fulfilled" || res.value == null || res.value === job.headSha) return;
     try {
-      reopened.push(store.transitionSweepJob(job.id, { state: "queued", headSha: res.value, cycles: 0, gate: null, reason: null, sessionId: null }));
+      reopened.push(store.transitionSweepJob(job.id, { state: "queued", headSha: res.value, cycles: 0, gate: null, reason: null, sessionId: null, leadGuidance: null }));
       store.recordSweepEvent(job.id, "state_change", { from: job.state, to: "queued", reason: "head-advance re-review", headSha: res.value });
     } catch (err) {
       // uq_sweep_review spans ALL in_review states for a ticket (not just active ones, unlike
@@ -244,7 +244,7 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
     ciPollMs: cfg.ciPollMs ?? DEFAULT_CI_POLL_MS,
     maxCiWaits: cfg.maxCiWaits ?? DEFAULT_MAX_CI_WAITS,
     async spawnWorker(job, feedback, territory): Promise<WorkerResult> {
-      const ctx: WorkerSeedContext = { acceptance: cfg.acceptanceFor?.(job.ticketId) ?? null, territory };
+      const ctx: WorkerSeedContext = { acceptance: cfg.acceptanceFor?.(job.ticketId) ?? null, territory, guidance: job.leadGuidance };
       const sessionId = await spawnAndWait(workerSeed(job, feedback, ctx));
       const { headSha, prNumber } = await readHeadPr(job);
       // Free the ticket branch so a fix-cycle re-spawn can re-provision it — but only once a PR exists, i.e.
@@ -275,6 +275,7 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
 export interface WorkerSeedContext {
   acceptance?: string | null;
   territory?: Territory;
+  guidance?: string | null; // the lead's re-drive instruction (resolve panel), followed on this drive
 }
 
 const MAX_ACCEPTANCE = 4000; // keep a pathologically long description from bloating the seed
@@ -291,6 +292,8 @@ export function workerSeed(job: SweepJob, feedback: WorkerFeedback, ctx: WorkerS
     const detail = feedback.review.findings ? `\n\nThe independent reviewer's findings to address:\n${feedback.review.findings}` : "";
     body = `${head} Address ${findingsPhrase} and these gate blockers: ${feedback.blockers.join(", ")}.${preservation}${quality}${detail}`;
   }
+  const g = clampAcceptance(ctx.guidance);
+  if (g) body += `\n\nThe lead reviewed this and is re-driving it — follow this instruction exactly:\n${g}`;
   const warning = ctx.territory ? territoryWarning(ctx.territory) : null;
   return warning ? `${body}\n\n${warning}` : body;
 }

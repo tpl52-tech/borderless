@@ -263,6 +263,12 @@ describe("workerSeed (PRD §5/§4 — rescue/fix embed the ACs; in-review drives
     expect(seed).toContain("src/x.ts:10 split this function"); // the reviewer's specifics are relayed, not re-derived
   });
 
+  test("a re-drive embeds the lead's guidance in the seed (so the worker follows the instruction)", () => {
+    const seed = workerSeed(job({ kind: "in_review", prNumber: 7 }), initial, { guidance: "put the price above the stars, per Figma" });
+    expect(seed).toContain("The lead reviewed this and is re-driving it");
+    expect(seed).toContain("put the price above the stars, per Figma");
+  });
+
   test("a territory in context appends the preventive collision warning (both initial + fix cycles)", () => {
     const territory: Territory = new Map([
       ["conditionstars", { ticketKey: "COR-54", owner: "Renee Gowda", state: "In Progress", deliverable: "ConditionStars" }],

@@ -439,7 +439,10 @@
           </div>
           <div class="md-body">
             <div class="md-reason" id="sd-reason"></div>
-            <div id="sd-actions" hidden><button class="btn green" id="sd-approve">&#10003; Approve &mdash; mark ready</button><span class="note" id="sd-approve-note" style="margin:0 0 0 .6rem"></span></div>
+            <div id="sd-actions" hidden>
+              <div style="margin-bottom:.5rem"><button class="btn green" id="sd-approve">&#10003; Approve &mdash; mark ready</button><span class="note" id="sd-approve-note" style="margin:0 0 0 .6rem"></span></div>
+              <div><input id="sd-redrive-field" placeholder="or tell the agent what to change&hellip;" autocomplete="off" style="width:54%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:.32rem .5rem;font:inherit;font-size:.8rem;margin-right:.5rem;vertical-align:middle"><button class="btn o-pink" id="sd-redrive">&#8635; Re-drive</button><span class="note" id="sd-redrive-note" style="margin:0 0 0 .6rem"></span></div>
+            </div>
             <div><div class="ph" style="margin-bottom:.45rem">TIMELINE</div><div class="log" id="sd-timeline"></div></div>
             <div>
               <div class="ph" style="margin-bottom:.45rem">RESOLVE &mdash; chat it through</div>
@@ -602,7 +605,7 @@
   field.addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
 
   // ---- RESOLVE: click a NEEDS_YOU / READY card → detail panel + per-ticket chat ----
-  const sdModal = $("s-detail"), sdStream = $("sd-stream"), sdField = $("sd-field"), sdApprove = $("sd-approve");
+  const sdModal = $("s-detail"), sdStream = $("sd-stream"), sdField = $("sd-field"), sdApprove = $("sd-approve"), sdRedrive = $("sd-redrive"), sdRedriveField = $("sd-redrive-field");
   let sdId = "", sdHistory = [];
   const sdBubble = makeBubble(sdStream);
   function sdClose() { sdModal.hidden = true; sdId = ""; }
@@ -623,6 +626,7 @@
       $("sd-reason").textContent = j.reason || "(no escalation reason recorded)";
       $("sd-actions").hidden = j.state !== "needs_human"; // approve only a job that's waiting on you
       sdApprove.disabled = false; $("sd-approve-note").textContent = "";
+      sdRedrive.disabled = false; $("sd-redrive-note").textContent = ""; sdRedriveField.value = "";
       $("sd-timeline").innerHTML = (d.events || []).map((e) => `<div class="line"><span class="t">${sdTime(e.at)}</span> <span class="tag dim">${esc(e.event)}</span> ${esc(sdDetail(e.detail))}</div>`).join("") || `<div class="line s-dim">no events</div>`;
       sdBubble("Borderless", "Ask me anything about this ticket, or tell me how you want to resolve it.");
     } catch (e) { $("sd-ticket").textContent = "error loading"; }
@@ -656,6 +660,19 @@
       else { $("sd-approve-note").textContent = j.error || "could not approve"; sdApprove.disabled = false; }
     } catch (e) { $("sd-approve-note").textContent = "approve failed"; sdApprove.disabled = false; }
   });
+  sdRedrive.addEventListener("click", async () => {
+    if (!sdId) return;
+    const guidance = sdRedriveField.value.trim();
+    if (!guidance) { $("sd-redrive-note").textContent = "type what to change first"; return; }
+    sdRedrive.disabled = true; $("sd-redrive-note").textContent = "…";
+    try {
+      const res = await fetch("/api/sweep/redrive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: sdId, guidance }) });
+      const j = await res.json();
+      if (j.ok) { $("sd-redrive-note").textContent = "↻ re-driving — the agent is applying your guidance"; sdRedriveField.value = ""; await load(); }
+      else { $("sd-redrive-note").textContent = j.error || "could not re-drive"; sdRedrive.disabled = false; }
+    } catch (e) { $("sd-redrive-note").textContent = "re-drive failed"; sdRedrive.disabled = false; }
+  });
+  sdRedriveField.addEventListener("keydown", (e) => { if (e.key === "Enter") sdRedrive.click(); });
 
   // ---- Refresh: pull the live Linear board, then re-render ----
   const refreshBtn = $("refresh-btn");

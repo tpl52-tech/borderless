@@ -10,7 +10,7 @@
 
 import { consolePayload, sweepRow } from "../shared/console-rows.ts";
 import { parseResolveTurns, type ResolveTurn } from "../shared/resolve-chat.ts";
-import type { ApproveResult } from "./resolve-drive.ts";
+import type { ApproveResult, RedriveResult } from "./resolve-drive.ts";
 import type { InReviewSweepResult, FixSweepResult } from "../shared/types.ts";
 import { parseDraftAnswers, type DeskDraftResponse, type DraftAnswer } from "../shared/desk-draft.ts";
 import { parseCreateRequest, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
@@ -38,6 +38,9 @@ export interface WebServerDeps {
   /** Lead decision on a stopped job (SWEEPS detail panel): APPROVE → move the needs_human job to ready (lead
    *  override). Synchronous store update; `ready` is surfaced for the lead to merge, not merged here. */
   approveJob: (jobId: string) => ApproveResult;
+  /** Lead decision on a stopped job: RE-DRIVE with guidance → re-open the needs_human job to queued with the
+   *  lead's instruction + kick the engine (the next worker's seed carries it). */
+  redrive: (jobId: string, guidance: string) => RedriveResult;
   /** Pull the live Linear board into the store (no sweeps) — the Refresh button. */
   syncBoard: () => Promise<{ synced: number; configured: boolean }>;
   /** PRD §13: classify the Verifying tickets from their merged PRs. A live gh scan — on-demand, never polled. */
@@ -148,6 +151,13 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         const id = typeof body.id === "string" ? body.id.trim() : "";
         if (!id) return Response.json({ ok: false, error: "no job id" });
         return Response.json(deps.approveJob(id)); // needs_human → ready (lead override)
+      }
+      if (pathname === "/api/sweep/redrive" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { id?: unknown; guidance?: unknown };
+        const id = typeof body.id === "string" ? body.id.trim() : "";
+        const guidance = typeof body.guidance === "string" ? body.guidance.trim() : "";
+        if (!id) return Response.json({ ok: false, error: "no job id" });
+        return Response.json(deps.redrive(id, guidance)); // needs_human → queued, re-driven with the lead's guidance
       }
       return new Response("not found", { status: 404 });
     },

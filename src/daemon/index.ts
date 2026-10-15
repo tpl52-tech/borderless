@@ -60,7 +60,7 @@ import { httpOpenRouterChat } from "./openrouter/chat.ts";
 import { claudeCliChat } from "./claude-chat.ts";
 import type { Chat, Message } from "./openrouter/runner.ts";
 import { resolveChatSeed } from "../shared/resolve-chat.ts";
-import { approveJob } from "./resolve-drive.ts";
+import { approveJob, redriveJob } from "./resolve-drive.ts";
 import { memberByLinearId, firstName, testerMember, ROSTER } from "../shared/roster.ts";
 import { coLeads, epicRows, DELEGATED_LABEL, DELEGATED_LABEL_COLOR, delegationDmText, DEFAULT_LEAD_OPS_PROJECT } from "../shared/lead-desk.ts";
 import { draftPrompt, parseDraft, type DraftContext, type DeskDraftResponse, type DraftPerson, type DraftAnswer } from "../shared/desk-draft.ts";
@@ -581,13 +581,21 @@ export function startDaemon(home = stateHome()): Daemon {
   };
   const scanFix = singleFlight(scanFixSweepImpl, () => "fix");
 
+  // Re-drive a stopped job with the lead's guidance (resolve panel): re-open it, then kick the supervisor so the
+  // engine picks it up and the next worker's seed carries the instruction. No-op pickup when no repo is wired.
+  const redrive = (id: string, guidance: string) => {
+    const r = redriveJob(store, id, guidance);
+    if (r.ok) sweepSupervisor?.pickup();
+    return r;
+  };
+
   server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, fixSweep: scanFix, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, verifyQa: runVerifyQa, verifyQaSync: runVerifyQaSync, verifyQaFix: runVerifyQaFix });
 
   // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only. It is
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runQaFix: () => runVerifyQaFix(true), runInReviewSweep: () => scanInReview("In Review"), runFixSweep: () => scanFix(), repo: config.repo, resolveChatRun, approveJob: (id) => approveJob(store, id), deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runQaFix: () => runVerifyQaFix(true), runInReviewSweep: () => scanInReview("In Review"), runFixSweep: () => scanFix(), repo: config.repo, resolveChatRun, approveJob: (id) => approveJob(store, id), redrive, deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

@@ -163,14 +163,26 @@ describe("reReviewAdvancedPrs (re-open resting jobs whose PR head advanced)", ()
 });
 
 describe("parseReviewVerdict (reviewer output → verdict)", () => {
-  test("parses all three markers; a clean review", () => {
-    const v = parseReviewVerdict("summary...\nRED FINDINGS: 0\nPRESERVATION: proven\nJUDGMENT: none\n", "rev-1");
-    expect(v).toEqual({ sessionId: "rev-1", redFindings: 0, preservationProven: true, judgmentCall: null });
+  test("parses all four markers; a clean review", () => {
+    const v = parseReviewVerdict("summary...\nRED FINDINGS: 0\nPRESERVATION: proven\nJUDGMENT: none\nTHERMO GRADE: A\n", "rev-1");
+    expect(v).toEqual({ sessionId: "rev-1", redFindings: 0, preservationProven: true, judgmentCall: null, thermoGrade: "A" });
   });
 
-  test("red findings + unproven preservation + a judgment call", () => {
-    const v = parseReviewVerdict("RED FINDINGS: 3\nPRESERVATION: unproven\nJUDGMENT: which rounding rule applies?", "rev-2");
-    expect(v).toEqual({ sessionId: "rev-2", redFindings: 3, preservationProven: false, judgmentCall: "which rounding rule applies?" });
+  test("red findings + unproven preservation + a judgment call + a below-A grade", () => {
+    const v = parseReviewVerdict("RED FINDINGS: 3\nPRESERVATION: unproven\nJUDGMENT: which rounding rule applies?\nTHERMO GRADE: B+", "rev-2");
+    expect(v).toEqual({ sessionId: "rev-2", redFindings: 3, preservationProven: false, judgmentCall: "which rounding rule applies?", thermoGrade: "B+" });
+  });
+
+  test("parses a modified grade like A- (the gate reads it as below A)", () => {
+    expect(parseReviewVerdict("RED FINDINGS: 0\nPRESERVATION: proven\nJUDGMENT: none\nTHERMO GRADE: A-", "r").thermoGrade).toBe("A-");
+  });
+
+  test("captures the FINDINGS block (relayed to the fixer); omits it when absent or 'none'", () => {
+    const v = parseReviewVerdict("RED FINDINGS: 1\nPRESERVATION: proven\nJUDGMENT: none\nTHERMO GRADE: B+\nFINDINGS:\n- src/x.ts:10 split this function\n- src/y.ts dead branch", "r");
+    expect(v.findings).toContain("src/x.ts:10 split this function");
+    expect(v.findings).toContain("dead branch");
+    expect(parseReviewVerdict("RED FINDINGS: 0\nPRESERVATION: proven\nJUDGMENT: none\nTHERMO GRADE: A\nFINDINGS: none", "r").findings).toBeUndefined();
+    expect(parseReviewVerdict("RED FINDINGS: 0\nPRESERVATION: proven\nJUDGMENT: none\nTHERMO GRADE: A", "r").findings).toBeUndefined();
   });
 
   test("fails closed when markers are missing or garbled", () => {
@@ -178,6 +190,7 @@ describe("parseReviewVerdict (reviewer output → verdict)", () => {
     expect(v.redFindings).toBe(1); // unparseable red = treated as blocking
     expect(v.preservationProven).toBe(false); // unparseable = not proven
     expect(v.judgmentCall).toBeNull();
+    expect(v.thermoGrade).toBeNull(); // no grade = fail-closed → the gate blocks
   });
 
   test("the last restated marker wins (reviewers revise)", () => {
@@ -234,12 +247,20 @@ describe("workerSeed (PRD §5/§4 — rescue/fix embed the ACs; in-review drives
   });
 
   test("a fix cycle appends the findings + gate blockers to the head", () => {
-    const fb: WorkerFeedback = { initial: false, blockers: ["ci-failing"], review: { redFindings: 2, preservationProven: false, judgmentCall: null, sessionId: "r1" } };
+    const fb: WorkerFeedback = { initial: false, blockers: ["ci-failing"], review: { redFindings: 2, preservationProven: false, judgmentCall: null, thermoGrade: "A", sessionId: "r1" } };
     const seed = workerSeed(job({ kind: "in_review", prNumber: 7 }), fb);
     expect(seed).toContain("Drive PR #7");
     expect(seed).toContain("2 blocking review finding(s)");
     expect(seed).toContain("ci-failing");
     expect(seed).toContain("prove no behavior regression");
+  });
+
+  test("a fix cycle with a below-A thermo grade directs the worker to reach grade A and relays the findings", () => {
+    const fb: WorkerFeedback = { initial: false, blockers: ["thermo-below-a"], review: { redFindings: 0, preservationProven: true, judgmentCall: null, thermoGrade: "B+", findings: "src/x.ts:10 split this function", sessionId: "r1" } };
+    const seed = workerSeed(job({ kind: "in_review", prNumber: 7 }), fb);
+    expect(seed).toContain("grade A");
+    expect(seed).toContain("B+"); // the current grade is named so the worker knows the starting point
+    expect(seed).toContain("src/x.ts:10 split this function"); // the reviewer's specifics are relayed, not re-derived
   });
 
   test("a territory in context appends the preventive collision warning (both initial + fix cycles)", () => {
@@ -251,7 +272,7 @@ describe("workerSeed (PRD §5/§4 — rescue/fix embed the ACs; in-review drives
     expect(rescue).toContain("do NOT create, extract, or rewrite them"); // ...plus the warning
     expect(rescue).toContain("ConditionStars — owned by COR-54");
 
-    const fb: WorkerFeedback = { initial: false, blockers: ["ci-failing"], review: { redFindings: 1, preservationProven: true, judgmentCall: null, sessionId: "r1" } };
+    const fb: WorkerFeedback = { initial: false, blockers: ["ci-failing"], review: { redFindings: 1, preservationProven: true, judgmentCall: null, thermoGrade: "A", sessionId: "r1" } };
     const fix = workerSeed(job({ kind: "in_review", prNumber: 7 }), fb, { territory });
     expect(fix).toContain("Drive PR #7");
     expect(fix).toContain("ConditionStars — owned by COR-54");
@@ -290,6 +311,13 @@ describe("reviewerSeed (acceptance-criteria completeness is a gate dimension)", 
     for (const m of MARKERS) expect(s).toContain(m);
   });
 
+  test("instructs the reviewer to grade code quality (thermo) and emit the 4th THERMO GRADE line", () => {
+    const s = reviewerSeed(job(), "- [ ] x");
+    expect(s).toContain("thermo-nuclear-code-quality-review");
+    expect(s).toContain("THERMO GRADE:");
+    expect(s).toContain("four lines");
+  });
+
   test("no/blank ACs → flags that completeness couldn't be confirmed and treats it as blocking", () => {
     expect(reviewerSeed(job(), null)).toContain("could not confirm completeness");
     expect(reviewerSeed(job(), "   ")).toContain("could not confirm completeness");
@@ -299,6 +327,6 @@ describe("reviewerSeed (acceptance-criteria completeness is a gate dimension)", 
     const s = reviewerSeed(job(), "x".repeat(5000));
     expect(s).toContain("…(truncated)");
     expect(s).not.toContain("x".repeat(4001)); // the AC block is capped at MAX_ACCEPTANCE (4000)
-    expect(s.length).toBeLessThan(5200);        // 4000 capped AC + the prompt boilerplate
+    expect(s.length).toBeLessThan(6200);        // 4000 capped AC + the prompt boilerplate (thermo-grade + FINDINGS instructions)
   });
 });

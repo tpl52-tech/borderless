@@ -16,7 +16,7 @@ import type { SessionManager } from "./session-manager.ts";
 import type { StatusTracker } from "./monitors/status.ts";
 import type { SweepJob, SweepState } from "../shared/types.ts";
 import type { CheckState, RequiredCheck } from "../shared/sweep-gate.ts";
-import { REQUIRED_CHECKS, buildsFromScratch } from "../shared/sweep-gate.ts";
+import { REQUIRED_CHECKS, buildsFromScratch, thermoPasses } from "../shared/sweep-gate.ts";
 import type { SweepEngineDeps, ReviewVerdict, WorkerResult, WorkerFeedback, PollResult } from "./sweep-engine.ts";
 import { territoryWarning, type Territory } from "../shared/collision.ts";
 import { fetchPr, listPrsForBranch, prFiles } from "./github.ts";
@@ -72,11 +72,22 @@ export function parseReviewVerdict(text: string, sessionId: string): ReviewVerdi
   const red = lastMatch(text, /^RED FINDINGS:\s*(\d+)\s*$/im);
   const preservation = lastMatch(text, /^PRESERVATION:\s*(proven|unproven)\s*$/im);
   const judgment = lastMatch(text, /^JUDGMENT:\s*(.+?)\s*$/im);
+  // Capture the grade WITH its modifier ([A-F][+-]?): the gate must tell A from A- (only exact A passes).
+  // Deliberately separate from pr-derive.ts's letter-only THERMO_LINE, which feeds a different subsystem (the
+  // PR-state ThermoGrade union) that doesn't track modifiers.
+  const thermo = lastMatch(text, /^THERMO GRADE:\s*([A-F][+-]?)\s*$/im);
+  // Everything after a `FINDINGS:` line — the reviewer's specific blocking + quality findings, relayed to the
+  // fixer so it need not re-derive them. Trimmed + capped; "none"/blank → omitted.
+  const fm = text.match(/^FINDINGS:[ \t]*\n?([\s\S]*)/im);
+  const findingsRaw = fm ? fm[1]!.trim() : "";
+  const findings = findingsRaw && findingsRaw.toLowerCase() !== "none" ? clampAcceptance(findingsRaw) : null;
   return {
     sessionId,
     redFindings: red != null ? Number(red) : 1, // unparseable → treat as blocking
     preservationProven: preservation?.toLowerCase() === "proven", // unparseable/unproven → false
     judgmentCall: judgment && judgment.toLowerCase() !== "none" ? judgment : null,
+    thermoGrade: thermo ? thermo.toUpperCase() : null, // unparseable/absent → null → gate blocks (fail-closed)
+    ...(findings ? { findings } : {}),
   };
 }
 
@@ -274,9 +285,11 @@ export function workerSeed(job: SweepJob, feedback: WorkerFeedback, ctx: WorkerS
   const head = workerSeedHead(job, ctx);
   let body = head;
   if (!feedback.initial && feedback.review) {
-    const findings = feedback.review.redFindings > 0 ? `${feedback.review.redFindings} blocking review finding(s)` : "the review feedback";
+    const findingsPhrase = feedback.review.redFindings > 0 ? `${feedback.review.redFindings} blocking review finding(s)` : "the review feedback";
     const preservation = feedback.review.preservationProven ? "" : " Also prove no behavior regression vs the original.";
-    body = `${head} Address ${findings} and these gate blockers: ${feedback.blockers.join(", ")}.${preservation}`;
+    const quality = thermoPasses(feedback.review.thermoGrade) ? "" : ` Raise code quality to /thermo-nuclear-code-quality-review grade A (the independent reviewer graded it ${feedback.review.thermoGrade ?? "below A"}); apply that standard.`;
+    const detail = feedback.review.findings ? `\n\nThe independent reviewer's findings to address:\n${feedback.review.findings}` : "";
+    body = `${head} Address ${findingsPhrase} and these gate blockers: ${feedback.blockers.join(", ")}.${preservation}${quality}${detail}`;
   }
   const warning = ctx.territory ? territoryWarning(ctx.territory) : null;
   return warning ? `${body}\n\n${warning}` : body;
@@ -334,6 +347,7 @@ function workerSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
  * in_review, "proven" = no regression of the author's original behavior; for rescue/fix, "proven" = every acceptance
  * criterion affirmatively satisfied. The ACs are embedded because a spawned reviewer has no Linear access;
  * `acceptance` is the ticket's synced description (null → the reviewer flags completeness couldn't be confirmed).
+ * It ALSO grades the diff to the /thermo-nuclear code-quality standard (the THERMO GRADE line); the gate requires A.
  */
 export function reviewerSeed(job: SweepJob, acceptance: string | null): string {
   const ac = clampAcceptance(acceptance);
@@ -350,9 +364,18 @@ export function reviewerSeed(job: SweepJob, acceptance: string | null): string {
       ? `\nAcceptance criteria for ${job.ticketKey} — check each one against the PR:\n${ac}`
       : `\n(No acceptance criteria were available — you could not confirm completeness; flag that and treat it as blocking.)`,
     "",
-    "Then write your verdict to the file $AO_SESSION_DIR/verdict.txt as EXACTLY these three lines, nothing else:",
+    "Then AUDIT CODE QUALITY to the standard in ~/.claude/skills/thermo-nuclear-code-quality-review/SKILL.md",
+    "(read that file and apply it): structure, abstraction, spaghetti/branching, file size, type/boundary",
+    "cleanliness, canonical-layer fit. Grade it as that standard would — A ONLY when it genuinely meets the bar,",
+    "A- or below when it does not. You did not write this code, so the grade is independent.",
+    "",
+    "Write your verdict to $AO_SESSION_DIR/verdict.txt: FIRST these four lines, each on its own line:",
     "RED FINDINGS: <count — include every unmet acceptance criterion>",
     "PRESERVATION: proven | unproven",
     "JUDGMENT: <a no-clearly-better-option decision only the lead can make, or 'none'>",
+    "THERMO GRADE: <A | A- | B+ | B | B- | C | D | F>",
+    "Then a line reading exactly FINDINGS: followed by every blocking (🔴) issue AND every code-quality problem",
+    "behind a below-A grade — one per line, specific and actionable (file:line + what to change) — so the",
+    "implementer can fix them without re-deriving them. Put 'none' under FINDINGS when the PR is clean and A.",
   ].join("\n");
 }

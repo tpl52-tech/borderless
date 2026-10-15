@@ -37,6 +37,9 @@ export interface ReviewVerdict {
   redFindings: number; // 🔴 blocking findings
   preservationProven: boolean; // no-regression (in_review) / acceptance criteria (rescue/fix)
   judgmentCall: string | null; // a no-clearly-better-option decision only the lead can make
+  thermoGrade: string | null; // the SAME reviewer's /thermo-nuclear grade (e.g. "A", "A-"); the gate requires exactly "A"
+                              // (a raw string, not the letter-only ThermoGrade union, so the gate can tell A from A-)
+  findings?: string; // advisory: the reviewer's specific blocking + quality findings, relayed to the fixer; never gates
 }
 
 /** What a worker run produced (after it finished and pushed). */
@@ -153,6 +156,7 @@ export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngin
         preservationProven: review?.preservationProven ?? null,
         checks: poll.checks,
         reviewerRedFindings: review?.redFindings ?? null,
+        thermoGrade: review?.thermoGrade ?? null,
       });
       const action = nextSweepAction({ cycles, gate, escalation });
       store.recordSweepEvent(seed.id, "gate_eval", { blockers: gate.blockers, action: action.kind, cycles });

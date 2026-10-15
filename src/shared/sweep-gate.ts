@@ -5,8 +5,10 @@
  * reviewer's verdict, the changed paths — and feeds them here; the result drives whether it spawns a
  * worker, spawns a reviewer, waits on CI, marks the job ready, or escalates to the human.
  *
- * The thermo grade is deliberately NOT an input: it is a summary, not the gate (self-grading inflates,
- * PRD §4). Absence is never a pass: a null/missing signal blocks rather than silently clearing.
+ * Code quality is gated too: the SAME INDEPENDENT reviewer also grades the diff to the /thermo-nuclear
+ * standard, and the gate requires exactly A (below-A or ungraded blocks). This is not self-grading — the
+ * grader never wrote the code — so it avoids the inflation that originally kept a self-reported grade out of
+ * the gate. Absence is never a pass: a null/missing signal blocks rather than silently clearing.
  */
 
 import type { SweepKind } from "./types.ts";
@@ -30,6 +32,13 @@ export function buildsFromScratch(kind: SweepKind): boolean {
   return kind !== "in_review";
 }
 
+/** The sweep gate's code-quality bar: the independent reviewer's /thermo-nuclear grade must be exactly A —
+ *  A-, any lower grade, or no grade does not pass. One predicate so the gate and the fix-cycle worker seed
+ *  share the single rule. */
+export function thermoPasses(grade: string | null): boolean {
+  return grade === "A";
+}
+
 /** Why a job is not yet ready-to-merge. Empty iff the gate passes. */
 export type GateBlocker =
   | "regression-unproven" // in_review: the no-regression diff isn't proven
@@ -37,7 +46,8 @@ export type GateBlocker =
   | "ci-failing" // a required check failed
   | "ci-pending" // a required check is still pending/missing
   | "reviewer-unrun" // the independent reviewer hasn't run on this head
-  | "reviewer-red"; // the independent reviewer left >=1 blocking (🔴) finding
+  | "reviewer-red" // the independent reviewer left >=1 blocking (🔴) finding
+  | "thermo-below-a"; // the independent reviewer graded code quality below A
 
 export interface GateInput {
   kind: SweepKind;
@@ -47,6 +57,9 @@ export interface GateInput {
   checks: Partial<Record<RequiredCheck, CheckState>>;
   /** Count of blocking (🔴) findings from the independent reviewer; null = it hasn't run on this head. */
   reviewerRedFindings: number | null;
+  /** The SAME independent reviewer's /thermo-nuclear code-quality grade ("A", "A-", "B+", …); null = not
+   *  graded yet. The gate requires exactly "A". */
+  thermoGrade: string | null;
 }
 
 export interface GateResult {
@@ -78,6 +91,10 @@ export function evaluateGate(input: GateInput): GateResult {
   // 3. Independent reviewer — zero 🔴. null = not yet run (never a pass).
   if (input.reviewerRedFindings === null) blockers.push("reviewer-unrun");
   else if (input.reviewerRedFindings > 0) blockers.push("reviewer-red");
+
+  // 4. Code quality — the SAME independent reviewer's /thermo-nuclear grade must be exactly A. Only checked
+  //    once the reviewer has run (it is the grade's source); a below-A or missing grade blocks (fail-closed).
+  if (input.reviewerRedFindings !== null && !thermoPasses(input.thermoGrade)) blockers.push("thermo-below-a");
 
   return { pass: blockers.length === 0, blockers };
 }

@@ -34,7 +34,7 @@ import type { VerifyRunRow } from "../shared/verify-verdict.ts";
 import { runQaSubIssues } from "./verify-qa-run.ts";
 import { runQaWriteback } from "./verify-qa-sync-run.ts";
 import { runQaFixSweep } from "./verify-qa-fix-run.ts";
-import { QA_FIX_LABEL, QA_BLOCKED_LABEL, DIFFICULTY_LABELS, buildDifficultyPrompt, parseDifficulty, heuristicDifficulty } from "../shared/verify-qa-fix.ts";
+import { QA_FIX_LABEL, QA_BLOCKED_LABEL, DIFFICULTY_LABELS, assessDifficultyVia } from "../shared/verify-qa-fix.ts";
 import { QA_LABEL, qaRunsheetPrompt } from "../shared/verify-qa.ts";
 import { openCatalogDb } from "./verify-db.ts";
 import { openAppSession, readQaRuns } from "./verify-session.ts";
@@ -357,22 +357,9 @@ export function startDaemon(home = stateHome()): Daemon {
         targets: () => (targetsOnce ??= resolveQaFixTargets(linear, teamKey, QA_FIX_LABEL, QA_BLOCKED_LABEL, DIFFICULTY_LABELS)),
         todoStateId: () => (todoOnce ??= resolveTodoStateId(linear, teamKey)),
         doneStateId: () => (doneOnce ??= resolveDoneStateId(linear, teamKey)),
-        // Rate fix difficulty via the Ask backend (single-shot, no tools); on no-backend or any failure, fall back
-        // to the pure step-count heuristic so a fix ticket always gets a difficulty.
-        assessDifficulty: async (row, acceptance) => {
-          const chat = makeChat();
-          if (chat) {
-            try {
-              const res = await chat([
-                { role: "system", content: "You rate how hard a bug fix is. Reply with exactly one word: easy, medium, or hard." },
-                { role: "user", content: buildDifficultyPrompt(row, acceptance) },
-              ], []);
-              const d = parseDifficulty(res.text ?? "");
-              if (d) return d;
-            } catch { /* fall through to the heuristic */ }
-          }
-          return heuristicDifficulty(row);
-        },
+        // Rate fix difficulty via the Ask backend (single-shot); the chat→parse→heuristic fallback lives in the
+        // tested pure helper, so this is just the wiring (inject the live chat, or null when no backend).
+        assessDifficulty: (row, acceptance) => assessDifficultyVia(makeChat(), row, acceptance),
         createIssue: async (input) => { const c = parseIssueCreate(await linear.query(ISSUE_CREATE_MUTATION, { input })); return { ticketKey: c.ticketKey, url: c.url }; },
         setState: async (issueId, stateId) => { parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id: issueId, input: { stateId } })); },
         postComment: async (issueId, body) => parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId, body } })).url,

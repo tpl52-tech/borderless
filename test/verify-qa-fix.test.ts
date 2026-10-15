@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import {
   fixMarker, shouldCloseFeature, buildFixTitle, buildFixBody, buildFixTicketInput, decideFix, actionableVerdicts,
-  heuristicDifficulty, buildDifficultyPrompt, parseDifficulty, DIFFICULTY_LABELS, QA_FIX_LABEL, QA_BLOCKED_LABEL,
+  heuristicDifficulty, buildDifficultyPrompt, parseDifficulty, assessDifficultyVia, DIFFICULTY_LABELS, QA_FIX_LABEL, QA_BLOCKED_LABEL,
 } from "../src/shared/verify-qa-fix.ts";
 import type { QaVerdictRow } from "../src/shared/verify-qa-sync.ts";
 
@@ -109,6 +109,14 @@ describe("difficulty assessment", () => {
 
   test("the three difficulty label names are distinct", () => {
     expect(new Set(Object.values(DIFFICULTY_LABELS)).size).toBe(3);
+  });
+
+  test("assessDifficultyVia: uses a good reply, falls back to the heuristic on null / unparseable / thrown", async () => {
+    const easyRow = failRun(1); // heuristic → easy
+    expect(await assessDifficultyVia(async () => ({ text: "this is hard" }), easyRow, "ac")).toBe("hard");
+    expect(await assessDifficultyVia(null, easyRow, "ac")).toBe("easy");                       // no backend → heuristic
+    expect(await assessDifficultyVia(async () => ({ text: "no clue" }), easyRow, "ac")).toBe("easy"); // unparseable → heuristic
+    expect(await assessDifficultyVia(async () => { throw new Error("CLI exit 1"); }, failRun(5), "ac")).toBe("hard"); // throw → heuristic (5 fails)
   });
 });
 

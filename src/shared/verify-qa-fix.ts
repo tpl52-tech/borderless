@@ -62,7 +62,7 @@ export interface QaFixResult {
   /** The created fix/blocked ticket's key (on `created`). */
   fixKey?: string;
   url?: string | null;
-  /** The assessed fix difficulty — only ever on a created/would-create `fix` ticket. */
+  /** The assessed fix difficulty — only ever on a created `fix` ticket. */
   difficulty?: Difficulty;
   detail?: string;
 }
@@ -192,6 +192,28 @@ export function buildDifficultyPrompt(row: QaVerdictRow, acceptance: string | nu
 export function parseDifficulty(text: string): Difficulty | null {
   const m = text.toLowerCase().match(/\b(easy|medium|hard)\b/);
   return m ? (m[1] as Difficulty) : null;
+}
+
+/** The minimal single-shot chat {@link assessDifficultyVia} needs — a structural subset of the Ask backend's Chat; null ⇒ no backend. */
+export type DifficultyChat = ((messages: Array<{ role: "system" | "user"; content: string }>, tools: never[]) => Promise<{ text?: string }>) | null;
+
+/**
+ * Rate a fix's difficulty: ask the model (one-shot) and parse its reply, else fall back to the step-count
+ * heuristic — so a fix ALWAYS gets a difficulty. The chat is injected (null ⇒ no backend), and any chat error or
+ * unparseable reply degrades to the heuristic; this never throws. Keeps the LLM glue behind the test seam.
+ */
+export async function assessDifficultyVia(chat: DifficultyChat, row: QaVerdictRow, acceptance: string | null): Promise<Difficulty> {
+  if (chat) {
+    try {
+      const res = await chat([
+        { role: "system", content: "You rate how hard a bug fix is. Reply with exactly one word: easy, medium, or hard." },
+        { role: "user", content: buildDifficultyPrompt(row, acceptance) },
+      ], []);
+      const d = parseDifficulty(res.text ?? "");
+      if (d) return d;
+    } catch { /* fall through to the heuristic */ }
+  }
+  return heuristicDifficulty(row);
 }
 
 /**

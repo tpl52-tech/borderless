@@ -10,6 +10,7 @@
 
 import { consolePayload, sweepRow } from "../shared/console-rows.ts";
 import { parseResolveTurns, type ResolveTurn } from "../shared/resolve-chat.ts";
+import type { ApproveResult } from "./resolve-drive.ts";
 import type { InReviewSweepResult, FixSweepResult } from "../shared/types.ts";
 import { parseDraftAnswers, type DeskDraftResponse, type DraftAnswer } from "../shared/desk-draft.ts";
 import { parseCreateRequest, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
@@ -34,6 +35,9 @@ export interface WebServerDeps {
   /** Per-job resolve chat (the SWEEPS detail panel): advisory, scoped to the clicked job; the client replays
    *  prior turns via `history` because the chat backend is stateless. */
   resolveChatRun: (jobId: string, question: string, history: ResolveTurn[]) => Promise<{ answer: string; configured: boolean }>;
+  /** Lead decision on a stopped job (SWEEPS detail panel): APPROVE → move the needs_human job to ready (lead
+   *  override). Synchronous store update; `ready` is surfaced for the lead to merge, not merged here. */
+  approveJob: (jobId: string, note: string) => ApproveResult;
   /** Pull the live Linear board into the store (no sweeps) — the Refresh button. */
   syncBoard: () => Promise<{ synced: number; configured: boolean }>;
   /** PRD §13: classify the Verifying tickets from their merged PRs. A live gh scan — on-demand, never polled. */
@@ -138,6 +142,13 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         const question = typeof body.question === "string" ? body.question.trim() : "";
         if (!id || !question) return Response.json({ answer: "", configured: true });
         return Response.json(await deps.resolveChatRun(id, question, parseResolveTurns(body.history)));
+      }
+      if (pathname === "/api/sweep/approve" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { id?: unknown; note?: unknown };
+        const id = typeof body.id === "string" ? body.id.trim() : "";
+        const note = typeof body.note === "string" ? body.note.trim() : "";
+        if (!id) return Response.json({ ok: false, error: "no job id" });
+        return Response.json(deps.approveJob(id, note)); // needs_human → ready (lead override)
       }
       return new Response("not found", { status: 404 });
     },

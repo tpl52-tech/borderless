@@ -301,6 +301,7 @@ export interface SweepJob {
   cycles: number;          // fix/implement -> review loop; cap 8
   gate: unknown | null;    // { ac, ci, findings, grade }
   reason: string | null;   // why needs_human / failed
+  leadGuidance: string | null; // the lead's re-drive instruction (resolve panel); embedded in the next worker seed
   createdAt: number;
   updatedAt: number;
 }

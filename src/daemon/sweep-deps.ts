@@ -12,6 +12,7 @@
  */
 
 import type { Store } from "./store.ts";
+import { REOPEN_QUEUED_PATCH } from "./sweep-store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { StatusTracker } from "./monitors/status.ts";
 import type { SweepJob, SweepState } from "../shared/types.ts";
@@ -211,7 +212,7 @@ export async function reReviewAdvancedPrs(
     // sweep; an unchanged or unknown head means the human hasn't pushed → still resting on them.
     if (res.status !== "fulfilled" || res.value == null || res.value === job.headSha) return;
     try {
-      reopened.push(store.transitionSweepJob(job.id, { state: "queued", headSha: res.value, cycles: 0, gate: null, reason: null, sessionId: null }));
+      reopened.push(store.transitionSweepJob(job.id, { ...REOPEN_QUEUED_PATCH, headSha: res.value }));
       store.recordSweepEvent(job.id, "state_change", { from: job.state, to: "queued", reason: "head-advance re-review", headSha: res.value });
     } catch (err) {
       // uq_sweep_review spans ALL in_review states for a ticket (not just active ones, unlike
@@ -244,7 +245,7 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
     ciPollMs: cfg.ciPollMs ?? DEFAULT_CI_POLL_MS,
     maxCiWaits: cfg.maxCiWaits ?? DEFAULT_MAX_CI_WAITS,
     async spawnWorker(job, feedback, territory): Promise<WorkerResult> {
-      const ctx: WorkerSeedContext = { acceptance: cfg.acceptanceFor?.(job.ticketId) ?? null, territory };
+      const ctx: WorkerSeedContext = { acceptance: cfg.acceptanceFor?.(job.ticketId) ?? null, territory, guidance: job.leadGuidance };
       const sessionId = await spawnAndWait(workerSeed(job, feedback, ctx));
       const { headSha, prNumber } = await readHeadPr(job);
       // Free the ticket branch so a fix-cycle re-spawn can re-provision it — but only once a PR exists, i.e.
@@ -275,6 +276,7 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
 export interface WorkerSeedContext {
   acceptance?: string | null;
   territory?: Territory;
+  guidance?: string | null; // the lead's re-drive instruction (resolve panel), followed on this drive
 }
 
 const MAX_ACCEPTANCE = 4000; // keep a pathologically long description from bloating the seed
@@ -291,6 +293,8 @@ export function workerSeed(job: SweepJob, feedback: WorkerFeedback, ctx: WorkerS
     const detail = feedback.review.findings ? `\n\nThe independent reviewer's findings to address:\n${feedback.review.findings}` : "";
     body = `${head} Address ${findingsPhrase} and these gate blockers: ${feedback.blockers.join(", ")}.${preservation}${quality}${detail}`;
   }
+  const g = clampAcceptance(ctx.guidance);
+  if (g) body += `\n\nThe lead reviewed this and is re-driving it — follow this instruction exactly:\n${g}`;
   const warning = ctx.territory ? territoryWarning(ctx.territory) : null;
   return warning ? `${body}\n\n${warning}` : body;
 }
@@ -351,6 +355,7 @@ function workerSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
  */
 export function reviewerSeed(job: SweepJob, acceptance: string | null): string {
   const ac = clampAcceptance(acceptance);
+  const guidance = clampAcceptance(job.leadGuidance); // set when the lead re-drove this job — authoritative here
   const preservation = buildsFromScratch(job.kind)
     ? "For PRESERVATION, report 'proven' only if EVERY acceptance criterion is affirmatively satisfied, with evidence."
     : "For PRESERVATION, report 'proven' only if the final diff preserves the author's original behavior (no regression).";
@@ -363,6 +368,9 @@ export function reviewerSeed(job: SweepJob, acceptance: string | null): string {
     ac
       ? `\nAcceptance criteria for ${job.ticketKey} — check each one against the PR:\n${ac}`
       : `\n(No acceptance criteria were available — you could not confirm completeness; flag that and treat it as blocking.)`,
+    guidance
+      ? `\nThe lead REVIEWED this and re-drove it with this instruction — treat it as AUTHORITATIVE: do NOT re-raise a judgment the lead already settled, and verify the PR actually reflects it. Flag any part not yet implemented as a BLOCKING (🔴) unmet item:\n${guidance}`
+      : "",
     "",
     "Then AUDIT CODE QUALITY to the standard in ~/.claude/skills/thermo-nuclear-code-quality-review/SKILL.md",
     "(read that file and apply it): structure, abstraction, spaghetti/branching, file size, type/boundary",

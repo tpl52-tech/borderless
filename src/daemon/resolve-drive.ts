@@ -11,6 +11,7 @@
 
 import type { Store } from "./store.ts";
 import type { SweepState } from "../shared/types.ts";
+import { REOPEN_QUEUED_PATCH } from "./sweep-store.ts";
 
 /** The store surface approve needs — satisfied by Store. */
 export type ResolveStore = Pick<Store, "getSweepJob" | "transitionSweepJob" | "recordSweepEvent">;
@@ -36,4 +37,23 @@ export function approveJob(store: ResolveStore, jobId: string): ApproveResult {
   store.transitionSweepJob(jobId, { state: "ready", reason: "lead-approved" });
   store.recordSweepEvent(jobId, "state_change", { from: "needs_human", to: "ready", by: "lead-approve" });
   return { ok: true, state: "ready" };
+}
+
+export interface RedriveResult { ok: boolean; state?: SweepState; error?: string }
+
+/**
+ * Re-drive a stopped job with the lead's guidance. Same shape-guards as approve (needs_human + has a PR) plus a
+ * non-empty instruction. Re-opens the job to queued from its existing PR/head with a FRESH cycle budget and the
+ * guidance stashed on the job (the next worker's seed carries it); clears the stale review/reason. The caller
+ * kicks the supervisor so the engine picks it up.
+ */
+export function redriveJob(store: ResolveStore, jobId: string, guidance: string): RedriveResult {
+  const job = store.getSweepJob(jobId);
+  if (!job) return { ok: false, error: "job not found" };
+  if (job.state !== "needs_human") return { ok: false, error: `can't re-drive a ${job.state} job (only one waiting on you)` };
+  if (job.prNumber == null) return { ok: false, error: "no PR to re-drive — this job never opened one" };
+  if (!guidance) return { ok: false, error: "add an instruction telling the agent what to change" };
+  store.transitionSweepJob(jobId, { ...REOPEN_QUEUED_PATCH, leadGuidance: guidance });
+  store.recordSweepEvent(jobId, "state_change", { from: "needs_human", to: "queued", by: "lead-redrive", guidance });
+  return { ok: true, state: "queued" };
 }

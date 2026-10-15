@@ -12,6 +12,16 @@ import type { SweepJob, SweepEvent, SweepKind, SweepState, SweepEventKind } from
 /** A raw sqlite row (snake_case columns); mapped to a domain type by the rowToX helpers. */
 type Row = Record<string, any>;
 
+/**
+ * The canonical "re-open a resting job to queued" transition patch — the ONE place the fresh-queued field set
+ * lives, so no re-open site (resolve-drive's redriveJob, reReviewAdvancedPrs, the Ask tool's requeue) forgets a
+ * field. Clears the fix→review loop state (cycles/gate/reason/session) AND the lead's re-drive guidance; callers
+ * override only what differs (a new head, or guidance to re-apply).
+ */
+export const REOPEN_QUEUED_PATCH = {
+  state: "queued", cycles: 0, gate: null, reason: null, sessionId: null, leadGuidance: null,
+} as const;
+
 export class SweepJobStore {
   constructor(public readonly db: Database) {}
 
@@ -46,7 +56,7 @@ export class SweepJobStore {
   /** Patch a job's mutable fields (state, cycles, pr, head, session, gate, reason); bumps updated_at. */
   transitionSweepJob(id: string, patch: {
     state?: SweepState; cycles?: number; prNumber?: number | null;
-    headSha?: string | null; sessionId?: string | null; gate?: unknown; reason?: string | null;
+    headSha?: string | null; sessionId?: string | null; gate?: unknown; reason?: string | null; leadGuidance?: string | null;
   }): SweepJob {
     const sets: string[] = ["updated_at = ?"];
     const vals: any[] = [Date.now()];
@@ -57,6 +67,7 @@ export class SweepJobStore {
     if (patch.sessionId !== undefined) { sets.push("session_id = ?"); vals.push(patch.sessionId); }
     if (patch.gate !== undefined)      { sets.push("gate = ?");       vals.push(patch.gate === null ? null : JSON.stringify(patch.gate)); }
     if (patch.reason !== undefined)    { sets.push("reason = ?");     vals.push(patch.reason); }
+    if (patch.leadGuidance !== undefined) { sets.push("lead_guidance = ?"); vals.push(patch.leadGuidance); }
     this.db.run(`UPDATE sweep_job SET ${sets.join(", ")} WHERE id = ?`, [...vals, id]);
     return this.getSweepJob(id)!;
   }
@@ -80,7 +91,7 @@ function rowToSweepJob(r: Row): SweepJob {
     assignee: r.assignee ?? null, prNumber: r.pr_number ?? null, headSha: r.head_sha ?? null,
     sessionId: r.session_id ?? null,
     state: r.state as SweepState, cycles: r.cycles,
-    gate: r.gate == null ? null : JSON.parse(r.gate), reason: r.reason ?? null,
+    gate: r.gate == null ? null : JSON.parse(r.gate), reason: r.reason ?? null, leadGuidance: r.lead_guidance ?? null,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }

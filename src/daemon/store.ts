@@ -293,6 +293,10 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE linear_issues ADD COLUMN parent_id TEXT;
   `,
+  // --- step 8: the lead's re-drive guidance on a sweep job (resolve panel: re-open with an instruction) ---
+  `
+  ALTER TABLE sweep_job ADD COLUMN lead_guidance TEXT;
+  `,
 ];
 
 /**
@@ -310,6 +314,7 @@ export const HEAL_COLUMNS: Array<[table: string, column: string, ddl: string]> =
   ["linear_issues", "project_name", "TEXT"], // step 5
   ["linear_issues", "description", "TEXT"], // step 6
   ["linear_issues", "parent_id", "TEXT"], // step 7
+  ["sweep_job", "lead_guidance", "TEXT"], // step 8
 ];
 
 /**

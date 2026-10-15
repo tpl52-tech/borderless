@@ -32,6 +32,13 @@ export function buildsFromScratch(kind: SweepKind): boolean {
   return kind !== "in_review";
 }
 
+/** The sweep gate's code-quality bar: the independent reviewer's /thermo-nuclear grade must be exactly A —
+ *  A-, any lower grade, or no grade does not pass. One predicate so the gate and the fix-cycle worker seed
+ *  share the single rule. */
+export function thermoPasses(grade: string | null): boolean {
+  return grade === "A";
+}
+
 /** Why a job is not yet ready-to-merge. Empty iff the gate passes. */
 export type GateBlocker =
   | "regression-unproven" // in_review: the no-regression diff isn't proven
@@ -87,7 +94,7 @@ export function evaluateGate(input: GateInput): GateResult {
 
   // 4. Code quality — the SAME independent reviewer's /thermo-nuclear grade must be exactly A. Only checked
   //    once the reviewer has run (it is the grade's source); a below-A or missing grade blocks (fail-closed).
-  if (input.reviewerRedFindings !== null && input.thermoGrade !== "A") blockers.push("thermo-below-a");
+  if (input.reviewerRedFindings !== null && !thermoPasses(input.thermoGrade)) blockers.push("thermo-below-a");
 
   return { pass: blockers.length === 0, blockers };
 }

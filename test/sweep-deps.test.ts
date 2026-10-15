@@ -177,6 +177,14 @@ describe("parseReviewVerdict (reviewer output → verdict)", () => {
     expect(parseReviewVerdict("RED FINDINGS: 0\nPRESERVATION: proven\nJUDGMENT: none\nTHERMO GRADE: A-", "r").thermoGrade).toBe("A-");
   });
 
+  test("captures the FINDINGS block (relayed to the fixer); omits it when absent or 'none'", () => {
+    const v = parseReviewVerdict("RED FINDINGS: 1\nPRESERVATION: proven\nJUDGMENT: none\nTHERMO GRADE: B+\nFINDINGS:\n- src/x.ts:10 split this function\n- src/y.ts dead branch", "r");
+    expect(v.findings).toContain("src/x.ts:10 split this function");
+    expect(v.findings).toContain("dead branch");
+    expect(parseReviewVerdict("RED FINDINGS: 0\nPRESERVATION: proven\nJUDGMENT: none\nTHERMO GRADE: A\nFINDINGS: none", "r").findings).toBeUndefined();
+    expect(parseReviewVerdict("RED FINDINGS: 0\nPRESERVATION: proven\nJUDGMENT: none\nTHERMO GRADE: A", "r").findings).toBeUndefined();
+  });
+
   test("fails closed when markers are missing or garbled", () => {
     const v = parseReviewVerdict("the reviewer rambled with no markers at all", "rev-3");
     expect(v.redFindings).toBe(1); // unparseable red = treated as blocking
@@ -247,11 +255,12 @@ describe("workerSeed (PRD §5/§4 — rescue/fix embed the ACs; in-review drives
     expect(seed).toContain("prove no behavior regression");
   });
 
-  test("a fix cycle with a below-A thermo grade directs the worker to reach grade A", () => {
-    const fb: WorkerFeedback = { initial: false, blockers: ["thermo-below-a"], review: { redFindings: 0, preservationProven: true, judgmentCall: null, thermoGrade: "B+", sessionId: "r1" } };
+  test("a fix cycle with a below-A thermo grade directs the worker to reach grade A and relays the findings", () => {
+    const fb: WorkerFeedback = { initial: false, blockers: ["thermo-below-a"], review: { redFindings: 0, preservationProven: true, judgmentCall: null, thermoGrade: "B+", findings: "src/x.ts:10 split this function", sessionId: "r1" } };
     const seed = workerSeed(job({ kind: "in_review", prNumber: 7 }), fb);
     expect(seed).toContain("grade A");
     expect(seed).toContain("B+"); // the current grade is named so the worker knows the starting point
+    expect(seed).toContain("src/x.ts:10 split this function"); // the reviewer's specifics are relayed, not re-derived
   });
 
   test("a territory in context appends the preventive collision warning (both initial + fix cycles)", () => {
@@ -318,6 +327,6 @@ describe("reviewerSeed (acceptance-criteria completeness is a gate dimension)", 
     const s = reviewerSeed(job(), "x".repeat(5000));
     expect(s).toContain("…(truncated)");
     expect(s).not.toContain("x".repeat(4001)); // the AC block is capped at MAX_ACCEPTANCE (4000)
-    expect(s.length).toBeLessThan(5800);        // 4000 capped AC + the prompt boilerplate (incl. the thermo-grade instructions)
+    expect(s.length).toBeLessThan(6200);        // 4000 capped AC + the prompt boilerplate (thermo-grade + FINDINGS instructions)
   });
 });

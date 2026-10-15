@@ -26,6 +26,16 @@ import type { IssueCreateInput } from "./linear.ts";
 export const QA_FIX_LABEL = "qa-fix";
 export const QA_BLOCKED_LABEL = "qa-blocked";
 
+/** How hard the QA fix is — assessed (LLM, else a step-count heuristic) and attached to a `fix` ticket as a label. */
+export type Difficulty = "easy" | "medium" | "hard";
+
+/** The Linear label name per difficulty (created on first use). */
+export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
+  easy: "difficulty: easy",
+  medium: "difficulty: medium",
+  hard: "difficulty: hard",
+};
+
 /** A failed verdict → a `fix` ticket; a blocked verdict → a `blocked` (needs-info) ticket; a passed verdict closes the feature ticket. */
 export type QaFixKind = "fix" | "blocked" | "pass";
 
@@ -52,6 +62,8 @@ export interface QaFixResult {
   /** The created fix/blocked ticket's key (on `created`). */
   fixKey?: string;
   url?: string | null;
+  /** The assessed fix difficulty — only ever on a created/would-create `fix` ticket. */
+  difficulty?: Difficulty;
   detail?: string;
 }
 
@@ -133,15 +145,53 @@ export function buildFixTicketInput(args: {
   parentPriority?: number | null;
   /** The workflow-state id the new ticket opens in (the team's Todo state); omitted ⇒ the team default state. */
   stateId?: string;
+  /** An extra label id to attach alongside the kind label (the difficulty label on a fix ticket). */
+  difficultyLabelId?: string;
 }): IssueCreateInput {
   const base = buildQaSubIssueInput({
     teamId: args.teamId, projectId: args.projectId, parentId: args.parentId,
     labelId: args.labelId, title: args.title, description: args.description,
   });
-  const withState = args.stateId ? { ...base, stateId: args.stateId } : base;
+  const withLabels = args.difficultyLabelId
+    ? { ...base, labelIds: [...(base.labelIds ?? []), args.difficultyLabelId] }
+    : base;
+  const withState = args.stateId ? { ...withLabels, stateId: args.stateId } : withLabels;
   return typeof args.parentPriority === "number" && args.parentPriority > 0
     ? { ...withState, priority: args.parentPriority }
     : withState;
+}
+
+/** A step-count fallback difficulty, used when the LLM assessment is unavailable: by how many steps failed. Pure. */
+export function heuristicDifficulty(row: QaVerdictRow): Difficulty {
+  const { failed } = summarizeSteps(row.run);
+  return failed <= 1 ? "easy" : failed <= 3 ? "medium" : "hard";
+}
+
+/** The one-shot prompt that asks the model to rate the fix difficulty from the failure notes + the feature's acceptance criteria. Pure. */
+export function buildDifficultyPrompt(row: QaVerdictRow, acceptance: string | null): string {
+  const { failNotes } = summarizeSteps(row.run);
+  const notes = failNotes.length ? failNotes.map(({ step, note }) => `- Step ${step}: ${note}`).join("\n") : "(no step notes recorded)";
+  const ac = acceptance?.trim() ? acceptance.trim().slice(0, 1500) : "(acceptance criteria unavailable)";
+  return [
+    "A manual QA pass failed on a mobile-app feature. Rate how hard the FIX is for a student developer.",
+    "",
+    "What failed:",
+    notes,
+    "",
+    "The feature's acceptance criteria (for context):",
+    ac,
+    "",
+    "Answer with exactly ONE word — easy, medium, or hard — and nothing else:",
+    "- easy: a small, localized change (a layout tweak, a copy fix, one prop).",
+    "- medium: a few files, or some new logic/state.",
+    "- hard: a whole missing feature, a new integration, or a cross-cutting change.",
+  ].join("\n");
+}
+
+/** Extract the difficulty from a model reply (tolerant — the first of easy/medium/hard found); null when none. Pure. */
+export function parseDifficulty(text: string): Difficulty | null {
+  const m = text.toLowerCase().match(/\b(easy|medium|hard)\b/);
+  return m ? (m[1] as Difficulty) : null;
 }
 
 /**

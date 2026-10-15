@@ -34,7 +34,7 @@ import type { VerifyRunRow } from "../shared/verify-verdict.ts";
 import { runQaSubIssues } from "./verify-qa-run.ts";
 import { runQaWriteback } from "./verify-qa-sync-run.ts";
 import { runQaFixSweep } from "./verify-qa-fix-run.ts";
-import { QA_FIX_LABEL, QA_BLOCKED_LABEL } from "../shared/verify-qa-fix.ts";
+import { QA_FIX_LABEL, QA_BLOCKED_LABEL, DIFFICULTY_LABELS, buildDifficultyPrompt, parseDifficulty, heuristicDifficulty } from "../shared/verify-qa-fix.ts";
 import { QA_LABEL, qaRunsheetPrompt } from "../shared/verify-qa.ts";
 import { openCatalogDb } from "./verify-db.ts";
 import { openAppSession, readQaRuns } from "./verify-session.ts";
@@ -335,13 +335,14 @@ export function startDaemon(home = stateHome()): Daemon {
       return { results, configured: true, wrote: write };
     }, (write = false) => (write ? "write" : "dry"));
 
-    // The QA-fix sweep: a FAIL → a `qa-fix` child of the feature ticket (and the feature ticket moves to Todo);
-    // a BLOCKED → a `qa-blocked` child (feature ticket left in place). Unassigned (triage), idempotent on a marker
-    // in the created ticket's body. The team/labels + Todo state are each resolved at most once per run, lazily.
+    // The QA-fix sweep: a FAIL → a `qa-fix` Todo child of the feature ticket (which stays put); a BLOCKED → a
+    // `qa-blocked` Todo child; a PASS → close the feature ticket (→ Done). Each fix ticket is rated easy/medium/
+    // hard (LLM, else a step-count heuristic) and labelled. Unassigned (triage), idempotent on a marker in the
+    // created ticket's body. Team/labels + Todo/Done states are each resolved at most once per run, lazily.
     runVerifyQaFix = singleFlight(async (write = false) => {
       let todoOnce: Promise<string | null> | null = null;
       let doneOnce: Promise<string | null> | null = null;
-      let targetsOnce: Promise<{ teamId: string; fixLabelId: string; blockedLabelId: string }> | null = null;
+      let targetsOnce: Promise<{ teamId: string; fixLabelId: string; blockedLabelId: string; difficultyLabelIds: { easy: string; medium: string; hard: string } }> | null = null;
       const results = await runQaFixSweep({
         readVerdicts: () => readQaRuns(verifyApp),
         subIssueByKey: (key) => {
@@ -350,12 +351,28 @@ export function startDaemon(home = stateHome()): Daemon {
         },
         parentByUuid: (uuid) => {
           const p = store.getLinearIssue(uuid);
-          return p ? { id: p.id, identifier: p.identifier, title: p.title, projectId: p.projectId, stateType: p.stateType, priority: p.priority } : undefined;
+          return p ? { id: p.id, identifier: p.identifier, title: p.title, description: p.description, projectId: p.projectId, stateType: p.stateType, priority: p.priority } : undefined;
         },
         childDescriptions: (parentUuid) => fetchIssueChildDescriptions(linear, parentUuid),
-        targets: () => (targetsOnce ??= resolveQaFixTargets(linear, teamKey, QA_FIX_LABEL, QA_BLOCKED_LABEL)),
+        targets: () => (targetsOnce ??= resolveQaFixTargets(linear, teamKey, QA_FIX_LABEL, QA_BLOCKED_LABEL, DIFFICULTY_LABELS)),
         todoStateId: () => (todoOnce ??= resolveTodoStateId(linear, teamKey)),
         doneStateId: () => (doneOnce ??= resolveDoneStateId(linear, teamKey)),
+        // Rate fix difficulty via the Ask backend (single-shot, no tools); on no-backend or any failure, fall back
+        // to the pure step-count heuristic so a fix ticket always gets a difficulty.
+        assessDifficulty: async (row, acceptance) => {
+          const chat = makeChat();
+          if (chat) {
+            try {
+              const res = await chat([
+                { role: "system", content: "You rate how hard a bug fix is. Reply with exactly one word: easy, medium, or hard." },
+                { role: "user", content: buildDifficultyPrompt(row, acceptance) },
+              ], []);
+              const d = parseDifficulty(res.text ?? "");
+              if (d) return d;
+            } catch { /* fall through to the heuristic */ }
+          }
+          return heuristicDifficulty(row);
+        },
         createIssue: async (input) => { const c = parseIssueCreate(await linear.query(ISSUE_CREATE_MUTATION, { input })); return { ticketKey: c.ticketKey, url: c.url }; },
         setState: async (issueId, stateId) => { parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id: issueId, input: { stateId } })); },
         postComment: async (issueId, body) => parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId, body } })).url,

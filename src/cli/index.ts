@@ -270,7 +270,8 @@ export async function main(argv: string[]): Promise<void> {
             : r.action === "skipped-verified" ? "· already verified"
             : "· skipped";
           const tail = r.fixKey ? `→ ${r.fixKey}${r.url ? ` ${r.url}` : ""}` : r.detail ? `(${r.detail})` : "";
-          console.log(`  ${mark}  ${r.subKey}  [${r.kind}]${r.parentKey ? ` under ${r.parentKey}` : ""}  ${tail}`);
+          const kind = r.difficulty ? `${r.kind} · ${r.difficulty}` : r.kind;
+          console.log(`  ${mark}  ${r.subKey}  [${kind}]${r.parentKey ? ` under ${r.parentKey}` : ""}  ${tail}`);
         }
         if (!wrote) console.log("\n(dry run — re-run with --write to apply these in Linear)");
       });

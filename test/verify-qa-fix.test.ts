@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import {
   fixMarker, shouldCloseFeature, buildFixTitle, buildFixBody, buildFixTicketInput, decideFix, actionableVerdicts,
-  QA_FIX_LABEL, QA_BLOCKED_LABEL,
+  heuristicDifficulty, buildDifficultyPrompt, parseDifficulty, DIFFICULTY_LABELS, QA_FIX_LABEL, QA_BLOCKED_LABEL,
 } from "../src/shared/verify-qa-fix.ts";
 import type { QaVerdictRow } from "../src/shared/verify-qa-sync.ts";
 
@@ -68,6 +68,47 @@ describe("buildFixTicketInput", () => {
     expect(buildFixTicketInput({ ...base, parentPriority: 2 }).priority).toBe(2);
     expect(buildFixTicketInput({ ...base, parentPriority: 0 }).priority).toBeUndefined(); // 0 = None
     expect(buildFixTicketInput({ ...base, parentPriority: null }).priority).toBeUndefined();
+  });
+
+  test("appends the difficulty label alongside the kind label when given; just the kind label otherwise", () => {
+    expect(buildFixTicketInput({ ...base, difficultyLabelId: "l-hard" }).labelIds).toEqual(["lfix", "l-hard"]);
+    expect(buildFixTicketInput(base).labelIds).toEqual(["lfix"]);
+  });
+});
+
+describe("difficulty assessment", () => {
+  const failRun = (failed: number) => {
+    const steps: Record<string, string> = {};
+    for (let i = 1; i <= failed; i++) steps[String(i)] = "fail";
+    return row("fail", { steps });
+  };
+
+  test("heuristicDifficulty scales with the number of failed steps", () => {
+    expect(heuristicDifficulty(failRun(1))).toBe("easy");
+    expect(heuristicDifficulty(failRun(2))).toBe("medium");
+    expect(heuristicDifficulty(failRun(3))).toBe("medium");
+    expect(heuristicDifficulty(failRun(5))).toBe("hard");
+  });
+
+  test("parseDifficulty extracts the level tolerantly, null when absent", () => {
+    expect(parseDifficulty("hard")).toBe("hard");
+    expect(parseDifficulty("I'd say this is Medium, honestly.")).toBe("medium");
+    expect(parseDifficulty("EASY.")).toBe("easy");
+    expect(parseDifficulty("no idea")).toBeNull();
+    expect(parseDifficulty("")).toBeNull();
+  });
+
+  test("buildDifficultyPrompt includes the failed-step notes, the acceptance criteria, and the one-word instruction", () => {
+    const p = buildDifficultyPrompt(row("fail", { steps: { "1": "fail" }, notes: { "1": "no section exists yet" } }), "AC: show a Recommended section");
+    expect(p).toContain("no section exists yet");
+    expect(p).toContain("AC: show a Recommended section");
+    expect(p).toMatch(/one word/i);
+    expect(p).toContain("easy");
+    expect(p).toContain("hard");
+  });
+
+  test("the three difficulty label names are distinct", () => {
+    expect(new Set(Object.values(DIFFICULTY_LABELS)).size).toBe(3);
   });
 });
 

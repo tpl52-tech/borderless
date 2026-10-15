@@ -124,22 +124,32 @@ export async function resolveTodoStateId(client: LinearClient, teamKey: string):
 const QA_FIX_LABEL_COLOR = "#e5484d";
 const QA_BLOCKED_LABEL_COLOR = "#f5a623";
 
+/** Difficulty label colors (Linear hex): green / amber / red for easy / medium / hard. */
+const DIFFICULTY_LABEL_COLORS = { easy: "#4cb782", medium: "#f5a623", hard: "#e5484d" } as const;
+
 /**
- * Resolve the team id + the `qa-fix` / `qa-blocked` label ids, creating either label on first use. Returns the
- * ids ready to attach on create — unlike the read-only {@link resolveDoneStateId}, this may write (the labels).
+ * Resolve the team id + the `qa-fix` / `qa-blocked` + the three `difficulty:` label ids, creating any that don't
+ * exist yet. Returns the ids ready to attach on create — unlike the read-only {@link resolveDoneStateId}, this
+ * may write (the labels).
  */
 export async function resolveQaFixTargets(
   client: LinearClient,
   teamKey: string,
   fixLabel: string,
   blockedLabel: string,
-): Promise<{ teamId: string; fixLabelId: string; blockedLabelId: string }> {
-  const t: QaFixTargets = parseQaFixTargets(await client.query(QA_FIX_TARGETS_QUERY, { teamKey, fix: fixLabel, blocked: blockedLabel }), teamKey);
+  difficultyLabels: { easy: string; medium: string; hard: string },
+): Promise<{ teamId: string; fixLabelId: string; blockedLabelId: string; difficultyLabelIds: { easy: string; medium: string; hard: string } }> {
+  const t: QaFixTargets = parseQaFixTargets(await client.query(QA_FIX_TARGETS_QUERY, { teamKey, fix: fixLabel, blocked: blockedLabel, ...difficultyLabels }), teamKey);
   const ensure = async (existing: string | null, name: string, color: string): Promise<string> =>
     existing ?? parseLabelCreate(await client.query(ISSUE_LABEL_CREATE_MUTATION, { input: { name, teamId: t.teamId, color } }));
   return {
     teamId: t.teamId,
     fixLabelId: await ensure(t.fixLabelId, fixLabel, QA_FIX_LABEL_COLOR),
     blockedLabelId: await ensure(t.blockedLabelId, blockedLabel, QA_BLOCKED_LABEL_COLOR),
+    difficultyLabelIds: {
+      easy: await ensure(t.difficultyLabelIds.easy, difficultyLabels.easy, DIFFICULTY_LABEL_COLORS.easy),
+      medium: await ensure(t.difficultyLabelIds.medium, difficultyLabels.medium, DIFFICULTY_LABEL_COLORS.medium),
+      hard: await ensure(t.difficultyLabelIds.hard, difficultyLabels.hard, DIFFICULTY_LABEL_COLORS.hard),
+    },
   };
 }

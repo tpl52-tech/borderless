@@ -17,8 +17,9 @@
 
 import {
   actionableVerdicts, decideFix, shouldCloseFeature, buildFixTitle, buildFixBody, buildFixTicketInput,
-  type QaFixResult, type QaFixKind,
+  type QaFixResult, type QaFixKind, type Difficulty,
 } from "../shared/verify-qa-fix.ts";
+import type { QaVerdictRow } from "../shared/verify-qa-sync.ts";
 import type { IssueCreateInput } from "../shared/linear.ts";
 
 export interface QaFixDeps {
@@ -26,12 +27,14 @@ export interface QaFixDeps {
   readVerdicts: () => Promise<unknown>;
   /** The synced manual-QA sub-issue by key → its UUID + its parent feature ticket's UUID; undefined ⇒ not in the store. */
   subIssueByKey: (key: string) => { id: string; parentId: string | null } | undefined;
-  /** The feature ticket by UUID → the fields needed to file the fix + close it; undefined ⇒ not in the store. */
-  parentByUuid: (uuid: string) => { id: string; identifier: string; title: string; projectId: string | null; stateType: string | null; priority: number | null } | undefined;
+  /** The feature ticket by UUID → the fields needed to file the fix + close it (description = the acceptance criteria for the difficulty assessment); undefined ⇒ not in the store. */
+  parentByUuid: (uuid: string) => { id: string; identifier: string; title: string; description: string | null; projectId: string | null; stateType: string | null; priority: number | null } | undefined;
   /** The feature ticket's existing children's descriptions (the idempotency source — a child carries the marker). */
   childDescriptions: (parentUuid: string) => Promise<string[]>;
-  /** The team id + the `qa-fix` / `qa-blocked` label ids (resolved/created once, lazily). */
-  targets: () => Promise<{ teamId: string; fixLabelId: string; blockedLabelId: string }>;
+  /** The team id + the `qa-fix` / `qa-blocked` + the three `difficulty:` label ids (resolved/created once, lazily). */
+  targets: () => Promise<{ teamId: string; fixLabelId: string; blockedLabelId: string; difficultyLabelIds: { easy: string; medium: string; hard: string } }>;
+  /** Rate how hard a FAIL's fix is (LLM, else a step-count heuristic) from the failure notes + the feature's acceptance criteria. */
+  assessDifficulty: (row: QaVerdictRow, acceptance: string | null) => Promise<Difficulty>;
   /** The team's "Todo" workflow-state id — the state a new fix/blocked ticket OPENS in (resolved once, lazily); null ⇒ the team default state. */
   todoStateId: () => Promise<string | null>;
   /** The team's "Done" workflow-state id (where a QA-passed feature ticket moves; resolved once, lazily); null ⇒ none. */
@@ -121,21 +124,26 @@ export async function runQaFixSweep(deps: QaFixDeps): Promise<QaFixResult[]> {
       // the marker), so a failed create strands nothing; the breadcrumb on the sub-issue is a best-effort last step.
       const todoId = await deps.todoStateId();
       const t = await deps.targets();
-      const labelId = decision.kind === "fix" ? t.fixLabelId : t.blockedLabelId;
+      const isFix = decision.kind === "fix";
+      const labelId = isFix ? t.fixLabelId : t.blockedLabelId;
+      // Rate how hard the fix is (fix tickets only) from the failure + the feature's acceptance criteria, and
+      // attach the matching `difficulty:` label. Assessed here, once, on create — a re-run is skipped-exists.
+      const difficulty = isFix ? await deps.assessDifficulty(row, parent.description) : undefined;
       const input = buildFixTicketInput({
         teamId: t.teamId, projectId: parent.projectId, parentId: parent.id, labelId,
         title: buildFixTitle(decision.kind, parent.title),
         description: buildFixBody(decision.kind, row, { parentKey: parent.identifier, subKey: row.ticketKey }),
         parentPriority: parent.priority,
         stateId: todoId ?? undefined,
+        difficultyLabelId: difficulty ? t.difficultyLabelIds[difficulty] : undefined,
       });
       const created = await deps.createIssue(input);
 
       try {
-        await deps.postComment(sub.id, `Opened **${created.ticketKey}** from this QA ${decision.kind === "fix" ? "fail" : "block"} — ao.`);
+        await deps.postComment(sub.id, `Opened **${created.ticketKey}** from this QA ${isFix ? "fail" : "block"} — ao.`);
       } catch { /* non-fatal: the ticket (the dedupe artifact) exists; the breadcrumb is a convenience */ }
 
-      results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind: decision.kind, action: "created", fixKey: created.ticketKey, url: created.url, ...(todoId ? {} : { detail: "no Todo workflow state found — opened in the team default state" }) });
+      results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind: decision.kind, action: "created", fixKey: created.ticketKey, url: created.url, ...(difficulty ? { difficulty } : {}), ...(todoId ? {} : { detail: "no Todo workflow state found — opened in the team default state" }) });
     } catch (err) {
       results.push({ subKey: row.ticketKey, parentKey: parent.identifier, kind, action: "error", detail: err instanceof Error ? err.message : String(err) });
     }

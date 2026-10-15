@@ -45,9 +45,15 @@ describe("parseTodoStates / pickTodoState", () => {
 });
 
 describe("parseQaFixTargets", () => {
-  test("returns the team id and both label ids, leaving a missing label null", () => {
-    const json = { data: { teams: { nodes: [{ id: "t1" }] }, fix: { nodes: [{ id: "lfix" }] }, blocked: { nodes: [] } } };
-    expect(parseQaFixTargets(json, "COR")).toEqual({ teamId: "t1", fixLabelId: "lfix", blockedLabelId: null });
+  test("returns the team id, the kind label ids, and the three difficulty label ids, leaving missing ones null", () => {
+    const json = { data: {
+      teams: { nodes: [{ id: "t1" }] }, fix: { nodes: [{ id: "lfix" }] }, blocked: { nodes: [] },
+      easy: { nodes: [{ id: "l-easy" }] }, medium: { nodes: [] }, hard: { nodes: [{ id: "l-hard" }] },
+    } };
+    expect(parseQaFixTargets(json, "COR")).toEqual({
+      teamId: "t1", fixLabelId: "lfix", blockedLabelId: null,
+      difficultyLabelIds: { easy: "l-easy", medium: null, hard: "l-hard" },
+    });
   });
 
   test("throws when the team is missing (can't create anything without it)", () => {

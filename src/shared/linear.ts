@@ -399,18 +399,33 @@ export function pickTodoState(states: readonly TypedWorkflowState[]): TypedWorkf
 
 /** The team id + the `qa-fix` / `qa-blocked` label ids (null ⇒ not created yet; the caller makes it on first use). */
 export const QA_FIX_TARGETS_QUERY = `
-query BorderlessQaFixTargets($teamKey: String!, $fix: String!, $blocked: String!) {
+query BorderlessQaFixTargets($teamKey: String!, $fix: String!, $blocked: String!, $easy: String!, $medium: String!, $hard: String!) {
   teams(filter: { key: { eq: $teamKey } }, first: 1) { nodes { id } }
   fix: issueLabels(filter: { name: { eq: $fix } }, first: 1) { nodes { id } }
   blocked: issueLabels(filter: { name: { eq: $blocked } }, first: 1) { nodes { id } }
+  easy: issueLabels(filter: { name: { eq: $easy } }, first: 1) { nodes { id } }
+  medium: issueLabels(filter: { name: { eq: $medium } }, first: 1) { nodes { id } }
+  hard: issueLabels(filter: { name: { eq: $hard } }, first: 1) { nodes { id } }
 }`;
 
-export interface QaFixTargets { teamId: string; fixLabelId: string | null; blockedLabelId: string | null }
+export interface QaFixTargets {
+  teamId: string;
+  fixLabelId: string | null;
+  blockedLabelId: string | null;
+  /** The `difficulty: easy|medium|hard` label ids (null ⇒ not created yet). */
+  difficultyLabelIds: { easy: string | null; medium: string | null; hard: string | null };
+}
 
 /** Parse {@link QA_FIX_TARGETS_QUERY}; throws if the team is missing, leaves missing labels null (created on first use). */
 export function parseQaFixTargets(json: unknown, teamKey: string): QaFixTargets {
-  const data = (json as { data?: { teams?: { nodes?: Array<{ id?: string }> }; fix?: { nodes?: Array<{ id?: string }> }; blocked?: { nodes?: Array<{ id?: string }> } } } | null)?.data;
+  const data = (json as { data?: Record<string, { nodes?: Array<{ id?: string }> } | undefined> } | null)?.data;
   const teamId = data?.teams?.nodes?.[0]?.id;
   if (!teamId) throw new Error(`qa-fix: no Linear team with key "${teamKey}"`);
-  return { teamId, fixLabelId: data?.fix?.nodes?.[0]?.id ?? null, blockedLabelId: data?.blocked?.nodes?.[0]?.id ?? null };
+  const labelId = (key: string): string | null => data?.[key]?.nodes?.[0]?.id ?? null;
+  return {
+    teamId,
+    fixLabelId: labelId("fix"),
+    blockedLabelId: labelId("blocked"),
+    difficultyLabelIds: { easy: labelId("easy"), medium: labelId("medium"), hard: labelId("hard") },
+  };
 }

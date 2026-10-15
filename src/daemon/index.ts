@@ -47,7 +47,7 @@ import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCrea
 import { runDeskCreate, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import { verifyRow, type VerifyRow } from "../shared/verify.ts";
 import { singleFlight } from "../shared/single-flight.ts";
-import type { InReviewSweepResult } from "../shared/types.ts";
+import type { InReviewSweepResult, FixSweepResult } from "../shared/types.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
 import { buildTerritory } from "../shared/collision.ts";
 import { liveSweepDeps, needsHydration, hydrateInReviewJob, reReviewAdvancedPrs, liveHeadReader } from "./sweep-deps.ts";
@@ -546,13 +546,24 @@ export function startDaemon(home = stateHome()): Daemon {
   // or a button + a terminal `ao sweep` at once, must join one run, never spawn a duplicate agent fleet.
   const scanInReview = singleFlight(scanInReviewImpl, (stateName) => stateName ?? "In Review");
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, verifyQa: runVerifyQa, verifyQaSync: runVerifyQaSync, verifyQaFix: runVerifyQaFix });
+  // The qa-fix sweep (PRD §13): sync the board, enqueue a build-from-scratch job for every qa-fix Todo ticket,
+  // kick the engine. Uncapped fan-out, matching the in-review/rescue supervisor; singleFlight so a double-click
+  // (the web button + a terminal `ao fix-sweep`) joins one in-flight run instead of spawning a duplicate fleet.
+  const scanFixSweepImpl = async (): Promise<FixSweepResult> => {
+    const { synced, configured } = await syncBoard();
+    const created = store.enqueueFixSweeps(config.leadOpsProject).length;
+    const started = sweepSupervisor?.pickup().length ?? 0;
+    return { synced, created, started, configured };
+  };
+  const scanFix = singleFlight(scanFixSweepImpl, () => "fix");
+
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, fixSweep: scanFix, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, verifyQa: runVerifyQa, verifyQaSync: runVerifyQaSync, verifyQaFix: runVerifyQaFix });
 
   // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only. It is
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runQaFix: () => runVerifyQaFix(true), runInReviewSweep: () => scanInReview("In Review"), deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runQaFix: () => runVerifyQaFix(true), runInReviewSweep: () => scanInReview("In Review"), runFixSweep: () => scanFix(), deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

@@ -9,7 +9,7 @@
  */
 
 import { consolePayload } from "../shared/console-rows.ts";
-import type { InReviewSweepResult } from "../shared/types.ts";
+import type { InReviewSweepResult, FixSweepResult } from "../shared/types.ts";
 import { parseDraftAnswers, type DeskDraftResponse, type DraftAnswer } from "../shared/desk-draft.ts";
 import { parseCreateRequest, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
@@ -47,6 +47,9 @@ export interface WebServerDeps {
   /** PRD §4/§11: run the In-Review sweep from the browser SWEEP button — sync + re-review + enqueue + kick the
    *  engine; the fixer/reviewer agents run server-side in the daemon. Deduped (singleFlight) upstream. */
   runInReviewSweep: () => Promise<InReviewSweepResult>;
+  /** PRD §13: run the qa-fix sweep from the browser FIX SWEEP button — sync + enqueue + kick build-from-scratch
+   *  jobs for qa-fix Todo tickets; agents run server-side. Deduped (singleFlight) upstream. */
+  runFixSweep: () => Promise<FixSweepResult>;
   /** PRD §9 (Lead Desk v2): the lead's words (+ any MCQ answers from a re-draft) → the LLM's structured draft
    *  of epics + tickets + clarifying questions. Writes nothing. */
   deskDraft: (text: string, answers: DraftAnswer[]) => Promise<DeskDraftResponse>;
@@ -94,6 +97,9 @@ export function startWebServer(deps: WebServerDeps): WebServer {
       }
       if (pathname === "/api/sweep" && req.method === "POST") {
         return Response.json(await deps.runInReviewSweep()); // enqueue + drive the In-Review sweep (agents run server-side)
+      }
+      if (pathname === "/api/sweep/fix" && req.method === "POST") {
+        return Response.json(await deps.runFixSweep()); // enqueue + drive qa-fix build-from-scratch jobs (agents run server-side)
       }
       if (pathname === "/api/desk/draft" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { text?: unknown; answers?: unknown };

@@ -136,6 +136,7 @@
   .row-card.clickable { cursor: pointer; transition: border-color .12s; }
   .row-card.clickable:hover { border-color: var(--line-2); }
   .modal { position: fixed; inset: 0; background: color-mix(in srgb, #000 62%, transparent); display: flex; align-items: center; justify-content: center; padding: 1.4rem; z-index: 60; }
+  .modal[hidden] { display: none; } /* .modal sets display:flex, which overrides the bare `hidden` attr — mirror the .view[hidden] idiom above so hidden actually hides it */
   .modal-card { background: var(--panel); border: 1px solid var(--line-2); border-radius: 5px; width: min(760px, 100%); max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; }
   .md-head { display: flex; align-items: center; gap: .6rem; padding: .7rem .9rem; border-bottom: 1px solid var(--line); }
   .md-head b { color: var(--pink); font-size: .95rem; } .md-head .md-meta { color: var(--ink-2); font-size: .76rem; }

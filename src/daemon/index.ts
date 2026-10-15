@@ -469,15 +469,15 @@ export function startDaemon(home = stateHome()): Daemon {
   // Per-ticket resolve chat (web SWEEPS detail panel, PRD §11): advisory, ticket-scoped. Reuses the Ask chat
   // backend but seeds it with ONE ticket's context (title + ACs + why the sweep stopped for a human) instead of
   // the whole fleet. The backend is stateless, so the client replays prior turns via `history`.
-  const resolveChatRun: WebServerDeps["resolveChatRun"] = async (ticketKey, question, history) => {
+  const resolveChatRun: WebServerDeps["resolveChatRun"] = async (jobId, question, history) => {
     const chat = makeChat();
     if (!chat) return { answer: "", configured: false }; // openrouter selected, no key
-    const issue = store.getLinearIssueByIdentifier(ticketKey);
-    const jobs = store.listSweepJobs().filter((j) => j.ticketKey === ticketKey);
-    const job = jobs.length ? jobs[jobs.length - 1]! : null; // the latest sweep job for this ticket
+    const job = store.getSweepJob(jobId); // the exact job the lead clicked — not "latest for the ticket"
+    if (!job) return { answer: "", configured: true }; // job gone — nothing to discuss
+    const issue = store.getLinearIssueByIdentifier(job.ticketKey);
     const seed = resolveChatSeed({
-      ticketKey, title: issue?.title ?? null, description: issue?.description ?? null,
-      state: job?.state ?? null, reason: job?.reason ?? null, prNumber: job?.prNumber ?? null,
+      ticketKey: job.ticketKey, title: issue?.title ?? null, description: issue?.description ?? null,
+      state: job.state, reason: job.reason, prNumber: job.prNumber,
     });
     const messages: Message[] = [
       { role: "user", content: seed },

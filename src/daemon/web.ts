@@ -31,9 +31,9 @@ export interface WebServerDeps {
   askRun: (question: string, allowActions: boolean) => Promise<{ answer: string; configured: boolean }>;
   /** The GitHub repo slug (owner/repo), for building PR links in the sweep detail panel. */
   repo?: string;
-  /** Per-ticket resolve chat (the SWEEPS detail panel): advisory, scoped to ONE ticket; the client replays
+  /** Per-job resolve chat (the SWEEPS detail panel): advisory, scoped to the clicked job; the client replays
    *  prior turns via `history` because the chat backend is stateless. */
-  resolveChatRun: (ticketKey: string, question: string, history: ResolveTurn[]) => Promise<{ answer: string; configured: boolean }>;
+  resolveChatRun: (jobId: string, question: string, history: ResolveTurn[]) => Promise<{ answer: string; configured: boolean }>;
   /** Pull the live Linear board into the store (no sweeps) — the Refresh button. */
   syncBoard: () => Promise<{ synced: number; configured: boolean }>;
   /** PRD §13: classify the Verifying tickets from their merged PRs. A live gh scan — on-demand, never polled. */
@@ -133,11 +133,11 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         return Response.json({ job: sweepRow(job), events: deps.store.listSweepEvents(job.id), prUrl });
       }
       if (pathname === "/api/resolve-chat" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { ticket?: unknown; question?: unknown; history?: unknown };
-        const ticket = typeof body.ticket === "string" ? body.ticket.trim() : "";
+        const body = (await req.json().catch(() => ({}))) as { id?: unknown; question?: unknown; history?: unknown };
+        const id = typeof body.id === "string" ? body.id.trim() : ""; // the exact clicked job
         const question = typeof body.question === "string" ? body.question.trim() : "";
-        if (!ticket || !question) return Response.json({ answer: "", configured: true });
-        return Response.json(await deps.resolveChatRun(ticket, question, parseResolveTurns(body.history)));
+        if (!id || !question) return Response.json({ answer: "", configured: true });
+        return Response.json(await deps.resolveChatRun(id, question, parseResolveTurns(body.history)));
       }
       return new Response("not found", { status: 404 });
     },

@@ -569,14 +569,18 @@
 
   // ---- ASK ----
   const field = $("chat-field"), stream = $("chat-stream");
-  function bubble(role, text) {
-    const d = document.createElement("div");
-    d.className = "cmsg " + (role === "You" ? "user" : "ai");
-    d.innerHTML = `<div class="crole">${esc(role)}</div><div class="ctext">${esc(text)}</div>`;
-    stream.appendChild(d);
-    stream.scrollTop = stream.scrollHeight;
-    return d;
+  // One bubble factory for both the ASK chat and the resolve-chat (they differ only in which stream they append to).
+  function makeBubble(streamEl) {
+    return (role, text) => {
+      const d = document.createElement("div");
+      d.className = "cmsg " + (role === "You" ? "user" : "ai");
+      d.innerHTML = `<div class="crole">${esc(role)}</div><div class="ctext">${esc(text)}</div>`;
+      streamEl.appendChild(d);
+      streamEl.scrollTop = streamEl.scrollHeight;
+      return d;
+    };
   }
+  const bubble = makeBubble(stream);
   async function ask() {
     const q = field.value.trim();
     if (!q) return;
@@ -597,26 +601,19 @@
 
   // ---- RESOLVE: click a NEEDS_YOU / READY card → detail panel + per-ticket chat ----
   const sdModal = $("s-detail"), sdStream = $("sd-stream"), sdField = $("sd-field");
-  let sdTicket = "", sdHistory = [];
-  function sdBubble(role, text) {
-    const d = document.createElement("div");
-    d.className = "cmsg " + (role === "You" ? "user" : "ai");
-    d.innerHTML = `<div class="crole">${esc(role)}</div><div class="ctext">${esc(text)}</div>`;
-    sdStream.appendChild(d); sdStream.scrollTop = sdStream.scrollHeight;
-    return d;
-  }
-  function sdClose() { sdModal.hidden = true; sdTicket = ""; }
+  let sdId = "", sdHistory = [];
+  const sdBubble = makeBubble(sdStream);
+  function sdClose() { sdModal.hidden = true; sdId = ""; }
   function sdTime(ms) { try { return new Date(ms).toLocaleTimeString(); } catch { return ""; } }
   function sdDetail(x) { if (x == null) return ""; const s = typeof x === "string" ? x : JSON.stringify(x); return s.length > 100 ? s.slice(0, 100) + "…" : s; }
   async function sdOpen(id) {
-    sdHistory = []; sdStream.innerHTML = ""; sdModal.hidden = false;
+    sdId = id; sdHistory = []; sdStream.innerHTML = ""; sdModal.hidden = false;
     $("sd-ticket").textContent = "…"; $("sd-meta").textContent = ""; $("sd-reason").textContent = ""; $("sd-timeline").innerHTML = ""; $("sd-pr").hidden = true;
     try {
       const res = await fetch("/api/sweep/job?id=" + encodeURIComponent(id), { cache: "no-store" });
       const d = await res.json();
       const j = d.job;
       if (!j) { $("sd-ticket").textContent = "job not found"; return; }
-      sdTicket = j.ticketKey;
       $("sd-ticket").textContent = j.ticketKey;
       $("sd-meta").textContent = `${KIND_LABEL[j.kind] || j.kind} · ${String(j.state).toUpperCase()} · ${j.cycles} cyc`;
       const pr = $("sd-pr");
@@ -627,11 +624,11 @@
     } catch (e) { $("sd-ticket").textContent = "error loading"; }
   }
   async function sdSend() {
-    const q = sdField.value.trim(); if (!q || !sdTicket) return;
+    const q = sdField.value.trim(); if (!q || !sdId) return;
     sdField.value = ""; sdBubble("You", q);
     const thinking = sdBubble("Borderless", "… thinking");
     try {
-      const res = await fetch("/api/resolve-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ticket: sdTicket, question: q, history: sdHistory }) });
+      const res = await fetch("/api/resolve-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: sdId, question: q, history: sdHistory }) });
       const j = await res.json();
       const answer = j.configured === false ? "Chat backend is off — set one in ~/.borderless/config.json" : (j.answer || "(no answer)");
       thinking.querySelector(".ctext").textContent = answer;

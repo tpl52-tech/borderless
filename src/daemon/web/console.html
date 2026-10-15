@@ -439,6 +439,7 @@
           </div>
           <div class="md-body">
             <div class="md-reason" id="sd-reason"></div>
+            <div id="sd-actions" hidden><button class="btn green" id="sd-approve">&#10003; Approve &mdash; mark ready</button><span class="note" id="sd-approve-note" style="margin:0 0 0 .6rem"></span></div>
             <div><div class="ph" style="margin-bottom:.45rem">TIMELINE</div><div class="log" id="sd-timeline"></div></div>
             <div>
               <div class="ph" style="margin-bottom:.45rem">RESOLVE &mdash; chat it through</div>
@@ -601,7 +602,7 @@
   field.addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
 
   // ---- RESOLVE: click a NEEDS_YOU / READY card → detail panel + per-ticket chat ----
-  const sdModal = $("s-detail"), sdStream = $("sd-stream"), sdField = $("sd-field");
+  const sdModal = $("s-detail"), sdStream = $("sd-stream"), sdField = $("sd-field"), sdApprove = $("sd-approve");
   let sdId = "", sdHistory = [];
   const sdBubble = makeBubble(sdStream);
   function sdClose() { sdModal.hidden = true; sdId = ""; }
@@ -609,7 +610,7 @@
   function sdDetail(x) { if (x == null) return ""; const s = typeof x === "string" ? x : JSON.stringify(x); return s.length > 100 ? s.slice(0, 100) + "…" : s; }
   async function sdOpen(id) {
     sdId = id; sdHistory = []; sdStream.innerHTML = ""; sdModal.hidden = false;
-    $("sd-ticket").textContent = "…"; $("sd-meta").textContent = ""; $("sd-reason").textContent = ""; $("sd-timeline").innerHTML = ""; $("sd-pr").hidden = true;
+    $("sd-ticket").textContent = "…"; $("sd-meta").textContent = ""; $("sd-reason").textContent = ""; $("sd-timeline").innerHTML = ""; $("sd-pr").hidden = true; $("sd-actions").hidden = true;
     try {
       const res = await fetch("/api/sweep/job?id=" + encodeURIComponent(id), { cache: "no-store" });
       const d = await res.json();
@@ -620,6 +621,8 @@
       const pr = $("sd-pr");
       if (d.prUrl) { pr.textContent = "PR #" + j.prNumber + " ↗"; pr.href = d.prUrl; pr.hidden = false; }
       $("sd-reason").textContent = j.reason || "(no escalation reason recorded)";
+      $("sd-actions").hidden = j.state !== "needs_human"; // approve only a job that's waiting on you
+      sdApprove.disabled = false; $("sd-approve-note").textContent = "";
       $("sd-timeline").innerHTML = (d.events || []).map((e) => `<div class="line"><span class="t">${sdTime(e.at)}</span> <span class="tag dim">${esc(e.event)}</span> ${esc(sdDetail(e.detail))}</div>`).join("") || `<div class="line s-dim">no events</div>`;
       sdBubble("Borderless", "Ask me anything about this ticket, or tell me how you want to resolve it.");
     } catch (e) { $("sd-ticket").textContent = "error loading"; }
@@ -643,6 +646,16 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !sdModal.hidden) sdClose(); });
   $("sd-send").addEventListener("click", sdSend);
   sdField.addEventListener("keydown", (e) => { if (e.key === "Enter") sdSend(); });
+  sdApprove.addEventListener("click", async () => {
+    if (!sdId) return;
+    sdApprove.disabled = true; $("sd-approve-note").textContent = "…";
+    try {
+      const res = await fetch("/api/sweep/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: sdId }) });
+      const j = await res.json();
+      if (j.ok) { $("sd-approve-note").textContent = "✓ moved to Ready — close this to see it in READY_TO_MERGE"; await load(); }
+      else { $("sd-approve-note").textContent = j.error || "could not approve"; sdApprove.disabled = false; }
+    } catch (e) { $("sd-approve-note").textContent = "approve failed"; sdApprove.disabled = false; }
+  });
 
   // ---- Refresh: pull the live Linear board, then re-render ----
   const refreshBtn = $("refresh-btn");

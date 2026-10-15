@@ -278,6 +278,15 @@ export interface InReviewSweepResult {
   configured: boolean; // false when Linear isn't configured (no API key / team keys) — the board sync couldn't run
 }
 
+/** The outcome of one fix sweep (scanFix): Linear sync → enqueue qa-fix build-jobs → drive them. No `reopened`:
+ *  a build-from-scratch kind has no author PR to head-advance re-review. */
+export interface FixSweepResult {
+  synced: number;      // Linear issues pulled into the store
+  created: number;     // brand-new fix jobs enqueued
+  started: number;     // jobs the supervisor kicked off this sweep
+  configured: boolean; // false when Linear isn't configured (no API key / team keys)
+}
+
 /** A sweep attempt on one ticket: in-review (drive an author's PR) or rescue/fix (build from scratch). */
 export interface SweepJob {
   id: string;

@@ -239,6 +239,7 @@
           <p class="hero-sub" id="s-herosub">loading&hellip;</p>
           <div class="hero-actions">
             <button class="btn green" id="s-sweep">&#9654; SWEEP IN REVIEW</button>
+            <button class="btn green" id="s-fixsweep">&#9654; FIX SWEEP</button>
             <button class="btn o-pink" data-cmd="ao rescue">&#10227; SCAN OVERDUE</button>
           </div>
         </div>
@@ -437,6 +438,9 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const stateClass = (st) => ({ ready: "s-green", merged: "s-green", needs_human: "s-pink", failed: "s-pink", queued: "s-dim", ci: "s-dim" }[st] || "s-ink");
   const ACTIVE = new Set(["implementing", "fixing", "reviewing", "ci", "queued"]);
+  // KIND column: in_review drives an author's PR (muted); rescue + qa-fix build from scratch (pink).
+  const KIND_LABEL = { in_review: "review", rescue: "rescue", fix: "fix" };
+  const KIND_CLASS = { in_review: "k-review", rescue: "k-rescue", fix: "k-rescue" };
 
   // ---- render ----
   function render(d) {
@@ -449,7 +453,7 @@
     $("s-herosub").innerHTML = `${sw.length} in scope &middot; <b style="color:var(--green)">${ready.length} ready</b> &middot; <b style="color:var(--pink)">${needs.length} need you</b> &middot; ${active} active. Agents drive to the gate; you decide.`;
     $("s-queuemeta").textContent = `${sw.length} JOBS`;
     $("s-queue").innerHTML = sw.length
-      ? sw.map((j) => `<tr><td>${esc(j.ticketKey)}</td><td class="${j.kind === "rescue" ? "k-rescue" : "k-review"}">${j.kind === "rescue" ? "rescue" : "review"}</td><td>${esc(j.owner) || "&mdash;"}</td><td class="${stateClass(j.state)}">${esc(String(j.state).toUpperCase())}</td><td>${esc(j.cycles)}</td></tr>`).join("")
+      ? sw.map((j) => `<tr><td>${esc(j.ticketKey)}</td><td class="${KIND_CLASS[j.kind] || "k-review"}">${KIND_LABEL[j.kind] || esc(j.kind)}</td><td>${esc(j.owner) || "&mdash;"}</td><td class="${stateClass(j.state)}">${esc(String(j.state).toUpperCase())}</td><td>${esc(j.cycles)}</td></tr>`).join("")
       : `<tr><td colspan="5" class="s-dim">no sweep jobs yet &mdash; nothing in review, nothing rescued</td></tr>`;
     $("s-readymeta").textContent = String(ready.length);
     $("s-ready").innerHTML = ready.length
@@ -577,6 +581,18 @@
       await load(); // refresh the SWEEP_QUEUE with the re-opened + newly-enqueued jobs
       return d.configured === false ? "Linear not configured" : `✓ ${d.reopened} re-opened · ${d.created} new · ${d.started} running`;
     } catch { return "sweep failed"; }
+  }, 3000));
+
+  // ---- SWEEPS: run the qa-fix sweep from the browser (sync + enqueue + drive build-from-scratch jobs) ----
+  const fixSweepBtn = $("s-fixsweep");
+  fixSweepBtn.addEventListener("click", () => withTransientResult(fixSweepBtn, "⟳ sweeping…", async () => {
+    try {
+      const res = await fetch("/api/sweep/fix", { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      const d = await res.json();
+      await load(); // refresh the SWEEP_QUEUE with the newly-enqueued fix jobs
+      return d.configured === false ? "Linear not configured" : `✓ ${d.created} new · ${d.started} running`;
+    } catch { return "fix sweep failed"; }
   }, 3000));
 
   // ---- LEAD DESK: chat → draft → review (editable) → create in Linear ----

@@ -32,7 +32,7 @@
 
 import type { DaemonClient } from "../client/daemon-client.ts";
 import type { DelegateResult } from "../shared/lead-desk.ts";
-import type { InReviewSweepResult } from "../shared/types.ts";
+import type { InReviewSweepResult, FixSweepResult } from "../shared/types.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 import type { VerifyQaResult } from "../shared/verify-qa.ts";
@@ -79,6 +79,16 @@ export async function main(argv: string[]): Promise<void> {
       );
       const note = r.configured ? "" : " — Linear not configured (no API key / teams)";
       console.log(`sweep: synced ${r.synced} issue(s), re-opened ${r.reopened} advanced, enqueued ${r.created} job(s), started ${r.started} run(s)${note}`);
+    });
+    return;
+  }
+
+  // `ao fix-sweep` — sync + enqueue + drive a build-from-scratch job for every qa-fix Todo ticket (PRD §13).
+  if (sub === "fix-sweep") {
+    await withDaemon("fix-sweep", async (client) => {
+      const r = await client.request<FixSweepResult>("sweep.scanFix", {});
+      const note = r.configured ? "" : " — Linear not configured (no API key / teams)";
+      console.log(`fix-sweep: synced ${r.synced} issue(s), enqueued ${r.created} job(s), started ${r.started} run(s)${note}`);
     });
     return;
   }

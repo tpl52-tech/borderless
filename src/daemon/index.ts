@@ -59,7 +59,7 @@ import { askBorderless, type FleetDocs } from "./ask-borderless.ts";
 import { httpOpenRouterChat } from "./openrouter/chat.ts";
 import { claudeCliChat } from "./claude-chat.ts";
 import type { Chat, Message } from "./openrouter/runner.ts";
-import { memberByLinearId, firstName, ROSTER } from "../shared/roster.ts";
+import { memberByLinearId, firstName, testerMember, ROSTER } from "../shared/roster.ts";
 import { coLeads, epicRows, DELEGATED_LABEL, DELEGATED_LABEL_COLOR, delegationDmText, DEFAULT_LEAD_OPS_PROJECT } from "../shared/lead-desk.ts";
 import { draftPrompt, parseDraft, type DraftContext, type DeskDraftResponse, type DraftPerson, type DraftAnswer } from "../shared/desk-draft.ts";
 
@@ -330,6 +330,8 @@ export function startDaemon(home = stateHome()): Daemon {
         doneStateId: () => (doneStateIdOnce ??= resolveDoneStateId(linear, teamKey)),
         postComment: async (issueId, body) => parseCommentCreate(await linear.query(COMMENT_CREATE_MUTATION, { input: { issueId, body } })).url,
         setState: async (issueId, stateId) => { parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id: issueId, input: { stateId } })); },
+        resolveTester: (verdictBy) => { const m = testerMember(verdictBy); const id = m?.linearIds[0]; return id ? { userId: id, name: firstName(m!) } : null; },
+        setAssignee: async (issueId, userId) => { parseIssueUpdate(await linear.query(ISSUE_UPDATE_MUTATION, { id: issueId, input: { assigneeId: userId } })); },
         write,
       });
       return { results, configured: true, wrote: write };

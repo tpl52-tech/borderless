@@ -787,8 +787,9 @@
   const qaCardHtml = (r) => {
     const [label, cls] = QA_ACTION[r.action] || [r.action, "s-ink"];
     const done = r.movedToDone ? " &rarr; Done" : "";
+    const who = r.assignedTo ? ` <span class="muted">&middot; by ${esc(r.assignedTo)}</span>` : "";
     const tail = r.detail ? esc(r.detail) : r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">comment</a>` : "";
-    return `<div class="row-card"><div class="rc-top"><span class="st ${cls}">${label}${done}</span> <b>${esc(r.ticketKey)}</b> <span class="vr-verd ${QA_VERDICT[r.verdict] || "s-ink"}">${esc(r.verdict)}</span>${tail ? ` <span class="muted">${tail}</span>` : ""}</div></div>`;
+    return `<div class="row-card"><div class="rc-top"><span class="st ${cls}">${label}${done}</span> <b>${esc(r.ticketKey)}</b> <span class="vr-verd ${QA_VERDICT[r.verdict] || "s-ink"}">${esc(r.verdict)}</span>${who}${tail ? ` <span class="muted">${tail}</span>` : ""}</div></div>`;
   };
 
   vQa.addEventListener("click", () => withBusy(vQa, "⟳ syncing…", async () => {

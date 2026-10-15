@@ -38,6 +38,8 @@ export interface QaWritebackResult {
   action: QaWritebackAction;
   /** true when the sub-issue was (or would be) moved to Done — only ever on a pass. */
   movedToDone?: boolean;
+  /** The tester the sub-issue was assigned to (display name), when the verdict's tester resolved to a roster member. */
+  assignedTo?: string;
   url?: string | null; // the created comment's url
   detail?: string;
 }

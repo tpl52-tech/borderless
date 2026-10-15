@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import {
-  ROSTER, buildRosterIndexes, memberByLinearId, memberByGithub, slackLookupEmails,
+  ROSTER, buildRosterIndexes, memberByLinearId, memberByGithub, slackLookupEmails, testerLinearId, testerMember,
 } from "../src/shared/roster.ts";
 
 const DANA_ER559 = "21964707-6acc-493e-80d5-af0a402af210";
@@ -54,5 +54,31 @@ describe("roster (lead-console PRD §5)", () => {
     const base = ROSTER[0]!;
     expect(() => buildRosterIndexes([base, { ...base, github: "other" }])).toThrow(/duplicate linearId/);
     expect(() => buildRosterIndexes([base, { ...base, linearIds: ["x"] }])).toThrow(/duplicate github/);
+  });
+
+  describe("testerLinearId (Cue QA tester → Linear user)", () => {
+    test("matches a tester by first name to their primary Linear id", () => {
+      expect(testerLinearId("renee")).toBe("dd7f7d59-a191-48f6-bde4-1fdad5e7ef1c"); // Renee Gowda
+      expect(testerLinearId("sabrina")).toBe("8ad608d2-2181-4938-8470-b9610617f422"); // Sabrina Gerson
+    });
+
+    test("Dana resolves unambiguously to her FIRST (canonical) linearId despite two accounts", () => {
+      expect(testerLinearId("dana")).toBe(DANA_ER559);
+      expect(ROSTER.find((m) => m.name === "Dana Ryu")!.linearIds[0]).toBe(DANA_ER559);
+    });
+
+    test("case-insensitive, and null for an unknown or empty tester (left unassigned)", () => {
+      expect(testerLinearId("Renee")).toBe("dd7f7d59-a191-48f6-bde4-1fdad5e7ef1c");
+      expect(testerLinearId("ghost")).toBeNull();
+      expect(testerLinearId("")).toBeNull();
+      expect(testerLinearId(undefined)).toBeNull();
+    });
+
+    test("testerMember is the single source — id and display name come from one member", () => {
+      const m = testerMember("dana");
+      expect(m!.name).toBe("Dana Ryu");
+      expect(m!.linearIds[0]).toBe(DANA_ER559); // the id testerLinearId returns
+      expect(testerMember("ghost")).toBeNull();
+    });
   });
 });

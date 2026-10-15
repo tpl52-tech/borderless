@@ -244,8 +244,9 @@ export async function main(argv: string[]): Promise<void> {
           const mark = r.action === "synced" ? "✓ synced" : r.action === "would-sync" ? "• would sync" : r.action === "error" ? "✗ error"
             : r.action === "skipped-synced" ? "· already synced" : "· skipped";
           const done = r.movedToDone ? (r.action === "would-sync" ? " + would move to Done" : " + moved to Done") : "";
+          const who = r.assignedTo ? ` + assigned to ${r.assignedTo}` : "";
           const tail = r.detail ? `(${r.detail})` : r.url ? r.url : "";
-          console.log(`  ${mark}  ${r.ticketKey}  [${r.verdict}]${done}  ${tail}`);
+          console.log(`  ${mark}  ${r.ticketKey}  [${r.verdict}]${done}${who}  ${tail}`);
         }
         if (!wrote) console.log("\n(dry run — re-run with --write to post these to Linear)");
       });

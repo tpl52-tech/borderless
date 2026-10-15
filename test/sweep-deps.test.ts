@@ -324,6 +324,12 @@ describe("reviewerSeed (acceptance-criteria completeness is a gate dimension)", 
     expect(s).toContain("four lines");
   });
 
+  test("a re-driven job (leadGuidance set) tells the reviewer the lead's instruction is authoritative", () => {
+    const s = reviewerSeed(job({ leadGuidance: "put the price above the stars, per Figma" }), "- [ ] x");
+    expect(s).toContain("AUTHORITATIVE");
+    expect(s).toContain("put the price above the stars, per Figma");
+  });
+
   test("no/blank ACs → flags that completeness couldn't be confirmed and treats it as blocking", () => {
     expect(reviewerSeed(job(), null)).toContain("could not confirm completeness");
     expect(reviewerSeed(job(), "   ")).toContain("could not confirm completeness");

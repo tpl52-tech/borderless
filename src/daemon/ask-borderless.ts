@@ -11,6 +11,7 @@
  */
 
 import type { Store } from "./store.ts";
+import { REOPEN_QUEUED_PATCH } from "./sweep-store.ts";
 import type { SweepJob } from "../shared/types.ts";
 import { isTerminalState } from "../shared/boards.ts";
 import { ROSTER, type Member } from "../shared/roster.ts";
@@ -121,7 +122,7 @@ export const FLEET_TOOLS: FleetTool[] = [
       const job = store.listSweepJobs({ state: "needs_human" }).find((j) => j.ticketKey === ticket);
       if (!job) return err(`no needs_human job for ${ticket || "(missing ticket)"}`);
       if (args.action === "requeue") {
-        store.transitionSweepJob(job.id, { state: "queued", reason: null });
+        store.transitionSweepJob(job.id, { ...REOPEN_QUEUED_PATCH }); // full fresh-queued reset (incl. clearing any stale lead guidance)
         return ok(`${ticket}: re-queued`);
       }
       if (args.action === "dismiss") {

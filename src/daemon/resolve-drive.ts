@@ -11,6 +11,7 @@
 
 import type { Store } from "./store.ts";
 import type { SweepState } from "../shared/types.ts";
+import { REOPEN_QUEUED_PATCH } from "./sweep-store.ts";
 
 /** The store surface approve needs — satisfied by Store. */
 export type ResolveStore = Pick<Store, "getSweepJob" | "transitionSweepJob" | "recordSweepEvent">;
@@ -52,7 +53,7 @@ export function redriveJob(store: ResolveStore, jobId: string, guidance: string)
   if (job.state !== "needs_human") return { ok: false, error: `can't re-drive a ${job.state} job (only one waiting on you)` };
   if (job.prNumber == null) return { ok: false, error: "no PR to re-drive — this job never opened one" };
   if (!guidance) return { ok: false, error: "add an instruction telling the agent what to change" };
-  store.transitionSweepJob(jobId, { state: "queued", cycles: 0, gate: null, reason: null, sessionId: null, leadGuidance: guidance });
+  store.transitionSweepJob(jobId, { ...REOPEN_QUEUED_PATCH, leadGuidance: guidance });
   store.recordSweepEvent(jobId, "state_change", { from: "needs_human", to: "queued", by: "lead-redrive", guidance });
   return { ok: true, state: "queued" };
 }

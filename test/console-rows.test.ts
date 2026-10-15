@@ -14,7 +14,7 @@ describe("sweepOwner / sweepRow / rosterRow (the shapes both consoles share)", (
   test("sweepRow projects the queue fields", () => {
     const s = new Store(":memory:");
     const j = s.createSweepJob({ kind: "in_review", ticketId: "i1", ticketKey: "COR-1", prNumber: 7, assignee: TESS });
-    expect(sweepRow(j)).toEqual({ ticketKey: "COR-1", kind: "in_review", state: "queued", owner: "Hyunsuh", prNumber: 7, cycles: 0, reason: null, sessionId: null });
+    expect(sweepRow(j)).toEqual({ id: j.id, ticketKey: "COR-1", kind: "in_review", state: "queued", owner: "Hyunsuh", prNumber: 7, cycles: 0, reason: null, sessionId: null });
   });
   test("rosterRow exposes only name/netid/github/lead (no emails/linearIds)", () => {
     expect(rosterRow(ROSTER[0]!)).toEqual({ name: "Hyunsuh (Tess) Lee", netid: "tpl52", github: "tpl52-tech", lead: true });

@@ -21,7 +21,7 @@ export function sweepOwner(assignee: string | null): string | null {
 /** The sweep-queue row shape both consoles render. */
 export function sweepRow(j: SweepJob) {
   return {
-    ticketKey: j.ticketKey, kind: j.kind, state: j.state, owner: sweepOwner(j.assignee),
+    id: j.id, ticketKey: j.ticketKey, kind: j.kind, state: j.state, owner: sweepOwner(j.assignee),
     prNumber: j.prNumber, cycles: j.cycles, reason: j.reason, sessionId: j.sessionId,
   };
 }

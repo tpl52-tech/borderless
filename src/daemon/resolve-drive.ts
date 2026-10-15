@@ -18,14 +18,22 @@ export type ResolveStore = Pick<Store, "getSweepJob" | "transitionSweepJob" | "r
 export interface ApproveResult { ok: boolean; state?: SweepState; error?: string }
 
 /**
- * Approve a stopped job → ready (lead override). Only a needs_human job can be approved; anything else is a
- * no-op error the UI reports (never a silent state jump). Records an audit event before the transition.
+ * Approve a stopped job → ready (lead override). Approvable only when the job is needs_human AND has a PR:
+ * `ready` means "there is a PR to `gh pr merge`", the invariant the engine keeps (it only reaches ready with a
+ * head; a PR-less job escalates instead). Any other state/shape is a no-op error the UI reports, never a silent
+ * jump. Transition FIRST, then record the audit event (the engine's order — sweep-engine `finish`, the
+ * reReviewAdvancedPrs reopener), so a throw between the two writes can't leave a log line claiming a state the
+ * job isn't in.
+ *
+ * Not sticky against a head advance: an in_review job later gets re-opened to queued by reReviewAdvancedPrs if
+ * the author pushes a new commit — a new head deserves fresh review. Intended.
  */
-export function approveJob(store: ResolveStore, jobId: string, note: string): ApproveResult {
+export function approveJob(store: ResolveStore, jobId: string): ApproveResult {
   const job = store.getSweepJob(jobId);
   if (!job) return { ok: false, error: "job not found" };
   if (job.state !== "needs_human") return { ok: false, error: `can't approve a ${job.state} job (only one waiting on you)` };
-  store.recordSweepEvent(jobId, "state_change", { to: "ready", by: "lead-approve", note: note || null });
-  store.transitionSweepJob(jobId, { state: "ready", reason: note ? `lead-approved: ${note}` : "lead-approved" });
+  if (job.prNumber == null) return { ok: false, error: "no PR to merge — this job never opened one" };
+  store.transitionSweepJob(jobId, { state: "ready", reason: "lead-approved" });
+  store.recordSweepEvent(jobId, "state_change", { from: "needs_human", to: "ready", by: "lead-approve" });
   return { ok: true, state: "ready" };
 }

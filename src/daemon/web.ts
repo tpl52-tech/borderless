@@ -37,7 +37,7 @@ export interface WebServerDeps {
   resolveChatRun: (jobId: string, question: string, history: ResolveTurn[]) => Promise<{ answer: string; configured: boolean }>;
   /** Lead decision on a stopped job (SWEEPS detail panel): APPROVE → move the needs_human job to ready (lead
    *  override). Synchronous store update; `ready` is surfaced for the lead to merge, not merged here. */
-  approveJob: (jobId: string, note: string) => ApproveResult;
+  approveJob: (jobId: string) => ApproveResult;
   /** Pull the live Linear board into the store (no sweeps) — the Refresh button. */
   syncBoard: () => Promise<{ synced: number; configured: boolean }>;
   /** PRD §13: classify the Verifying tickets from their merged PRs. A live gh scan — on-demand, never polled. */
@@ -144,11 +144,10 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         return Response.json(await deps.resolveChatRun(id, question, parseResolveTurns(body.history)));
       }
       if (pathname === "/api/sweep/approve" && req.method === "POST") {
-        const body = (await req.json().catch(() => ({}))) as { id?: unknown; note?: unknown };
+        const body = (await req.json().catch(() => ({}))) as { id?: unknown };
         const id = typeof body.id === "string" ? body.id.trim() : "";
-        const note = typeof body.note === "string" ? body.note.trim() : "";
         if (!id) return Response.json({ ok: false, error: "no job id" });
-        return Response.json(deps.approveJob(id, note)); // needs_human → ready (lead override)
+        return Response.json(deps.approveJob(id)); // needs_human → ready (lead override)
       }
       return new Response("not found", { status: 404 });
     },

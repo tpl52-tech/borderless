@@ -90,13 +90,10 @@ export function kindTone(kind: SweepKind): Tone {
   return kind === "in_review" ? "ink2" : "pink"; // build-from-scratch (rescue/fix) → pink; a driven in-review PR → muted
 }
 
-/** How a kind is spelled in the queue table. */
+/** How a kind is spelled in the queue table (a total Record so a new SweepKind is a compile error until added). */
+const KIND_LABEL: Record<SweepKind, string> = { in_review: "review", rescue: "rescue", fix: "fix" };
 export function kindLabel(kind: SweepKind): string {
-  switch (kind) {
-    case "in_review": return "review";
-    case "rescue": return "rescue";
-    case "fix": return "fix";
-  }
+  return KIND_LABEL[kind];
 }
 
 // --- nav / cursor / attach / ask-editor ------------------------------------------------------------------

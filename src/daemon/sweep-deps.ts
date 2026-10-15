@@ -322,6 +322,7 @@ function workerSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
     case "in_review": return `Drive PR #${job.prNumber} for ${job.ticketKey} to a mergeable state.`;
     case "rescue": return rescueSeedHead(job, ctx);
     case "fix": return fixSeedHead(job, ctx);
+    default: { const _exhaustive: never = job.kind; throw new Error(`workerSeedHead: unhandled kind ${String(_exhaustive)}`); }
   }
 }
 

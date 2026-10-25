@@ -173,7 +173,7 @@ export function liveHeadReader(repo: string): (prNumber: number) => Promise<stri
 
 /**
  * Re-review PRs that advanced after resting. The in-review sweep drives a PR to `ready`/`signoff`/`needs_human`
- * and then waits on a human; when the human pushes a fix, that resting job's reviewed head goes stale — yet the enqueue
+ * and then waits on a human; when the human pushes a fix, that resting job's reviewed head goes stale, yet the enqueue
  * dedup (it treats any non-merged/failed job as active) would never re-review the new code. So before each
  * sweep, re-open every resting in-review job whose PR head has moved past what it reviewed: back to `queued`
  * with the new head (a fresh attempt — cycles/gate/reason/session cleared), for the supervisor to drive and

@@ -124,7 +124,7 @@ describe("runSweepJob (sweep engine, PRD §4-§5)", () => {
     const final = s.getSweepJob(job.id)!;
     expect(final.state).toBe("signoff");
     expect(final.reason).toContain("dangerous tier: auth");
-    expect(rec.reviews).toBe(1);   // it DID review — drove to clean, unlike the old escalate-on-sight
+    expect(rec.reviews).toBe(1);   // it DID review, drove to clean, unlike the old escalate-on-sight
     expect(rec.spawns.length).toBe(0); // already clean, so no fix cycle was needed before the hand-off
   });
 
@@ -142,7 +142,7 @@ describe("runSweepJob (sweep engine, PRD §4-§5)", () => {
     expect(rec.reviews).toBe(2);
   });
 
-  test("a dangerous tier plus a collision stays needs_human — a real decision outranks a sign-off", async () => {
+  test("a dangerous tier plus a collision stays needs_human: a real decision outranks a sign-off", async () => {
     const s = new Store(":memory:");
     const job = s.createSweepJob({ kind: "in_review", ticketId: "t5c", ticketKey: "COR-5C", prNumber: 92, headSha: "h0" });
     const territory: Territory = new Map([

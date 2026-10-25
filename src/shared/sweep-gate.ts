@@ -91,13 +91,13 @@ export interface SweepDecisionInput {
   gate: GateResult;
   /**
    * A reason to stop for the human NOW instead of iterating: a genuine no-clearly-better-option judgment call
-   * or a cross-ticket collision — a real decision, not a rubber-stamp. Outranks everything, including a
+   * or a cross-ticket collision: a real decision, not a rubber-stamp. Outranks everything, including a
    * passing gate. null = keep self-resolving (PRD §4).
    */
   blockingEscalation: string | null;
   /**
    * A dangerous tier was touched (auth/money/schema/ci-config): mechanically the change may be fine, but the
-   * MERGE needs a human glance. This never blocks the drive — the sweep still fixes/reviews to a passing gate,
+   * MERGE needs a human glance. This never blocks the drive: the sweep still fixes/reviews to a passing gate,
    * then hands off for sign-off instead of auto-"ready" (PRD §4, "risky tiers always get explicit human
    * review"). null = no risky tier; ignored until the gate passes. A tier that coincides with a blocking
    * escalation is folded into that reason upstream, so it won't appear here.
@@ -114,7 +114,7 @@ export function nextSweepAction(input: SweepDecisionInput): SweepAction {
   // rubber-stamp (PRD §4).
   if (blockingEscalation) return { kind: "needs-human", reason: blockingEscalation };
 
-  // Gate passed. A dangerous tier doesn't block the drive, but the merge waits on a human glance — so hand
+  // Gate passed. A dangerous tier doesn't block the drive, but the merge waits on a human glance, so hand
   // off for sign-off rather than auto-merging a risky change (PRD §4). No tier → genuinely ready.
   if (gate.pass) return signoffReason ? { kind: "sign-off", reason: signoffReason } : { kind: "ready" };
 

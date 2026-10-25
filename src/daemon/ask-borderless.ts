@@ -37,7 +37,7 @@ export function buildFleetContext(store: Store, docs: FleetDocs = {}, roster: Me
   const jobs = store.listSweepJobs();
   const needsHuman = jobs.filter((j) => j.state === "needs_human");
   const awaitingSignoff = jobs.filter((j) => j.state === "signoff");
-  // "active", "awaiting sign-off", and "waiting on a human" are disjoint — a resting job is listed once, below.
+  // "active", "awaiting sign-off", and "waiting on a human" are disjoint: a resting job is listed once, below.
   const RESTING = new Set(["merged", "failed", "needs_human", "signoff"]);
   const active = jobs.filter((j) => !RESTING.has(j.state));
   const issues = store.listLinearIssues();

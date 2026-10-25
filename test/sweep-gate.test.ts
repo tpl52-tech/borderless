@@ -56,7 +56,7 @@ describe("nextSweepAction (PRD §4-§5)", () => {
     expect(decide({ gate: result([]) }).kind).toBe("ready");
   });
 
-  test("a blocking escalation stops for the human now, carrying the reason — even over a failing gate", () => {
+  test("a blocking escalation stops for the human now, carrying the reason, even over a failing gate", () => {
     const a = decide({ gate: result(["ci-failing"]), blockingEscalation: "judgment call: which rounding?" });
     expect(a).toEqual({ kind: "needs-human", reason: "judgment call: which rounding?" });
   });

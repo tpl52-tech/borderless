@@ -81,8 +81,8 @@ const WORKER_STATE: Record<SweepKind, SweepState> = { in_review: "fixing", rescu
 
 /**
  * Split the escalation signals into the two that route differently (PRD §4):
- *  - `blocking`: a cross-ticket collision or a reviewer judgment call — a real decision, stop for the human now;
- *  - `signoff`: a dangerous tier (auth/money/schema/ci-config) — drive to a clean gate first, then hand off for a
+ *  - `blocking`: a cross-ticket collision or a reviewer judgment call, a real decision, stop for the human now;
+ *  - `signoff`: a dangerous tier (auth/money/schema/ci-config), drive to a clean gate first, then hand off for a
  *    human glance (never auto-merge).
  * A tier that coincides with a blocker is folded INTO the blocking reason (so the human sees the full risk
  * picture) and does not also surface as a sign-off. null/null = keep self-resolving.
@@ -169,7 +169,7 @@ export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngin
         case "ready":
           return finish("ready");
         case "sign-off":
-          // Driven to a clean gate, but a dangerous tier was touched — hand off for a human glance, not auto-merge.
+          // Driven to a clean gate, but a dangerous tier was touched: hand off for a human glance, not auto-merge.
           return finish("signoff", action.reason);
         case "needs-human":
           return finish("needs_human", action.reason);

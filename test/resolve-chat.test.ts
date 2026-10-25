@@ -15,6 +15,7 @@ describe("resolveChatSeed", () => {
     expect(s).toContain("judgment call: how to derive Recommended/Deals");
     expect(s).toContain("Recommended/Deals section");
     expect(s).toContain("advice for the lead"); // advisory — the chat can't act
+    expect(s).toContain("ANSWER THE LEAD'S ACTUAL QUESTION"); // terse-by-default — don't essay every message
   });
 
   test("tolerates missing fields", () => {

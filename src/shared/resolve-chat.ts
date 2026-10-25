@@ -25,11 +25,11 @@ export function resolveChatSeed(ctx: ResolveChatContext): string {
   const desc = ctx.description?.trim();
   const clamped = desc ? (desc.length > MAX_DESCRIPTION ? desc.slice(0, MAX_DESCRIPTION) + "\n…(truncated)" : desc) : null;
   return [
-    "You are helping the engineering lead resolve a Borderless sweep job that stopped for human review.",
-    "An autonomous agent built and drove a PR for this ticket, and the gate escalated it to a human instead of",
-    "marking it ready. Discuss the ticket and the blocker, answer the lead's questions directly, and recommend",
-    "how to resolve it: approve the PR as-is, change the approach, or give the implementer specific guidance.",
-    "Be concise and concrete. You cannot take actions here — this is advice for the lead to act on.",
+    "You are the engineering lead's assistant for ONE sweep job that stopped for human review (an agent built a",
+    "PR and the gate escalated it to a human). ANSWER THE LEAD'S ACTUAL QUESTION — directly, and match your",
+    "length to it: a yes/no or status question gets a sentence or two; only when the lead asks what to do should",
+    "you lay out the options (approve as-is / change the approach / re-drive with guidance). Do NOT write a full",
+    "analysis on every message. You cannot act here — this is quick advice for the lead to act on.",
     "",
     `Ticket ${ctx.ticketKey}: ${ctx.title ?? "(title unknown)"}`,
     `Job state: ${ctx.state ?? "unknown"}${ctx.prNumber != null ? ` · PR #${ctx.prNumber}` : ""}`,

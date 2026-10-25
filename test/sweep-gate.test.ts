@@ -1,18 +1,18 @@
 import { test, expect, describe } from "bun:test";
 import {
-  evaluateGate, nextSweepAction, dangerousTiers, MAX_CYCLES,
+  evaluateGate, nextSweepAction, dangerousTiers, buildsFromScratch, MAX_CYCLES,
   type GateInput, type GateBlocker, type GateResult, type SweepDecisionInput,
 } from "../src/shared/sweep-gate.ts";
 
 // A fully-passing gate input; override one axis at a time.
 const PASSING: GateInput = {
   kind: "in_review", preservationProven: true,
-  checks: { ci: "success", "secrets-scan": "success" }, reviewerRedFindings: 0,
+  checks: { ci: "success", "secrets-scan": "success" }, reviewerRedFindings: 0, thermoGrade: "A",
 };
 const gate = (over: Partial<GateInput> = {}): GateInput => ({ ...PASSING, ...over });
 
 describe("evaluateGate (PRD §4)", () => {
-  test("all three conditions met → pass, no blockers", () => {
+  test("all conditions met → pass, no blockers", () => {
     expect(evaluateGate(PASSING)).toEqual({ pass: true, blockers: [] });
   });
 
@@ -20,6 +20,7 @@ describe("evaluateGate (PRD §4)", () => {
     expect(evaluateGate(gate({ preservationProven: null })).blockers).toContain("regression-unproven");
     expect(evaluateGate(gate({ preservationProven: false })).blockers).toContain("regression-unproven");
     expect(evaluateGate(gate({ kind: "rescue", preservationProven: null })).blockers).toContain("acceptance-unproven");
+    expect(evaluateGate(gate({ kind: "fix", preservationProven: null })).blockers).toContain("acceptance-unproven");
   });
 
   test("CI: a failure blocks as ci-failing; pending/missing only as ci-pending", () => {
@@ -40,10 +41,31 @@ describe("evaluateGate (PRD §4)", () => {
     expect(evaluateGate(gate({ reviewerRedFindings: 0 })).blockers).not.toContain("reviewer-red");
   });
 
+  test("thermo: below-A blocks once the reviewer has run; exactly A clears it; missing fails closed", () => {
+    expect(evaluateGate(gate({ thermoGrade: "A-" })).blockers).toContain("thermo-below-a");
+    expect(evaluateGate(gate({ thermoGrade: "B" })).blockers).toContain("thermo-below-a");
+    expect(evaluateGate(gate({ thermoGrade: null })).blockers).toContain("thermo-below-a"); // reviewer ran, no grade
+    expect(evaluateGate(gate({ thermoGrade: "A" })).blockers).not.toContain("thermo-below-a");
+  });
+
+  test("thermo: not evaluated until the reviewer has run (reviewer-unrun covers that state)", () => {
+    const b = evaluateGate(gate({ reviewerRedFindings: null, thermoGrade: null })).blockers;
+    expect(b).toContain("reviewer-unrun");
+    expect(b).not.toContain("thermo-below-a");
+  });
+
   test("absence is never a pass: nothing established → all three block", () => {
-    const r = evaluateGate({ kind: "in_review", preservationProven: null, checks: {}, reviewerRedFindings: null });
+    const r = evaluateGate({ kind: "in_review", preservationProven: null, checks: {}, reviewerRedFindings: null, thermoGrade: null });
     expect(r.pass).toBe(false);
     expect(r.blockers.sort()).toEqual(["ci-pending", "regression-unproven", "reviewer-unrun"].sort() as GateBlocker[]);
+  });
+});
+
+describe("buildsFromScratch (rescue + fix build from nothing; in_review drives an author's PR)", () => {
+  test("rescue + fix are from-scratch; in_review is not", () => {
+    expect(buildsFromScratch("rescue")).toBe(true);
+    expect(buildsFromScratch("fix")).toBe(true);
+    expect(buildsFromScratch("in_review")).toBe(false);
   });
 });
 

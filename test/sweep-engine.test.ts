@@ -8,8 +8,8 @@ import {
 import type { Territory } from "../src/shared/collision.ts";
 
 const CLEAN_POLL: PollResult = { checks: { ci: "success", "secrets-scan": "success" }, changedPaths: ["src/ui/button.ts"] };
-const cleanReview = (): Omit<ReviewVerdict, "sessionId"> => ({ redFindings: 0, preservationProven: true, judgmentCall: null });
-const redReview = (): Omit<ReviewVerdict, "sessionId"> => ({ redFindings: 2, preservationProven: false, judgmentCall: null });
+const cleanReview = (): Omit<ReviewVerdict, "sessionId"> => ({ redFindings: 0, preservationProven: true, judgmentCall: null, thermoGrade: "A" });
+const redReview = (): Omit<ReviewVerdict, "sessionId"> => ({ redFindings: 2, preservationProven: false, judgmentCall: null, thermoGrade: "A" });
 
 // The overrides give everything EXCEPT the sessionId — the fake mints a real session row (so the
 // sweep_job.session_id FK from Phase 1 is satisfiable) and injects its id, mirroring production where the
@@ -240,12 +240,24 @@ describe("runSweepJob (sweep engine, PRD §4-§5)", () => {
     const s = new Store(":memory:");
     const job = s.createSweepJob({ kind: "in_review", ticketId: "t12", ticketKey: "COR-12", prNumber: 13, headSha: "h0" });
     const { deps, rec } = makeDeps(s, {
-      review: (n) => (n === 1 ? { redFindings: 0, preservationProven: false, judgmentCall: null } : cleanReview()),
+      review: (n) => (n === 1 ? { redFindings: 0, preservationProven: false, judgmentCall: null, thermoGrade: "A" } : cleanReview()),
     });
 
     expect(await runSweepJob(job, s, deps)).toBe("ready");
     expect(rec.spawns.length).toBe(1);
     expect(rec.spawns[0]!.blockers).toContain("regression-unproven");
+  });
+
+  test("a below-A thermo grade triggers a fix cycle; reaching grade A clears the gate", async () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "in_review", ticketId: "tA", ticketKey: "COR-77", prNumber: 14, headSha: "h0" });
+    const { deps, rec } = makeDeps(s, {
+      review: (n) => (n === 1 ? { redFindings: 0, preservationProven: true, judgmentCall: null, thermoGrade: "B+" } : cleanReview()),
+    });
+
+    expect(await runSweepJob(job, s, deps)).toBe("ready");
+    expect(rec.spawns.length).toBe(1); // one fix cycle to lift the grade to A
+    expect(rec.spawns[0]!.blockers).toContain("thermo-below-a");
   });
 
   test("in_review with no PR (unhydrated) stops for a human — never implements blindly", async () => {
@@ -262,7 +274,7 @@ describe("runSweepJob (sweep engine, PRD §4-§5)", () => {
     const s = new Store(":memory:");
     const job = s.createSweepJob({ kind: "in_review", ticketId: "t8", ticketKey: "COR-8", prNumber: 10, headSha: "h0" });
     const { deps, rec } = makeDeps(s, {
-      review: () => ({ redFindings: 0, preservationProven: true, judgmentCall: "which rounding rule?" }),
+      review: () => ({ redFindings: 0, preservationProven: true, judgmentCall: "which rounding rule?", thermoGrade: "A" }),
     });
 
     expect(await runSweepJob(job, s, deps)).toBe("needs_human");
@@ -280,7 +292,7 @@ describe("runSweepJob (sweep engine, PRD §4-§5)", () => {
     ]);
     const { deps, rec } = makeDeps(s, {
       poll: () => ({ checks: { ci: "success", "secrets-scan": "success" }, changedPaths: ["components/ConditionStars.tsx"] }),
-      review: () => ({ redFindings: 0, preservationProven: true, judgmentCall: null }), // gate would otherwise pass
+      review: () => ({ redFindings: 0, preservationProven: true, judgmentCall: null, thermoGrade: "A" }), // gate would otherwise pass
       territoryFor: () => territory,
     });
 

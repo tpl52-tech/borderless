@@ -150,7 +150,7 @@ export type RequestType =
   | "workitem.list" | "workitem.refresh" | "workitem.add" | "workitem.remove"
   | "workitem.action"
   | "project.setHidden"
-  | "sweep.scanInReview" | "rescue.scan" | "rescue.authorize"
+  | "sweep.scanInReview" | "sweep.scanFix" | "rescue.scan" | "rescue.authorize"
   | "boards.get" | "assign.suggest" | "lead.desk" | "lead.delegate" | "ask.run" | "sync.run"
   | "verify.scan" | "verify.run" | "verify.qa" | "verify.qa-sync" | "verify.qa-fix"
   | "sweep.list" | "roster.get"

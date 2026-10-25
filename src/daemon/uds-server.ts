@@ -20,7 +20,7 @@ import { activeLoads, suggestAssignments } from "../shared/assign.ts";
 import { deskOverview, type DelegateRequest, type DelegateResult } from "../shared/lead-desk.ts";
 import { ROSTER } from "../shared/roster.ts";
 import { sweepRow, rosterRow, boardRow, assignRow } from "../shared/console-rows.ts";
-import type { InReviewSweepResult } from "../shared/types.ts";
+import type { InReviewSweepResult, FixSweepResult } from "../shared/types.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
 import type { VerifyQaResult } from "../shared/verify-qa.ts";
@@ -47,6 +47,8 @@ export interface UdsServerDeps {
   extendAutonomy: (hours: number) => { until: number };
   /** Build order #2/#3c: refresh linear_issues (if configured), enqueue in-review sweep jobs, then run them. */
   scanInReview: (stateName?: string) => Promise<InReviewSweepResult>;
+  /** PRD §13: the qa-fix sweep — enqueue a build-from-scratch job for every qa-fix Todo ticket, then run them. */
+  fixSweep: () => Promise<FixSweepResult>;
   /** Build order #4b: the Rescues queue — eligible overdue tickets (PRD §5). */
   rescueScan: () => Promise<Array<{ ticketId: string; ticketKey: string; title: string; daysOverdue: number }>>;
   /** Build order #4b: authorize a rescue for one ticket (id or identifier) → a rescue sweep_job + run it. */
@@ -239,6 +241,8 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
       // --- sweeps ---
       case "sweep.scanInReview":
         return deps.scanInReview(typeof p.stateName === "string" ? p.stateName : undefined);
+      case "sweep.scanFix":
+        return deps.fixSweep();
       case "rescue.scan":
         return deps.rescueScan();
       case "rescue.authorize":

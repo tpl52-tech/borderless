@@ -262,7 +262,8 @@ export interface AutonomyAction {
 
 // --- AO Lead Console sweeps (lead-console PRD §4-§5) ---
 
-export type SweepKind = "in_review" | "rescue";
+/** in_review drives an author's existing PR; rescue + fix BUILD from scratch (fix = resolve a qa-fix ticket). */
+export type SweepKind = "in_review" | "rescue" | "fix";
 
 export type SweepState =
   | "queued" | "implementing" | "fixing" | "reviewing" | "ci"
@@ -277,7 +278,16 @@ export interface InReviewSweepResult {
   configured: boolean; // false when Linear isn't configured (no API key / team keys) — the board sync couldn't run
 }
 
-/** A sweep attempt on one ticket: in-review (drive a PR) or rescue (build from scratch). */
+/** The outcome of one fix sweep (scanFix): Linear sync → enqueue qa-fix build-jobs → drive them. No `reopened`:
+ *  a build-from-scratch kind has no author PR to head-advance re-review. */
+export interface FixSweepResult {
+  synced: number;      // Linear issues pulled into the store
+  created: number;     // brand-new fix jobs enqueued
+  started: number;     // jobs the supervisor kicked off this sweep
+  configured: boolean; // false when Linear isn't configured (no API key / team keys)
+}
+
+/** A sweep attempt on one ticket: in-review (drive an author's PR) or rescue/fix (build from scratch). */
 export interface SweepJob {
   id: string;
   kind: SweepKind;
@@ -285,12 +295,13 @@ export interface SweepJob {
   ticketKey: string;       // e.g. COR-42
   assignee: string | null;
   prNumber: number | null;
-  headSha: string | null;  // in_review: PR head; rescue: null until a PR opens
+  headSha: string | null;  // in_review: PR head; rescue/fix: null until a PR opens
   sessionId: string | null; // the agent session driving this job; null while queued, set on spawn
   state: SweepState;
   cycles: number;          // fix/implement -> review loop; cap 8
   gate: unknown | null;    // { ac, ci, findings, grade }
   reason: string | null;   // why needs_human / signoff / failed
+  leadGuidance: string | null; // the lead's re-drive instruction (resolve panel); embedded in the next worker seed
   createdAt: number;
   updatedAt: number;
 }
@@ -316,7 +327,7 @@ export interface LinearIssue {
   id: string;
   identifier: string;        // e.g. COR-42
   title: string;
-  description: string | null; // the ticket body/ACs; embedded in a rescue worker's seed (PRD §5)
+  description: string | null; // the ticket body/ACs; embedded in a rescue/fix worker's seed (PRD §5)
   stateName: string | null;  // e.g. "In Review"
   stateType: string | null;  // e.g. "started"
   assignee: string | null;   // Linear user id

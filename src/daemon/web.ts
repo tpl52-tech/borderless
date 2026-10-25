@@ -8,8 +8,10 @@
  * is thin + live.
  */
 
-import { consolePayload } from "../shared/console-rows.ts";
-import type { InReviewSweepResult } from "../shared/types.ts";
+import { consolePayload, sweepRow } from "../shared/console-rows.ts";
+import { parseResolveTurns, type ResolveTurn } from "../shared/resolve-chat.ts";
+import type { ApproveResult, RedriveResult } from "./resolve-drive.ts";
+import type { InReviewSweepResult, FixSweepResult } from "../shared/types.ts";
 import { parseDraftAnswers, type DeskDraftResponse, type DraftAnswer } from "../shared/desk-draft.ts";
 import { parseCreateRequest, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
@@ -28,6 +30,18 @@ export interface WebServerDeps {
   projectLabel: string;
   /** Advisory Ask Borderless over the chosen backend (the browser never gets the action tools). */
   askRun: (question: string, allowActions: boolean) => Promise<{ answer: string; configured: boolean }>;
+  /** The GitHub repo slug (owner/repo), for building PR links in the sweep detail panel. */
+  repo?: string;
+  /** Per-job resolve chat (the SWEEPS detail panel): advisory, scoped to the clicked job; the client replays
+   *  prior turns via `history` (stateless backend). STREAMS the answer via onDelta token-by-token; resolves
+   *  with whether the backend was configured. */
+  resolveChatStream: (jobId: string, question: string, history: ResolveTurn[], onDelta: (text: string) => void) => Promise<{ configured: boolean }>;
+  /** Lead decision on a stopped job (SWEEPS detail panel): APPROVE → move the needs_human job to ready (lead
+   *  override). Synchronous store update; `ready` is surfaced for the lead to merge, not merged here. */
+  approveJob: (jobId: string) => ApproveResult;
+  /** Lead decision on a stopped job: RE-DRIVE with guidance → re-open the needs_human job to queued with the
+   *  lead's instruction + kick the engine (the next worker's seed carries it). */
+  redrive: (jobId: string, guidance: string) => RedriveResult;
   /** Pull the live Linear board into the store (no sweeps) — the Refresh button. */
   syncBoard: () => Promise<{ synced: number; configured: boolean }>;
   /** PRD §13: classify the Verifying tickets from their merged PRs. A live gh scan — on-demand, never polled. */
@@ -47,6 +61,9 @@ export interface WebServerDeps {
   /** PRD §4/§11: run the In-Review sweep from the browser SWEEP button — sync + re-review + enqueue + kick the
    *  engine; the fixer/reviewer agents run server-side in the daemon. Deduped (singleFlight) upstream. */
   runInReviewSweep: () => Promise<InReviewSweepResult>;
+  /** PRD §13: run the qa-fix sweep from the browser FIX SWEEP button — sync + enqueue + kick build-from-scratch
+   *  jobs for qa-fix Todo tickets; agents run server-side. Deduped (singleFlight) upstream. */
+  runFixSweep: () => Promise<FixSweepResult>;
   /** PRD §9 (Lead Desk v2): the lead's words (+ any MCQ answers from a re-draft) → the LLM's structured draft
    *  of epics + tickets + clarifying questions. Writes nothing. */
   deskDraft: (text: string, answers: DraftAnswer[]) => Promise<DeskDraftResponse>;
@@ -95,6 +112,9 @@ export function startWebServer(deps: WebServerDeps): WebServer {
       if (pathname === "/api/sweep" && req.method === "POST") {
         return Response.json(await deps.runInReviewSweep()); // enqueue + drive the In-Review sweep (agents run server-side)
       }
+      if (pathname === "/api/sweep/fix" && req.method === "POST") {
+        return Response.json(await deps.runFixSweep()); // enqueue + drive qa-fix build-from-scratch jobs (agents run server-side)
+      }
       if (pathname === "/api/desk/draft" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { text?: unknown; answers?: unknown };
         const text = typeof body.text === "string" ? body.text.trim() : "";
@@ -112,6 +132,48 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         if (!question) return Response.json({ answer: "", configured: true });
         const r = await deps.askRun(question, false); // advisory only — no action tools from the browser
         return Response.json({ answer: r.answer, configured: r.configured });
+      }
+      if (pathname === "/api/sweep/job") {
+        const id = new URL(req.url).searchParams.get("id") ?? ""; // the detail panel for one clicked job
+        const job = id ? deps.store.getSweepJob(id) : null;
+        if (!job) return Response.json({ job: null, events: [], prUrl: null });
+        const prUrl = deps.repo && job.prNumber != null ? `https://github.com/${deps.repo}/pull/${job.prNumber}` : null;
+        return Response.json({ job: sweepRow(job), events: deps.store.listSweepEvents(job.id), prUrl });
+      }
+      if (pathname === "/api/resolve-chat" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { id?: unknown; question?: unknown; history?: unknown };
+        const id = typeof body.id === "string" ? body.id.trim() : ""; // the exact clicked job
+        const question = typeof body.question === "string" ? body.question.trim() : "";
+        if (!id || !question) return Response.json({ configured: true });
+        const history = parseResolveTurns(body.history);
+        // Newline-delimited JSON stream: {delta} per token as the model writes, then {done} | {configured:false} | {error}.
+        const enc = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const send = (obj: unknown) => controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
+            try {
+              const { configured } = await deps.resolveChatStream(id, question, history, (delta) => send({ delta }));
+              send(configured ? { done: true } : { configured: false });
+            } catch (e) {
+              send({ error: e instanceof Error ? e.message : String(e) });
+            }
+            controller.close();
+          },
+        });
+        return new Response(stream, { headers: { "content-type": "application/x-ndjson; charset=utf-8" } });
+      }
+      if (pathname === "/api/sweep/approve" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { id?: unknown };
+        const id = typeof body.id === "string" ? body.id.trim() : "";
+        if (!id) return Response.json({ ok: false, error: "no job id" });
+        return Response.json(deps.approveJob(id)); // needs_human → ready (lead override)
+      }
+      if (pathname === "/api/sweep/redrive" && req.method === "POST") {
+        const body = (await req.json().catch(() => ({}))) as { id?: unknown; guidance?: unknown };
+        const id = typeof body.id === "string" ? body.id.trim() : "";
+        const guidance = typeof body.guidance === "string" ? body.guidance.trim() : "";
+        if (!id) return Response.json({ ok: false, error: "no job id" });
+        return Response.json(deps.redrive(id, guidance)); // needs_human → queued, re-driven with the lead's guidance
       }
       return new Response("not found", { status: 404 });
     },

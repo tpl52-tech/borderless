@@ -12,11 +12,12 @@
  */
 
 import type { Store } from "./store.ts";
+import { REOPEN_QUEUED_PATCH } from "./sweep-store.ts";
 import type { SessionManager } from "./session-manager.ts";
 import type { StatusTracker } from "./monitors/status.ts";
 import type { SweepJob, SweepState } from "../shared/types.ts";
 import type { CheckState, RequiredCheck } from "../shared/sweep-gate.ts";
-import { REQUIRED_CHECKS } from "../shared/sweep-gate.ts";
+import { REQUIRED_CHECKS, buildsFromScratch, thermoPasses } from "../shared/sweep-gate.ts";
 import type { SweepEngineDeps, ReviewVerdict, WorkerResult, WorkerFeedback, PollResult } from "./sweep-engine.ts";
 import { territoryWarning, type Territory } from "../shared/collision.ts";
 import { fetchPr, listPrsForBranch, prFiles } from "./github.ts";
@@ -72,11 +73,22 @@ export function parseReviewVerdict(text: string, sessionId: string): ReviewVerdi
   const red = lastMatch(text, /^RED FINDINGS:\s*(\d+)\s*$/im);
   const preservation = lastMatch(text, /^PRESERVATION:\s*(proven|unproven)\s*$/im);
   const judgment = lastMatch(text, /^JUDGMENT:\s*(.+?)\s*$/im);
+  // Capture the grade WITH its modifier ([A-F][+-]?): the gate must tell A from A- (only exact A passes).
+  // Deliberately separate from pr-derive.ts's letter-only THERMO_LINE, which feeds a different subsystem (the
+  // PR-state ThermoGrade union) that doesn't track modifiers.
+  const thermo = lastMatch(text, /^THERMO GRADE:\s*([A-F][+-]?)\s*$/im);
+  // Everything after a `FINDINGS:` line — the reviewer's specific blocking + quality findings, relayed to the
+  // fixer so it need not re-derive them. Trimmed + capped; "none"/blank → omitted.
+  const fm = text.match(/^FINDINGS:[ \t]*\n?([\s\S]*)/im);
+  const findingsRaw = fm ? fm[1]!.trim() : "";
+  const findings = findingsRaw && findingsRaw.toLowerCase() !== "none" ? clampAcceptance(findingsRaw) : null;
   return {
     sessionId,
     redFindings: red != null ? Number(red) : 1, // unparseable → treat as blocking
     preservationProven: preservation?.toLowerCase() === "proven", // unparseable/unproven → false
     judgmentCall: judgment && judgment.toLowerCase() !== "none" ? judgment : null,
+    thermoGrade: thermo ? thermo.toUpperCase() : null, // unparseable/absent → null → gate blocks (fail-closed)
+    ...(findings ? { findings } : {}),
   };
 }
 
@@ -201,7 +213,7 @@ export async function reReviewAdvancedPrs(
     // sweep; an unchanged or unknown head means the human hasn't pushed → still resting on them.
     if (res.status !== "fulfilled" || res.value == null || res.value === job.headSha) return;
     try {
-      reopened.push(store.transitionSweepJob(job.id, { state: "queued", headSha: res.value, cycles: 0, gate: null, reason: null, sessionId: null }));
+      reopened.push(store.transitionSweepJob(job.id, { ...REOPEN_QUEUED_PATCH, headSha: res.value }));
       store.recordSweepEvent(job.id, "state_change", { from: job.state, to: "queued", reason: "head-advance re-review", headSha: res.value });
     } catch (err) {
       // uq_sweep_review spans ALL in_review states for a ticket (not just active ones, unlike
@@ -234,7 +246,7 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
     ciPollMs: cfg.ciPollMs ?? DEFAULT_CI_POLL_MS,
     maxCiWaits: cfg.maxCiWaits ?? DEFAULT_MAX_CI_WAITS,
     async spawnWorker(job, feedback, territory): Promise<WorkerResult> {
-      const ctx: WorkerSeedContext = { acceptance: cfg.acceptanceFor?.(job.ticketId) ?? null, territory };
+      const ctx: WorkerSeedContext = { acceptance: cfg.acceptanceFor?.(job.ticketId) ?? null, territory, guidance: job.leadGuidance };
       const sessionId = await spawnAndWait(workerSeed(job, feedback, ctx));
       const { headSha, prNumber } = await readHeadPr(job);
       // Free the ticket branch so a fix-cycle re-spawn can re-provision it — but only once a PR exists, i.e.
@@ -265,6 +277,7 @@ export function liveSweepDeps(cfg: LiveSweepDepsConfig): SweepEngineDeps {
 export interface WorkerSeedContext {
   acceptance?: string | null;
   territory?: Territory;
+  guidance?: string | null; // the lead's re-drive instruction (resolve panel), followed on this drive
 }
 
 const MAX_ACCEPTANCE = 4000; // keep a pathologically long description from bloating the seed
@@ -272,15 +285,17 @@ const MAX_ACCEPTANCE = 4000; // keep a pathologically long description from bloa
 /** The fixer/implementer prompt. in_review fixes the PR; rescue implements the ticket from scratch. Both get
  *  the collision guard's preventive territory warning, so the worker avoids a teammate's deliverable up front. */
 export function workerSeed(job: SweepJob, feedback: WorkerFeedback, ctx: WorkerSeedContext = {}): string {
-  const head = job.kind === "rescue"
-    ? rescueSeedHead(job, ctx)
-    : `Drive PR #${job.prNumber} for ${job.ticketKey} to a mergeable state.`;
+  const head = workerSeedHead(job, ctx);
   let body = head;
   if (!feedback.initial && feedback.review) {
-    const findings = feedback.review.redFindings > 0 ? `${feedback.review.redFindings} blocking review finding(s)` : "the review feedback";
+    const findingsPhrase = feedback.review.redFindings > 0 ? `${feedback.review.redFindings} blocking review finding(s)` : "the review feedback";
     const preservation = feedback.review.preservationProven ? "" : " Also prove no behavior regression vs the original.";
-    body = `${head} Address ${findings} and these gate blockers: ${feedback.blockers.join(", ")}.${preservation}`;
+    const quality = thermoPasses(feedback.review.thermoGrade) ? "" : ` Raise code quality to /thermo-nuclear-code-quality-review grade A (the independent reviewer graded it ${feedback.review.thermoGrade ?? "below A"}); apply that standard.`;
+    const detail = feedback.review.findings ? `\n\nThe independent reviewer's findings to address:\n${feedback.review.findings}` : "";
+    body = `${head} Address ${findingsPhrase} and these gate blockers: ${feedback.blockers.join(", ")}.${preservation}${quality}${detail}`;
   }
+  const g = clampAcceptance(ctx.guidance);
+  if (g) body += `\n\nThe lead reviewed this and is re-driving it — follow this instruction exactly:\n${g}`;
   const warning = ctx.territory ? territoryWarning(ctx.territory) : null;
   return warning ? `${body}\n\n${warning}` : body;
 }
@@ -305,17 +320,44 @@ function rescueSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
 }
 
 /**
- * The independent-reviewer prompt. Both kinds verify the ticket's acceptance criteria against the PR —
+ * The qa-fix implement instruction. A qa-fix ticket is a tester's FAIL verdict turned into a follow-up: its
+ * synced description is the failed steps + the tester's notes on what went wrong. A spawned worker can't read
+ * Linear, so that body is embedded inline as the criteria to satisfy. (Like rescue, the worktree is already on
+ * the canonical ticket branch — the spawn derives it from the ticket key — so the PR opens where readHeadPr looks.)
+ */
+function fixSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
+  const ac = clampAcceptance(ctx.acceptance);
+  const criteria = ac
+    ? `A tester's QA found this feature failing. These are the failed steps + notes — fix the code so every one passes:\n${ac}`
+    : "A tester's QA found this feature failing; implement the fix from its acceptance criteria.";
+  return [`Resolve qa-fix ticket ${job.ticketKey}.`, criteria, "Then open a PR."].join("\n\n");
+}
+
+/** The fixer/implementer opening line per kind: in_review drives the author's existing PR, rescue implements the
+ *  ticket from scratch, fix resolves a tester's qa-fix follow-up (both build-from-scratch kinds embed the ACs). */
+function workerSeedHead(job: SweepJob, ctx: WorkerSeedContext): string {
+  switch (job.kind) {
+    case "in_review": return `Drive PR #${job.prNumber} for ${job.ticketKey} to a mergeable state.`;
+    case "rescue": return rescueSeedHead(job, ctx);
+    case "fix": return fixSeedHead(job, ctx);
+    default: { const _exhaustive: never = job.kind; throw new Error(`workerSeedHead: unhandled kind ${String(_exhaustive)}`); }
+  }
+}
+
+/**
+ * The independent-reviewer prompt. Every kind verifies the ticket's acceptance criteria against the PR —
  * COMPLETENESS is a gate dimension, not just correctness: an unmet or only-partially-met criterion (a required
  * section/state/field/behavior that's missing) is a BLOCKING (🔴) finding, so a clean-but-incomplete PR is sent
  * back, not merged. The PRESERVATION line keeps its per-kind meaning the gate reads (sweep-gate.ts): for
- * in_review, "proven" = no regression of the author's original behavior; for rescue, "proven" = every acceptance
+ * in_review, "proven" = no regression of the author's original behavior; for rescue/fix, "proven" = every acceptance
  * criterion affirmatively satisfied. The ACs are embedded because a spawned reviewer has no Linear access;
  * `acceptance` is the ticket's synced description (null → the reviewer flags completeness couldn't be confirmed).
+ * It ALSO grades the diff to the /thermo-nuclear code-quality standard (the THERMO GRADE line); the gate requires A.
  */
 export function reviewerSeed(job: SweepJob, acceptance: string | null): string {
   const ac = clampAcceptance(acceptance);
-  const preservation = job.kind === "rescue"
+  const guidance = clampAcceptance(job.leadGuidance); // set when the lead re-drove this job — authoritative here
+  const preservation = buildsFromScratch(job.kind)
     ? "For PRESERVATION, report 'proven' only if EVERY acceptance criterion is affirmatively satisfied, with evidence."
     : "For PRESERVATION, report 'proven' only if the final diff preserves the author's original behavior (no regression).";
   return [
@@ -327,10 +369,22 @@ export function reviewerSeed(job: SweepJob, acceptance: string | null): string {
     ac
       ? `\nAcceptance criteria for ${job.ticketKey} — check each one against the PR:\n${ac}`
       : `\n(No acceptance criteria were available — you could not confirm completeness; flag that and treat it as blocking.)`,
+    guidance
+      ? `\nThe lead REVIEWED this and re-drove it with this instruction — treat it as AUTHORITATIVE: do NOT re-raise a judgment the lead already settled, and verify the PR actually reflects it. Flag any part not yet implemented as a BLOCKING (🔴) unmet item:\n${guidance}`
+      : "",
     "",
-    "Then write your verdict to the file $AO_SESSION_DIR/verdict.txt as EXACTLY these three lines, nothing else:",
+    "Then AUDIT CODE QUALITY to the standard in ~/.claude/skills/thermo-nuclear-code-quality-review/SKILL.md",
+    "(read that file and apply it): structure, abstraction, spaghetti/branching, file size, type/boundary",
+    "cleanliness, canonical-layer fit. Grade it as that standard would — A ONLY when it genuinely meets the bar,",
+    "A- or below when it does not. You did not write this code, so the grade is independent.",
+    "",
+    "Write your verdict to $AO_SESSION_DIR/verdict.txt: FIRST these four lines, each on its own line:",
     "RED FINDINGS: <count — include every unmet acceptance criterion>",
     "PRESERVATION: proven | unproven",
     "JUDGMENT: <a no-clearly-better-option decision only the lead can make, or 'none'>",
+    "THERMO GRADE: <A | A- | B+ | B | B- | C | D | F>",
+    "Then a line reading exactly FINDINGS: followed by every blocking (🔴) issue AND every code-quality problem",
+    "behind a below-A grade — one per line, specific and actionable (file:line + what to change) — so the",
+    "implementer can fix them without re-deriving them. Put 'none' under FINDINGS when the PR is clean and A.",
   ].join("\n");
 }

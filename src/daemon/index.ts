@@ -41,13 +41,13 @@ import { openAppSession, readQaRuns } from "./verify-session.ts";
 import { startBoxFederation, type BoxFederation } from "./box/federation.ts";
 import { RemoteAgents } from "./remote-box.ts";
 import { startUdsServer, type UdsServer, type UdsServerDeps } from "./uds-server.ts";
-import { startWebServer, type WebServer } from "./web.ts";
+import { startWebServer, type WebServer, type WebServerDeps } from "./web.ts";
 import { httpLinearClient, syncLinearIssues, fetchQaChildParentKeys, fetchIssueCommentBodies, resolveDoneStateId, fetchIssueChildDescriptions, resolveTodoStateId, resolveQaFixTargets } from "./linear.ts";
 import { QA_TARGETS_QUERY, parseQaTargets, ISSUE_CREATE_MUTATION, parseIssueCreate, ISSUE_LABEL_CREATE_MUTATION, parseLabelCreate, DESK_TARGETS_QUERY, parseDeskTargets } from "../shared/linear.ts";
 import { runDeskCreate, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import { verifyRow, type VerifyRow } from "../shared/verify.ts";
 import { singleFlight } from "../shared/single-flight.ts";
-import type { InReviewSweepResult } from "../shared/types.ts";
+import type { InReviewSweepResult, FixSweepResult } from "../shared/types.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
 import { buildTerritory } from "../shared/collision.ts";
 import { liveSweepDeps, needsHydration, hydrateInReviewJob, reReviewAdvancedPrs, liveHeadReader } from "./sweep-deps.ts";
@@ -57,8 +57,10 @@ import { delegate, liveCreateIssue, type DelegateResult } from "./lead-delegate.
 import { liveSlackDm } from "./slack.ts";
 import { askBorderless, type FleetDocs } from "./ask-borderless.ts";
 import { httpOpenRouterChat } from "./openrouter/chat.ts";
-import { claudeCliChat } from "./claude-chat.ts";
+import { claudeCliChat, claudeCliChatStream, type StreamChat } from "./claude-chat.ts";
 import type { Chat, Message } from "./openrouter/runner.ts";
+import { resolveChatSeed } from "../shared/resolve-chat.ts";
+import { approveJob, redriveJob } from "./resolve-drive.ts";
 import { memberByLinearId, firstName, testerMember, ROSTER } from "../shared/roster.ts";
 import { coLeads, epicRows, DELEGATED_LABEL, DELEGATED_LABEL_COLOR, delegationDmText, DEFAULT_LEAD_OPS_PROJECT } from "../shared/lead-desk.ts";
 import { draftPrompt, parseDraft, type DraftContext, type DeskDraftResponse, type DraftPerson, type DraftAnswer } from "../shared/desk-draft.ts";
@@ -435,6 +437,16 @@ export function startDaemon(home = stateHome()): Daemon {
     return claudeCliChat({ model: config.askModel }); // subscription: no key, answer-only (sandboxed)
   };
 
+  // Streaming counterpart of makeChat for the resolve-chat: subscription streams token-by-token; OpenRouter has
+  // no streaming wired here, so wrap its one-shot answer into a single onDelta. Null when unconfigured.
+  const makeStreamChat = (): StreamChat | null => {
+    if (backend === "openrouter") {
+      const chat = makeChat();
+      return chat ? async (messages, onDelta) => { const r = await chat(messages, []); if (r.text) onDelta(r.text); } : null;
+    }
+    return claudeCliChatStream({ model: config.askModel });
+  };
+
   const askRun: UdsServerDeps["askRun"] = async (question, allowActions) => {
     const chat = makeChat();
     if (!chat) return { answer: "", steps: 0, costMicros: 0, configured: false }; // openrouter selected, no key
@@ -463,6 +475,28 @@ export function startDaemon(home = stateHome()): Daemon {
       ? "\n\n[Ask on the subscription backend is advisory — it can't run actions. Set askBackend:\"openrouter\" with an openRouterApiKey to let --yes act.]"
       : "";
     return { answer: answer + note, steps: result.steps, costMicros: result.costMicros, configured: true };
+  };
+
+  // Per-ticket resolve chat (web SWEEPS detail panel, PRD §11): advisory, ticket-scoped. Reuses the Ask chat
+  // backend but seeds it with ONE ticket's context (title + ACs + why the sweep stopped for a human) instead of
+  // the whole fleet. The backend is stateless, so the client replays prior turns via `history`.
+  const resolveChatStream: WebServerDeps["resolveChatStream"] = async (jobId, question, history, onDelta) => {
+    const job = store.getSweepJob(jobId); // the exact job the lead clicked — not "latest for the ticket"
+    if (!job) return { configured: true }; // job gone — nothing to discuss
+    const chat = makeStreamChat();
+    if (!chat) return { configured: false }; // openrouter selected, no key
+    const issue = store.getLinearIssueByIdentifier(job.ticketKey);
+    const seed = resolveChatSeed({
+      ticketKey: job.ticketKey, title: issue?.title ?? null, description: issue?.description ?? null,
+      state: job.state, reason: job.reason, prNumber: job.prNumber,
+    });
+    const messages: Message[] = [
+      { role: "user", content: seed },
+      ...history.map((t) => ({ role: t.role, content: t.text })),
+      { role: "user", content: question },
+    ];
+    await chat(messages, onDelta);
+    return { configured: true };
   };
 
   // Lead Desk v2 (PRD §9, web): the lead's words → the LLM's structured draft of epics + tickets (assignee,
@@ -546,13 +580,32 @@ export function startDaemon(home = stateHome()): Daemon {
   // or a button + a terminal `ao sweep` at once, must join one run, never spawn a duplicate agent fleet.
   const scanInReview = singleFlight(scanInReviewImpl, (stateName) => stateName ?? "In Review");
 
-  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, verifyQa: runVerifyQa, verifyQaSync: runVerifyQaSync, verifyQaFix: runVerifyQaFix });
+  // The qa-fix sweep (PRD §13): sync the board, enqueue a build-from-scratch job for every qa-fix Todo ticket,
+  // kick the engine. Uncapped fan-out, matching the in-review/rescue supervisor; singleFlight so a double-click
+  // (the web button + a terminal `ao fix-sweep`) joins one in-flight run instead of spawning a duplicate fleet.
+  const scanFixSweepImpl = async (): Promise<FixSweepResult> => {
+    const { synced, configured } = await syncBoard();
+    const created = store.enqueueFixSweeps(config.leadOpsProject).length;
+    const started = sweepSupervisor?.pickup().length ?? 0;
+    return { synced, created, started, configured };
+  };
+  const scanFix = singleFlight(scanFixSweepImpl, () => "fix");
+
+  // Re-drive a stopped job with the lead's guidance (resolve panel): re-open it, then kick the supervisor so the
+  // engine picks it up and the next worker's seed carries the instruction. No-op pickup when no repo is wired.
+  const redrive = (id: string, guidance: string) => {
+    const r = redriveJob(store, id, guidance);
+    if (r.ok) sweepSupervisor?.pickup();
+    return r;
+  };
+
+  server = startUdsServer(p.socket, { store, manager, monitor, nudge, autonomyState, extendAutonomy, scanInReview, fixSweep: scanFix, rescueScan, rescueAuthorize, leadOpsProject: config.leadOpsProject, leadDelegate, askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, verifyQa: runVerifyQa, verifyQaSync: runVerifyQaSync, verifyQaFix: runVerifyQaFix });
 
   // Web console (PRD §11 browser mirror): the exact console design wired to live data, localhost only. It is
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runQaFix: () => runVerifyQaFix(true), runInReviewSweep: () => scanInReview("In Review"), deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runQaFix: () => runVerifyQaFix(true), runInReviewSweep: () => scanInReview("In Review"), runFixSweep: () => scanFix(), repo: config.repo, resolveChatStream, approveJob: (id) => approveJob(store, id), redrive, deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

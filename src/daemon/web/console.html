@@ -133,6 +133,19 @@
   .chip.green { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--line-2)); }
   .chip.pink { color: var(--pink); border-color: color-mix(in srgb, var(--pink) 45%, var(--line-2)); }
 
+  /* clickable sweep cards + resolve detail modal */
+  .row-card.clickable { cursor: pointer; transition: border-color .12s; }
+  .row-card.clickable:hover { border-color: var(--line-2); }
+  .modal { position: fixed; inset: 0; background: color-mix(in srgb, #000 62%, transparent); display: flex; align-items: center; justify-content: center; padding: 1.4rem; z-index: 60; }
+  .modal[hidden] { display: none; } /* .modal sets display:flex, which overrides the bare `hidden` attr — mirror the .view[hidden] idiom above so hidden actually hides it */
+  .modal-card { background: var(--panel); border: 1px solid var(--line-2); border-radius: 5px; width: min(760px, 100%); max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; }
+  .md-head { display: flex; align-items: center; gap: .6rem; padding: .7rem .9rem; border-bottom: 1px solid var(--line); }
+  .md-head b { color: var(--pink); font-size: .95rem; } .md-head .md-meta { color: var(--ink-2); font-size: .76rem; }
+  .md-head a { color: var(--green); font-size: .76rem; text-decoration: none; } .md-head a:hover { text-decoration: underline; }
+  .md-close { margin-left: auto; background: none; border: 1px solid var(--line-2); color: var(--ink-2); border-radius: 3px; cursor: pointer; padding: .12rem .5rem; font: inherit; font-size: .72rem; }
+  .md-body { padding: .8rem .9rem; overflow-y: auto; display: flex; flex-direction: column; gap: .85rem; }
+  .md-reason { font-size: .82rem; color: var(--ink); white-space: pre-wrap; border-left: 2px solid var(--pink); padding-left: .6rem; line-height: 1.45; }
+
   /* ranked list (do-next) */
   .rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .55rem; }
   .rank li { display: flex; align-items: center; gap: .6rem; font-size: .82rem; }
@@ -240,6 +253,7 @@
           <p class="hero-sub" id="s-herosub">loading&hellip;</p>
           <div class="hero-actions">
             <button class="btn green" id="s-sweep">&#9654; SWEEP IN REVIEW</button>
+            <button class="btn green" id="s-fixsweep">&#9654; FIX SWEEP</button>
             <button class="btn o-pink" data-cmd="ao rescue">&#10227; SCAN OVERDUE</button>
           </div>
         </div>
@@ -420,6 +434,34 @@
         </div>
       </section>
 
+      <!-- ============ RESOLVE DETAIL + CHAT (click a NEEDS_YOU / READY card) ============ -->
+      <div class="modal" id="s-detail" hidden>
+        <div class="modal-card">
+          <div class="md-head">
+            <b id="sd-ticket"></b>
+            <span class="md-meta" id="sd-meta"></span>
+            <a id="sd-pr" target="_blank" rel="noopener" hidden></a>
+            <button class="md-close" id="sd-close">esc &times;</button>
+          </div>
+          <div class="md-body">
+            <div class="md-reason" id="sd-reason"></div>
+            <div id="sd-actions" hidden>
+              <div style="margin-bottom:.5rem"><button class="btn green" id="sd-approve">&#10003; Approve &mdash; mark ready</button><span class="note" id="sd-approve-note" style="margin:0 0 0 .6rem"></span></div>
+              <div><input id="sd-redrive-field" placeholder="or tell the agent what to change&hellip;" autocomplete="off" style="width:54%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:.32rem .5rem;font:inherit;font-size:.8rem;margin-right:.5rem;vertical-align:middle"><button class="btn o-pink" id="sd-redrive">&#8635; Re-drive</button><span class="note" id="sd-redrive-note" style="margin:0 0 0 .6rem"></span></div>
+            </div>
+            <div><div class="ph" style="margin-bottom:.45rem">TIMELINE</div><div class="log" id="sd-timeline"></div></div>
+            <div>
+              <div class="ph" style="margin-bottom:.45rem">RESOLVE &mdash; chat it through</div>
+              <div id="sd-stream" style="max-height:32vh;overflow-y:auto;display:flex;flex-direction:column;gap:.6rem"></div>
+              <div class="chat-input">
+                <input class="ci-field" id="sd-field" placeholder="Ask about this ticket, or decide how to resolve it&hellip;" autocomplete="off" style="background:transparent;color:var(--ink);outline:none" />
+                <button class="ci-send" id="sd-send">Send</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -443,6 +485,9 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const stateClass = (st) => ({ ready: "s-green", merged: "s-green", signoff: "s-amber", needs_human: "s-pink", failed: "s-pink", queued: "s-dim", ci: "s-dim" }[st] || "s-ink");
   const ACTIVE = new Set(["implementing", "fixing", "reviewing", "ci", "queued"]);
+  // KIND column: in_review drives an author's PR (muted); rescue + qa-fix build from scratch (pink).
+  const KIND_LABEL = { in_review: "review", rescue: "rescue", fix: "fix" };
+  const KIND_CLASS = { in_review: "k-review", rescue: "k-rescue", fix: "k-rescue" };
 
   // ---- render ----
   function render(d) {
@@ -456,11 +501,11 @@
     $("s-herosub").innerHTML = `${sw.length} in scope &middot; <b style="color:var(--green)">${ready.length} ready</b> &middot; <b style="color:var(--amber)">${signoff.length} to sign off</b> &middot; <b style="color:var(--pink)">${needs.length} need you</b> &middot; ${active} active. Agents drive to the gate; you decide.`;
     $("s-queuemeta").textContent = `${sw.length} JOBS`;
     $("s-queue").innerHTML = sw.length
-      ? sw.map((j) => `<tr><td>${esc(j.ticketKey)}</td><td class="${j.kind === "rescue" ? "k-rescue" : "k-review"}">${j.kind === "rescue" ? "rescue" : "review"}</td><td>${esc(j.owner) || "&mdash;"}</td><td class="${stateClass(j.state)}">${esc(String(j.state).toUpperCase())}</td><td>${esc(j.cycles)}</td></tr>`).join("")
+      ? sw.map((j) => `<tr><td>${esc(j.ticketKey)}</td><td class="${KIND_CLASS[j.kind] || "k-review"}">${KIND_LABEL[j.kind] || esc(j.kind)}</td><td>${esc(j.owner) || "&mdash;"}</td><td class="${stateClass(j.state)}">${esc(String(j.state).toUpperCase())}</td><td>${esc(j.cycles)}</td></tr>`).join("")
       : `<tr><td colspan="5" class="s-dim">no sweep jobs yet &mdash; nothing in review, nothing rescued</td></tr>`;
     $("s-readymeta").textContent = String(ready.length);
     $("s-ready").innerHTML = ready.length
-      ? ready.map((j) => `<div class="row-card"><div class="rc-top"><b>${esc(j.ticketKey)}</b> <span class="muted">${j.prNumber != null ? "PR #" + esc(j.prNumber) : ""}</span></div></div>`).join("")
+      ? ready.map((j) => `<div class="row-card clickable" data-id="${esc(j.id)}"><div class="rc-top"><b>${esc(j.ticketKey)}</b> <span class="muted">${j.prNumber != null ? "PR #" + esc(j.prNumber) : ""}</span></div></div>`).join("")
       : `<p class="note">nothing at the gate</p>`;
     $("s-signoffmeta").textContent = String(signoff.length);
     $("s-signoff").innerHTML = signoff.length
@@ -468,7 +513,7 @@
       : `<p class="note">nothing to sign off &mdash; clean risky-tier PRs land here for your glance</p>`;
     $("s-needsmeta").textContent = String(needs.length);
     $("s-needs").innerHTML = needs.length
-      ? needs.map((j) => `<div class="row-card"><div class="rc-top"><b style="color:var(--pink)">${esc(j.ticketKey)}</b> <span class="muted">${esc(j.cycles)} cyc</span></div>${j.reason ? `<p class="note" style="margin:.4rem 0 0">${esc(j.reason)}</p>` : ""}</div>`).join("")
+      ? needs.map((j) => `<div class="row-card clickable" data-id="${esc(j.id)}"><div class="rc-top"><b style="color:var(--pink)">${esc(j.ticketKey)}</b> <span class="muted">${esc(j.cycles)} cyc</span></div>${j.reason ? `<p class="note" style="margin:.4rem 0 0">${esc(j.reason)}</p>` : ""}</div>`).join("")
       : `<p class="note">nothing waiting on you</p>`;
 
     // BOARDS
@@ -540,14 +585,18 @@
 
   // ---- ASK ----
   const field = $("chat-field"), stream = $("chat-stream");
-  function bubble(role, text) {
-    const d = document.createElement("div");
-    d.className = "cmsg " + (role === "You" ? "user" : "ai");
-    d.innerHTML = `<div class="crole">${esc(role)}</div><div class="ctext">${esc(text)}</div>`;
-    stream.appendChild(d);
-    stream.scrollTop = stream.scrollHeight;
-    return d;
+  // One bubble factory for both the ASK chat and the resolve-chat (they differ only in which stream they append to).
+  function makeBubble(streamEl) {
+    return (role, text) => {
+      const d = document.createElement("div");
+      d.className = "cmsg " + (role === "You" ? "user" : "ai");
+      d.innerHTML = `<div class="crole">${esc(role)}</div><div class="ctext">${esc(text)}</div>`;
+      streamEl.appendChild(d);
+      streamEl.scrollTop = streamEl.scrollHeight;
+      return d;
+    };
   }
+  const bubble = makeBubble(stream);
   async function ask() {
     const q = field.value.trim();
     if (!q) return;
@@ -565,6 +614,91 @@
   }
   $("chat-send").addEventListener("click", ask);
   field.addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
+
+  // ---- RESOLVE: click a NEEDS_YOU / READY card → detail panel + per-ticket chat ----
+  const sdModal = $("s-detail"), sdStream = $("sd-stream"), sdField = $("sd-field"), sdApprove = $("sd-approve"), sdRedrive = $("sd-redrive"), sdRedriveField = $("sd-redrive-field");
+  let sdId = "", sdHistory = [];
+  const sdBubble = makeBubble(sdStream);
+  function sdClose() { sdModal.hidden = true; sdId = ""; }
+  function sdTime(ms) { try { return new Date(ms).toLocaleTimeString(); } catch { return ""; } }
+  function sdDetail(x) { if (x == null) return ""; const s = typeof x === "string" ? x : JSON.stringify(x); return s.length > 100 ? s.slice(0, 100) + "…" : s; }
+  async function sdOpen(id) {
+    sdId = id; sdHistory = []; sdStream.innerHTML = ""; sdModal.hidden = false;
+    $("sd-ticket").textContent = "…"; $("sd-meta").textContent = ""; $("sd-reason").textContent = ""; $("sd-timeline").innerHTML = ""; $("sd-pr").hidden = true; $("sd-actions").hidden = true;
+    try {
+      const res = await fetch("/api/sweep/job?id=" + encodeURIComponent(id), { cache: "no-store" });
+      const d = await res.json();
+      const j = d.job;
+      if (!j) { $("sd-ticket").textContent = "job not found"; return; }
+      $("sd-ticket").textContent = j.ticketKey;
+      $("sd-meta").textContent = `${KIND_LABEL[j.kind] || j.kind} · ${String(j.state).toUpperCase()} · ${j.cycles} cyc`;
+      const pr = $("sd-pr");
+      if (d.prUrl) { pr.textContent = "PR #" + j.prNumber + " ↗"; pr.href = d.prUrl; pr.hidden = false; }
+      $("sd-reason").textContent = j.reason || "(no escalation reason recorded)";
+      $("sd-actions").hidden = j.state !== "needs_human"; // approve only a job that's waiting on you
+      sdApprove.disabled = false; $("sd-approve-note").textContent = "";
+      sdRedrive.disabled = false; $("sd-redrive-note").textContent = ""; sdRedriveField.value = "";
+      $("sd-timeline").innerHTML = (d.events || []).map((e) => `<div class="line"><span class="t">${sdTime(e.at)}</span> <span class="tag dim">${esc(e.event)}</span> ${esc(sdDetail(e.detail))}</div>`).join("") || `<div class="line s-dim">no events</div>`;
+      sdBubble("Borderless", "Ask me anything about this ticket, or tell me how you want to resolve it.");
+    } catch (e) { $("sd-ticket").textContent = "error loading"; }
+  }
+  async function sdSend() {
+    const q = sdField.value.trim(); if (!q || !sdId) return;
+    sdField.value = ""; sdBubble("You", q);
+    const ctext = sdBubble("Borderless", "…").querySelector(".ctext"); // fills in live as tokens stream
+    let answer = "", failed = false;
+    try {
+      const res = await fetch("/api/resolve-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: sdId, question: q, history: sdHistory }) });
+      if (!res.body) { ctext.textContent = "no response"; return; }
+      const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+          if (!line.trim()) continue;
+          let ev; try { ev = JSON.parse(line); } catch { continue; }
+          if (ev.delta != null) { answer += ev.delta; ctext.textContent = answer; }       // a token
+          else if (ev.configured === false) ctext.textContent = "Chat backend is off — set one in ~/.borderless/config.json";
+          else if (ev.error) { ctext.textContent = "error: " + ev.error; failed = true; }
+          sdStream.scrollTop = sdStream.scrollHeight;
+        }
+      }
+      if (answer && !failed) sdHistory.push({ role: "user", text: q }, { role: "assistant", text: answer }); // don't replay a failed turn
+      else if (ctext.textContent === "…") ctext.textContent = "(no answer)";
+    } catch (e) { ctext.textContent = "chat failed"; }
+    sdStream.scrollTop = sdStream.scrollHeight;
+  }
+  $("sweeps").addEventListener("click", (e) => { const c = e.target.closest("[data-id]"); if (c && c.dataset.id) sdOpen(c.dataset.id); });
+  $("sd-close").addEventListener("click", sdClose);
+  sdModal.addEventListener("click", (e) => { if (e.target === sdModal) sdClose(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !sdModal.hidden) sdClose(); });
+  $("sd-send").addEventListener("click", sdSend);
+  sdField.addEventListener("keydown", (e) => { if (e.key === "Enter") sdSend(); });
+  sdApprove.addEventListener("click", async () => {
+    if (!sdId) return;
+    sdApprove.disabled = true; $("sd-approve-note").textContent = "…";
+    try {
+      const res = await fetch("/api/sweep/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: sdId }) });
+      const j = await res.json();
+      if (j.ok) { $("sd-approve-note").textContent = "✓ moved to Ready — close this to see it in READY_TO_MERGE"; await load(); }
+      else { $("sd-approve-note").textContent = j.error || "could not approve"; sdApprove.disabled = false; }
+    } catch (e) { $("sd-approve-note").textContent = "approve failed"; sdApprove.disabled = false; }
+  });
+  sdRedrive.addEventListener("click", async () => {
+    if (!sdId) return;
+    const guidance = sdRedriveField.value.trim();
+    if (!guidance) { $("sd-redrive-note").textContent = "type what to change first"; return; }
+    sdRedrive.disabled = true; $("sd-redrive-note").textContent = "…";
+    try {
+      const res = await fetch("/api/sweep/redrive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: sdId, guidance }) });
+      const j = await res.json();
+      if (j.ok) { $("sd-redrive-note").textContent = "↻ re-driving — the agent is applying your guidance"; sdRedriveField.value = ""; await load(); }
+      else { $("sd-redrive-note").textContent = j.error || "could not re-drive"; sdRedrive.disabled = false; }
+    } catch (e) { $("sd-redrive-note").textContent = "re-drive failed"; sdRedrive.disabled = false; }
+  });
+  sdRedriveField.addEventListener("keydown", (e) => { if (e.key === "Enter") sdRedrive.click(); });
 
   // ---- Refresh: pull the live Linear board, then re-render ----
   const refreshBtn = $("refresh-btn");
@@ -588,6 +722,18 @@
       await load(); // refresh the SWEEP_QUEUE with the re-opened + newly-enqueued jobs
       return d.configured === false ? "Linear not configured" : `✓ ${d.reopened} re-opened · ${d.created} new · ${d.started} running`;
     } catch { return "sweep failed"; }
+  }, 3000));
+
+  // ---- SWEEPS: run the qa-fix sweep from the browser (sync + enqueue + drive build-from-scratch jobs) ----
+  const fixSweepBtn = $("s-fixsweep");
+  fixSweepBtn.addEventListener("click", () => withTransientResult(fixSweepBtn, "⟳ sweeping…", async () => {
+    try {
+      const res = await fetch("/api/sweep/fix", { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      const d = await res.json();
+      await load(); // refresh the SWEEP_QUEUE with the newly-enqueued fix jobs
+      return d.configured === false ? "Linear not configured" : `✓ ${d.created} new · ${d.started} running`;
+    } catch { return "fix sweep failed"; }
   }, 3000));
 
   // ---- LEAD DESK: chat → draft → review (editable) → create in Linear ----

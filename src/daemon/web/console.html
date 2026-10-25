@@ -434,7 +434,7 @@
         </div>
       </section>
 
-      <!-- ============ RESOLVE DETAIL + CHAT (click a NEEDS_YOU / READY card) ============ -->
+      <!-- ============ RESOLVE DETAIL + CHAT (click a NEEDS_YOU / AWAITING_SIGNOFF / READY card) ============ -->
       <div class="modal" id="s-detail" hidden>
         <div class="modal-card">
           <div class="md-head">
@@ -446,8 +446,8 @@
           <div class="md-body">
             <div class="md-reason" id="sd-reason"></div>
             <div id="sd-actions" hidden>
-              <div style="margin-bottom:.5rem"><button class="btn green" id="sd-approve">&#10003; Approve &mdash; mark ready</button><span class="note" id="sd-approve-note" style="margin:0 0 0 .6rem"></span></div>
-              <div><input id="sd-redrive-field" placeholder="or tell the agent what to change&hellip;" autocomplete="off" style="width:54%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:.32rem .5rem;font:inherit;font-size:.8rem;margin-right:.5rem;vertical-align:middle"><button class="btn o-pink" id="sd-redrive">&#8635; Re-drive</button><span class="note" id="sd-redrive-note" style="margin:0 0 0 .6rem"></span></div>
+              <div style="margin-bottom:.5rem"><button class="btn green" id="sd-approve">&#10003; Approve, mark ready</button><span class="note" id="sd-approve-note" style="margin:0 0 0 .6rem"></span></div>
+              <div id="sd-redrive-row"><input id="sd-redrive-field" placeholder="or tell the agent what to change&hellip;" autocomplete="off" style="width:54%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px;padding:.32rem .5rem;font:inherit;font-size:.8rem;margin-right:.5rem;vertical-align:middle"><button class="btn o-pink" id="sd-redrive">&#8635; Re-drive</button><span class="note" id="sd-redrive-note" style="margin:0 0 0 .6rem"></span></div>
             </div>
             <div><div class="ph" style="margin-bottom:.45rem">TIMELINE</div><div class="log" id="sd-timeline"></div></div>
             <div>
@@ -509,7 +509,7 @@
       : `<p class="note">nothing at the gate</p>`;
     $("s-signoffmeta").textContent = String(signoff.length);
     $("s-signoff").innerHTML = signoff.length
-      ? signoff.map((j) => `<div class="row-card"><div class="rc-top"><b style="color:var(--amber)">${esc(j.ticketKey)}</b> <span class="muted">${j.prNumber != null ? "PR #" + esc(j.prNumber) : ""}</span></div>${j.reason ? `<p class="note" style="margin:.4rem 0 0">${esc(j.reason)}</p>` : ""}</div>`).join("")
+      ? signoff.map((j) => `<div class="row-card clickable" data-id="${esc(j.id)}"><div class="rc-top"><b style="color:var(--amber)">${esc(j.ticketKey)}</b> <span class="muted">${j.prNumber != null ? "PR #" + esc(j.prNumber) : ""}</span></div>${j.reason ? `<p class="note" style="margin:.4rem 0 0">${esc(j.reason)}</p>` : ""}</div>`).join("")
       : `<p class="note">nothing to sign off &mdash; clean risky-tier PRs land here for your glance</p>`;
     $("s-needsmeta").textContent = String(needs.length);
     $("s-needs").innerHTML = needs.length
@@ -635,7 +635,10 @@
       const pr = $("sd-pr");
       if (d.prUrl) { pr.textContent = "PR #" + j.prNumber + " ↗"; pr.href = d.prUrl; pr.hidden = false; }
       $("sd-reason").textContent = j.reason || "(no escalation reason recorded)";
-      $("sd-actions").hidden = j.state !== "needs_human"; // approve only a job that's waiting on you
+      const canApprove = j.state === "needs_human" || j.state === "signoff"; // both wait on a human decision
+      $("sd-actions").hidden = !canApprove;
+      $("sd-redrive-row").hidden = j.state !== "needs_human"; // re-drive with guidance is for a stuck decision, not a clean sign-off
+      sdApprove.textContent = j.state === "signoff" ? "✓ Sign off, mark ready" : "✓ Approve, mark ready";
       sdApprove.disabled = false; $("sd-approve-note").textContent = "";
       sdRedrive.disabled = false; $("sd-redrive-note").textContent = ""; sdRedriveField.value = "";
       $("sd-timeline").innerHTML = (d.events || []).map((e) => `<div class="line"><span class="t">${sdTime(e.at)}</span> <span class="tag dim">${esc(e.event)}</span> ${esc(sdDetail(e.detail))}</div>`).join("") || `<div class="line s-dim">no events</div>`;

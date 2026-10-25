@@ -3,10 +3,15 @@ import { Store } from "../src/daemon/store.ts";
 import { approveJob, redriveJob } from "../src/daemon/resolve-drive.ts";
 
 describe("approveJob (lead approves a stopped job → ready)", () => {
-  // The only approvable shape: a needs_human job that actually has a PR to merge.
+  // An approvable shape: a job waiting on a human (needs_human or signoff) that actually has a PR to merge.
   const stopped = (s: Store, key: string, prNumber: number | null = 33) => {
     const job = s.createSweepJob({ kind: "fix", ticketId: "t-" + key, ticketKey: key, prNumber });
     s.transitionSweepJob(job.id, { state: "needs_human", reason: "dangerous tier: auth" });
+    return job;
+  };
+  const parkedForSignoff = (s: Store, key: string, prNumber: number | null = 33) => {
+    const job = s.createSweepJob({ kind: "fix", ticketId: "t-" + key, ticketKey: key, prNumber });
+    s.transitionSweepJob(job.id, { state: "signoff", reason: "dangerous tier: schema" });
     return job;
   };
 
@@ -23,6 +28,28 @@ describe("approveJob (lead approves a stopped job → ready)", () => {
     expect(ev.detail).toMatchObject({ from: "needs_human", to: "ready", by: "lead-approve" });
   });
 
+  test("a signoff job with a PR → ready; the audit records it was a sign-off", () => {
+    const s = new Store(":memory:");
+    const job = parkedForSignoff(s, "COR-150");
+    expect(approveJob(s, job.id)).toEqual({ ok: true, state: "ready" });
+
+    const after = s.getSweepJob(job.id)!;
+    expect(after.state).toBe("ready");
+    expect(after.reason).toBe("lead-approved");
+    const ev = s.listSweepEvents(job.id).at(-1)!;
+    expect(ev.event).toBe("state_change");
+    expect(ev.detail).toMatchObject({ from: "signoff", to: "ready", by: "lead-signoff" });
+  });
+
+  test("a signoff job with NO PR is refused (ready must have something to merge)", () => {
+    const s = new Store(":memory:");
+    const job = parkedForSignoff(s, "COR-151", null);
+    const r = approveJob(s, job.id);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("no PR");
+    expect(s.getSweepJob(job.id)!.state).toBe("signoff"); // unchanged
+  });
+
   test("unknown job → error, no write", () => {
     const s = new Store(":memory:");
     expect(approveJob(s, "nope")).toEqual({ ok: false, error: "job not found" });
@@ -37,7 +64,7 @@ describe("approveJob (lead approves a stopped job → ready)", () => {
     expect(s.getSweepJob(job.id)!.state).toBe("needs_human"); // unchanged
   });
 
-  test("only a needs_human job is approvable (every other state refused + left unchanged)", () => {
+  test("a non-waiting state is refused (every other state left unchanged)", () => {
     const s = new Store(":memory:");
     for (const state of ["ready", "queued", "implementing", "fixing", "reviewing", "ci", "merged", "failed"] as const) {
       const job = s.createSweepJob({ kind: "fix", ticketId: "t-" + state, ticketKey: "COR-9", prNumber: 5 });
@@ -90,5 +117,15 @@ describe("redriveJob (lead re-drives a stopped job with guidance)", () => {
     s.transitionSweepJob(ready.id, { state: "ready" });
     expect(redriveJob(s, ready.id, "do x").ok).toBe(false); // not needs_human
     expect(redriveJob(s, "nope", "do x")).toEqual({ ok: false, error: "job not found" });
+  });
+
+  test("a signoff job is refused: re-drive is for a stuck decision, not a clean sign-off", () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "fix", ticketId: "t-so", ticketKey: "COR-160", prNumber: 7 });
+    s.transitionSweepJob(job.id, { state: "signoff", reason: "dangerous tier: schema" });
+    const r = redriveJob(s, job.id, "do x");
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("signoff");
+    expect(s.getSweepJob(job.id)!.state).toBe("signoff"); // unchanged (approvable, but not re-drivable)
   });
 });

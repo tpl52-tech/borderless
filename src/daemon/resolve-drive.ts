@@ -1,10 +1,12 @@
 /**
- * Resolve-drive (web SWEEPS detail panel) — the lead's decision ACTING on a sweep job stopped at needs_human.
+ * Resolve-drive (web SWEEPS detail panel): the lead's decision ACTING on a sweep job that waits on a human,
+ * either needs_human (a real decision the sweep stopped for) or signoff (a clean risky-tier PR parked for a
+ * glance).
  *
- * Phase 1 (here): APPROVE. The lead has reviewed the PR + the escalation (via the resolve-chat) and judges it
- * good, so the job moves needs_human → ready by lead fiat — overriding the dangerous-tier / judgment-call
- * escalation for this one job. `ready` is NOT merged: it just surfaces in READY_TO_MERGE for the lead to
- * `gh pr merge`. (Phase 2 — re-drive with guidance — lands later.)
+ * APPROVE: the lead has reviewed the PR + the escalation (via the resolve-chat) and judges it good, so the job
+ * moves to `ready` by lead fiat, clearing the dangerous-tier / judgment-call escalation for this one job.
+ * `ready` is NOT merged: it just surfaces in READY_TO_MERGE for the lead to `gh pr merge`. RE-DRIVE (with
+ * guidance) stays reserved for needs_human: a clean sign-off has nothing to re-drive.
  *
  * Small + injected-store so it is unit-tested; the daemon wires the real Store in.
  */
@@ -18,24 +20,30 @@ export type ResolveStore = Pick<Store, "getSweepJob" | "transitionSweepJob" | "r
 
 export interface ApproveResult { ok: boolean; state?: SweepState; error?: string }
 
+/** The states that wait on a human and so can be approved: needs_human (a real decision) and signoff (a clean
+ *  risky-tier PR parked for a glance). Both resolve, by the lead's fiat, to `ready`. */
+const APPROVABLE: ReadonlySet<SweepState> = new Set<SweepState>(["needs_human", "signoff"]);
+
 /**
- * Approve a stopped job → ready (lead override). Approvable only when the job is needs_human AND has a PR:
- * `ready` means "there is a PR to `gh pr merge`", the invariant the engine keeps (it only reaches ready with a
- * head; a PR-less job escalates instead). Any other state/shape is a no-op error the UI reports, never a silent
- * jump. Transition FIRST, then record the audit event (the engine's order — sweep-engine `finish`, the
+ * Approve a stopped job to `ready` (lead override). Approvable only when the job waits on you (needs_human or
+ * signoff) AND has a PR: `ready` means "there is a PR to `gh pr merge`", the invariant the engine keeps (it
+ * only reaches a resting state with a head; a PR-less job escalates instead). Any other state or shape is a
+ * no-op error the UI reports, never a silent jump. The audit `from`/`by` record which state was approved.
+ * Transition FIRST, then record the audit event (the engine's order: sweep-engine `finish`, the
  * reReviewAdvancedPrs reopener), so a throw between the two writes can't leave a log line claiming a state the
  * job isn't in.
  *
  * Not sticky against a head advance: an in_review job later gets re-opened to queued by reReviewAdvancedPrs if
- * the author pushes a new commit — a new head deserves fresh review. Intended.
+ * the author pushes a new commit, because a new head deserves fresh review. Intended.
  */
 export function approveJob(store: ResolveStore, jobId: string): ApproveResult {
   const job = store.getSweepJob(jobId);
   if (!job) return { ok: false, error: "job not found" };
-  if (job.state !== "needs_human") return { ok: false, error: `can't approve a ${job.state} job (only one waiting on you)` };
+  if (!APPROVABLE.has(job.state)) return { ok: false, error: `can't approve a ${job.state} job (only one waiting on you)` };
   if (job.prNumber == null) return { ok: false, error: "no PR to merge — this job never opened one" };
+  const by = job.state === "signoff" ? "lead-signoff" : "lead-approve";
   store.transitionSweepJob(jobId, { state: "ready", reason: "lead-approved" });
-  store.recordSweepEvent(jobId, "state_change", { from: "needs_human", to: "ready", by: "lead-approve" });
+  store.recordSweepEvent(jobId, "state_change", { from: job.state, to: "ready", by });
   return { ok: true, state: "ready" };
 }
 

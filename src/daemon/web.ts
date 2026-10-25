@@ -166,7 +166,7 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         const body = (await req.json().catch(() => ({}))) as { id?: unknown };
         const id = typeof body.id === "string" ? body.id.trim() : "";
         if (!id) return Response.json({ ok: false, error: "no job id" });
-        return Response.json(deps.approveJob(id)); // needs_human → ready (lead override)
+        return Response.json(deps.approveJob(id)); // needs_human / signoff → ready (lead override)
       }
       if (pathname === "/api/sweep/redrive" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { id?: unknown; guidance?: unknown };

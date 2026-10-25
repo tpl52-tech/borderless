@@ -57,7 +57,7 @@ import { delegate, liveCreateIssue, type DelegateResult } from "./lead-delegate.
 import { liveSlackDm } from "./slack.ts";
 import { askBorderless, type FleetDocs } from "./ask-borderless.ts";
 import { httpOpenRouterChat } from "./openrouter/chat.ts";
-import { claudeCliChat } from "./claude-chat.ts";
+import { claudeCliChat, claudeCliChatStream } from "./claude-chat.ts";
 import type { Chat, Message } from "./openrouter/runner.ts";
 import { resolveChatSeed } from "../shared/resolve-chat.ts";
 import { approveJob, redriveJob } from "./resolve-drive.ts";
@@ -470,11 +470,9 @@ export function startDaemon(home = stateHome()): Daemon {
   // Per-ticket resolve chat (web SWEEPS detail panel, PRD §11): advisory, ticket-scoped. Reuses the Ask chat
   // backend but seeds it with ONE ticket's context (title + ACs + why the sweep stopped for a human) instead of
   // the whole fleet. The backend is stateless, so the client replays prior turns via `history`.
-  const resolveChatRun: WebServerDeps["resolveChatRun"] = async (jobId, question, history) => {
-    const chat = makeChat();
-    if (!chat) return { answer: "", configured: false }; // openrouter selected, no key
+  const resolveChatStream: WebServerDeps["resolveChatStream"] = async (jobId, question, history, onDelta) => {
     const job = store.getSweepJob(jobId); // the exact job the lead clicked — not "latest for the ticket"
-    if (!job) return { answer: "", configured: true }; // job gone — nothing to discuss
+    if (!job) return { configured: true }; // job gone — nothing to discuss
     const issue = store.getLinearIssueByIdentifier(job.ticketKey);
     const seed = resolveChatSeed({
       ticketKey: job.ticketKey, title: issue?.title ?? null, description: issue?.description ?? null,
@@ -485,8 +483,16 @@ export function startDaemon(home = stateHome()): Daemon {
       ...history.map((t) => ({ role: t.role, content: t.text })),
       { role: "user", content: question },
     ];
-    const res = await chat(messages, []); // no tools — advisory chat only
-    return { answer: res.text ?? "", configured: true };
+    if (backend === "openrouter") {
+      // OpenRouter has no token streaming wired here — emit the full answer as one chunk (advisory, no tools).
+      const chat = makeChat();
+      if (!chat) return { configured: false }; // openrouter selected, no key
+      const res = await chat(messages, []);
+      if (res.text) onDelta(res.text);
+      return { configured: true };
+    }
+    await claudeCliChatStream({ model: config.askModel })(messages, onDelta); // subscription: stream token-by-token
+    return { configured: true };
   };
 
   // Lead Desk v2 (PRD §9, web): the lead's words → the LLM's structured draft of epics + tickets (assignee,
@@ -595,7 +601,7 @@ export function startDaemon(home = stateHome()): Daemon {
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runQaFix: () => runVerifyQaFix(true), runInReviewSweep: () => scanInReview("In Review"), runFixSweep: () => scanFix(), repo: config.repo, resolveChatRun, approveJob: (id) => approveJob(store, id), redrive, deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runQaFix: () => runVerifyQaFix(true), runInReviewSweep: () => scanInReview("In Review"), runFixSweep: () => scanFix(), repo: config.repo, resolveChatStream, approveJob: (id) => approveJob(store, id), redrive, deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

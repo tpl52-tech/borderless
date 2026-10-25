@@ -33,8 +33,9 @@ export interface WebServerDeps {
   /** The GitHub repo slug (owner/repo), for building PR links in the sweep detail panel. */
   repo?: string;
   /** Per-job resolve chat (the SWEEPS detail panel): advisory, scoped to the clicked job; the client replays
-   *  prior turns via `history` because the chat backend is stateless. */
-  resolveChatRun: (jobId: string, question: string, history: ResolveTurn[]) => Promise<{ answer: string; configured: boolean }>;
+   *  prior turns via `history` (stateless backend). STREAMS the answer via onDelta token-by-token; resolves
+   *  with whether the backend was configured. */
+  resolveChatStream: (jobId: string, question: string, history: ResolveTurn[], onDelta: (text: string) => void) => Promise<{ configured: boolean }>;
   /** Lead decision on a stopped job (SWEEPS detail panel): APPROVE → move the needs_human job to ready (lead
    *  override). Synchronous store update; `ready` is surfaced for the lead to merge, not merged here. */
   approveJob: (jobId: string) => ApproveResult;
@@ -143,8 +144,23 @@ export function startWebServer(deps: WebServerDeps): WebServer {
         const body = (await req.json().catch(() => ({}))) as { id?: unknown; question?: unknown; history?: unknown };
         const id = typeof body.id === "string" ? body.id.trim() : ""; // the exact clicked job
         const question = typeof body.question === "string" ? body.question.trim() : "";
-        if (!id || !question) return Response.json({ answer: "", configured: true });
-        return Response.json(await deps.resolveChatRun(id, question, parseResolveTurns(body.history)));
+        if (!id || !question) return Response.json({ configured: true });
+        const history = parseResolveTurns(body.history);
+        // Newline-delimited JSON stream: {delta} per token as the model writes, then {done} | {configured:false} | {error}.
+        const enc = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const send = (obj: unknown) => controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
+            try {
+              const { configured } = await deps.resolveChatStream(id, question, history, (delta) => send({ delta }));
+              send(configured ? { done: true } : { configured: false });
+            } catch (e) {
+              send({ error: e instanceof Error ? e.message : String(e) });
+            }
+            controller.close();
+          },
+        });
+        return new Response(stream, { headers: { "content-type": "application/x-ndjson; charset=utf-8" } });
       }
       if (pathname === "/api/sweep/approve" && req.method === "POST") {
         const body = (await req.json().catch(() => ({}))) as { id?: unknown };

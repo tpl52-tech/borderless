@@ -634,14 +634,29 @@
   async function sdSend() {
     const q = sdField.value.trim(); if (!q || !sdId) return;
     sdField.value = ""; sdBubble("You", q);
-    const thinking = sdBubble("Borderless", "… thinking");
+    const ctext = sdBubble("Borderless", "…").querySelector(".ctext"); // fills in live as tokens stream
+    let answer = "";
     try {
       const res = await fetch("/api/resolve-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: sdId, question: q, history: sdHistory }) });
-      const j = await res.json();
-      const answer = j.configured === false ? "Chat backend is off — set one in ~/.borderless/config.json" : (j.answer || "(no answer)");
-      thinking.querySelector(".ctext").textContent = answer;
-      if (j.configured !== false) sdHistory.push({ role: "user", text: q }, { role: "assistant", text: j.answer || "" });
-    } catch (e) { thinking.querySelector(".ctext").textContent = "error: " + e; }
+      if (!res.body) { ctext.textContent = "no response"; return; }
+      const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+          if (!line.trim()) continue;
+          let ev; try { ev = JSON.parse(line); } catch { continue; }
+          if (ev.delta != null) { answer += ev.delta; ctext.textContent = answer; }       // a token
+          else if (ev.configured === false) ctext.textContent = "Chat backend is off — set one in ~/.borderless/config.json";
+          else if (ev.error) ctext.textContent = "error: " + ev.error;
+          sdStream.scrollTop = sdStream.scrollHeight;
+        }
+      }
+      if (answer) sdHistory.push({ role: "user", text: q }, { role: "assistant", text: answer });
+      else if (ctext.textContent === "…") ctext.textContent = "(no answer)";
+    } catch (e) { ctext.textContent = "chat failed"; }
     sdStream.scrollTop = sdStream.scrollHeight;
   }
   $("sweeps").addEventListener("click", (e) => { const c = e.target.closest("[data-id]"); if (c && c.dataset.id) sdOpen(c.dataset.id); });

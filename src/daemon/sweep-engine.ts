@@ -75,18 +75,26 @@ export interface SweepEngineDeps {
   territoryFor?: (job: SweepJob) => Territory;
 }
 
-export type SweepOutcome = "ready" | "needs_human" | "failed";
+export type SweepOutcome = "ready" | "signoff" | "needs_human" | "failed";
 
 const WORKER_STATE: Record<SweepKind, SweepState> = { in_review: "fixing", rescue: "implementing" };
 
-/** Compose the escalation reason the gate uses to stop for a human (null = keep self-resolving). */
-function deriveEscalation(tiers: DangerTier[], judgmentCall: string | null, collisions: TicketOwner[]): string | null {
-  const parts: string[] = [];
-  if (tiers.length > 0) parts.push(`dangerous tier: ${tiers.join(", ")}`);
+/**
+ * Split the escalation signals into the two that route differently (PRD §4):
+ *  - `blocking`: a cross-ticket collision or a reviewer judgment call — a real decision, stop for the human now;
+ *  - `signoff`: a dangerous tier (auth/money/schema/ci-config) — drive to a clean gate first, then hand off for a
+ *    human glance (never auto-merge).
+ * A tier that coincides with a blocker is folded INTO the blocking reason (so the human sees the full risk
+ * picture) and does not also surface as a sign-off. null/null = keep self-resolving.
+ */
+function deriveEscalation(
+  tiers: DangerTier[], judgmentCall: string | null, collisions: TicketOwner[],
+): { blocking: string | null; signoff: string | null } {
+  const tierNote = tiers.length > 0 ? `dangerous tier: ${tiers.join(", ")}` : null;
   const coordination = collisionEscalation(collisions);
-  if (coordination) parts.push(coordination);
-  if (judgmentCall) parts.push(`judgment call: ${judgmentCall}`);
-  return parts.length > 0 ? parts.join("; ") : null;
+  const blockers = [coordination, judgmentCall ? `judgment call: ${judgmentCall}` : null].filter(Boolean) as string[];
+  if (blockers.length > 0) return { blocking: [tierNote, ...blockers].filter(Boolean).join("; "), signoff: null };
+  return { blocking: null, signoff: tierNote };
 }
 
 /** Drive one sweep job to a terminal state. Returns the outcome. */
@@ -154,12 +162,15 @@ export async function runSweepJob(seed: SweepJob, store: Store, deps: SweepEngin
         checks: poll.checks,
         reviewerRedFindings: review?.redFindings ?? null,
       });
-      const action = nextSweepAction({ cycles, gate, escalation });
+      const action = nextSweepAction({ cycles, gate, blockingEscalation: escalation.blocking, signoffReason: escalation.signoff });
       store.recordSweepEvent(seed.id, "gate_eval", { blockers: gate.blockers, action: action.kind, cycles });
 
       switch (action.kind) {
         case "ready":
           return finish("ready");
+        case "sign-off":
+          // Driven to a clean gate, but a dangerous tier was touched — hand off for a human glance, not auto-merge.
+          return finish("signoff", action.reason);
         case "needs-human":
           return finish("needs_human", action.reason);
         case "wait-ci":

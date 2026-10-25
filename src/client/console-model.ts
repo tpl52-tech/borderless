@@ -56,28 +56,31 @@ export function cell(value: string, width: number, align: "left" | "right" = "le
 // --- SWEEPS derivations (the hero numbers + the three panels all come from the one sweep list) -----------
 
 /** The hero summary line's counts (PRD §11): scope + how the queue breaks down. Pure. */
-export interface HeroStats { inScope: number; active: number; ready: number; needsYou: number }
+export interface HeroStats { inScope: number; active: number; ready: number; signoff: number; needsYou: number }
 
 const ACTIVE_STATES = new Set<SweepState>(["implementing", "fixing", "reviewing", "ci", "queued"]);
 
 export function heroStats(sweeps: SweepRow[]): HeroStats {
-  let active = 0, ready = 0, needsYou = 0;
+  let active = 0, ready = 0, signoff = 0, needsYou = 0;
   for (const s of sweeps) {
     if (s.state === "ready") ready++;
+    else if (s.state === "signoff") signoff++;
     else if (s.state === "needs_human") needsYou++;
     else if (ACTIVE_STATES.has(s.state)) active++;
   }
-  return { inScope: sweeps.length, active, ready, needsYou };
+  return { inScope: sweeps.length, active, ready, signoff, needsYou };
 }
 
-/** The rows that drop into the READY_TO_MERGE / NEEDS_YOU side panels (subsets of the queue). Pure. */
+/** The rows that drop into the READY_TO_MERGE / AWAITING_SIGNOFF / NEEDS_YOU side panels (subsets of the queue). Pure. */
 export function readyRows(sweeps: SweepRow[]): SweepRow[] { return sweeps.filter((s) => s.state === "ready"); }
+export function signoffRows(sweeps: SweepRow[]): SweepRow[] { return sweeps.filter((s) => s.state === "signoff"); }
 export function needsYouRows(sweeps: SweepRow[]): SweepRow[] { return sweeps.filter((s) => s.state === "needs_human"); }
 
-/** Foreground tone for a sweep state (matches the HTML mock's s-green/s-ink/s-dim/s-pink classes). */
+/** Foreground tone for a sweep state (matches the HTML mock's s-green/s-ink/s-dim/s-pink/s-amber classes). */
 export function stateTone(state: SweepState): Tone {
   switch (state) {
     case "ready": case "merged": return "green";
+    case "signoff": return "amber"; // clean, but awaiting a human glance on a risky tier
     case "needs_human": return "pink";
     case "failed": return "red";
     case "queued": case "ci": return "dim";

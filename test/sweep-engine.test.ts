@@ -113,17 +113,64 @@ describe("runSweepJob (sweep engine, PRD §4-§5)", () => {
     expect(final.reason).toContain("8-cycle cap");
   });
 
-  test("a dangerous tier escalates to the human immediately — before spending a fix or review", async () => {
+  test("a dangerous tier drives to a clean gate, then hands off for sign-off (not escalate-on-sight)", async () => {
     const s = new Store(":memory:");
     const job = s.createSweepJob({ kind: "in_review", ticketId: "t5", ticketKey: "COR-5", prNumber: 9, headSha: "h0" });
     const { deps, rec } = makeDeps(s, {
       poll: () => ({ checks: { ci: "success", "secrets-scan": "success" }, changedPaths: ["src/auth/login.ts"] }),
     });
 
+    expect(await runSweepJob(job, s, deps)).toBe("signoff");
+    const final = s.getSweepJob(job.id)!;
+    expect(final.state).toBe("signoff");
+    expect(final.reason).toContain("dangerous tier: auth");
+    expect(rec.reviews).toBe(1);   // it DID review — drove to clean, unlike the old escalate-on-sight
+    expect(rec.spawns.length).toBe(0); // already clean, so no fix cycle was needed before the hand-off
+  });
+
+  test("a dangerous tier with a red review still drives the fix to clean, then signs off", async () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "in_review", ticketId: "t5b", ticketKey: "COR-5B", prNumber: 91, headSha: "h0" });
+    const { deps, rec } = makeDeps(s, {
+      poll: () => ({ checks: { ci: "success", "secrets-scan": "success" }, changedPaths: ["supabase/migrations/004.sql"] }),
+      review: (n) => (n === 1 ? redReview() : cleanReview()),
+    });
+
+    expect(await runSweepJob(job, s, deps)).toBe("signoff");
+    expect(s.getSweepJob(job.id)!.reason).toContain("dangerous tier: schema");
+    expect(rec.spawns.length).toBe(1); // drove the red review to clean before signing off
+    expect(rec.reviews).toBe(2);
+  });
+
+  test("a dangerous tier plus a collision stays needs_human — a real decision outranks a sign-off", async () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "in_review", ticketId: "t5c", ticketKey: "COR-5C", prNumber: 92, headSha: "h0" });
+    const territory: Territory = new Map([
+      ["conditionstars", { ticketKey: "COR-54", owner: "Renee Gowda", state: "In Progress", deliverable: "ConditionStars" }],
+    ]);
+    const { deps, rec } = makeDeps(s, {
+      poll: () => ({ checks: { ci: "success", "secrets-scan": "success" }, changedPaths: ["supabase/migrations/004.sql", "components/ConditionStars.tsx"] }),
+      territoryFor: () => territory,
+    });
+
     expect(await runSweepJob(job, s, deps)).toBe("needs_human");
-    expect(s.getSweepJob(job.id)!.reason).toContain("dangerous tier: auth");
-    expect(rec.spawns.length).toBe(0);
-    expect(rec.reviews).toBe(0);
+    const reason = s.getSweepJob(job.id)!.reason ?? "";
+    expect(reason).toContain("dangerous tier: schema"); // the tier is folded into the reason for the human's full picture
+    expect(reason).toContain("coordinate before merging");
+    expect(rec.spawns.length).toBe(0); // stopped for the human, never iterated
+  });
+
+  test("a dangerous tier that can't reach a clean gate hits the 8-cycle cap as needs_human, not sign-off", async () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "in_review", ticketId: "t5d", ticketKey: "COR-5D", prNumber: 93, headSha: "h0" });
+    const { deps, rec } = makeDeps(s, {
+      poll: () => ({ checks: { ci: "success", "secrets-scan": "success" }, changedPaths: ["supabase/migrations/004.sql"] }),
+      review: () => redReview(), // never clean
+    });
+
+    expect(await runSweepJob(job, s, deps)).toBe("needs_human");
+    expect(s.getSweepJob(job.id)!.reason).toContain("8-cycle cap");
+    expect(rec.spawns.length).toBe(MAX_CYCLES);
   });
 
   test("rescue: bootstraps by building a PR, then runs the same gate to ready", async () => {

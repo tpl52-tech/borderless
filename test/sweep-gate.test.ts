@@ -49,21 +49,37 @@ describe("evaluateGate (PRD §4)", () => {
 
 const result = (blockers: GateBlocker[]): GateResult => ({ pass: blockers.length === 0, blockers });
 const decide = (over: Partial<SweepDecisionInput>): ReturnType<typeof nextSweepAction> =>
-  nextSweepAction({ cycles: 0, gate: result([]), escalation: null, ...over });
+  nextSweepAction({ cycles: 0, gate: result([]), blockingEscalation: null, signoffReason: null, ...over });
 
 describe("nextSweepAction (PRD §4-§5)", () => {
-  test("a passing gate is ready-to-merge", () => {
+  test("a passing gate with nothing risky is ready-to-merge", () => {
     expect(decide({ gate: result([]) }).kind).toBe("ready");
   });
 
-  test("escalation stops for the human now, carrying the reason", () => {
-    const a = decide({ gate: result(["ci-failing"]), escalation: "dangerous tier: auth" });
-    expect(a).toEqual({ kind: "needs-human", reason: "dangerous tier: auth" });
+  test("a blocking escalation stops for the human now, carrying the reason — even over a failing gate", () => {
+    const a = decide({ gate: result(["ci-failing"]), blockingEscalation: "judgment call: which rounding?" });
+    expect(a).toEqual({ kind: "needs-human", reason: "judgment call: which rounding?" });
   });
 
-  test("escalation outranks even a passing gate (dangerous tiers never auto-ready)", () => {
-    const a = decide({ gate: result([]), escalation: "dangerous tier: auth" });
-    expect(a).toEqual({ kind: "needs-human", reason: "dangerous tier: auth" });
+  test("a blocking escalation outranks even a passing gate (never auto-ready)", () => {
+    const a = decide({ gate: result([]), blockingEscalation: "coordination: COR-54 owns ConditionStars" });
+    expect(a).toEqual({ kind: "needs-human", reason: "coordination: COR-54 owns ConditionStars" });
+  });
+
+  test("a dangerous tier does NOT block the drive: a failing gate still routes to the fix/wait/review, not the human", () => {
+    expect(decide({ gate: result(["ci-failing"]), signoffReason: "dangerous tier: auth" }).kind).toBe("spawn-worker");
+    expect(decide({ gate: result(["ci-pending"]), signoffReason: "dangerous tier: schema" }).kind).toBe("wait-ci");
+    expect(decide({ gate: result(["reviewer-unrun"]), signoffReason: "dangerous tier: schema" }).kind).toBe("spawn-reviewer");
+  });
+
+  test("a dangerous tier on a PASSING gate hands off for sign-off, not auto-ready", () => {
+    const a = decide({ gate: result([]), signoffReason: "dangerous tier: schema" });
+    expect(a).toEqual({ kind: "sign-off", reason: "dangerous tier: schema" });
+  });
+
+  test("a blocking escalation outranks a pending sign-off tier (the decision comes first)", () => {
+    const a = decide({ gate: result([]), blockingEscalation: "judgment call: x", signoffReason: "dangerous tier: schema" });
+    expect(a).toEqual({ kind: "needs-human", reason: "judgment call: x" });
   });
 
   test("blocker routing: fail CI → worker; pending CI → wait; unrun reviewer → reviewer; red → worker", () => {
@@ -91,14 +107,20 @@ describe("nextSweepAction (PRD §4-§5)", () => {
     expect(decide({ gate: result(["reviewer-unrun"]), cycles: MAX_CYCLES }).kind).toBe("spawn-reviewer");
   });
 
-  test("escalation outranks the cycle cap (the reason is the escalation, not the cap)", () => {
-    const a = decide({ gate: result(["reviewer-red"]), escalation: "dangerous tier: money", cycles: MAX_CYCLES });
-    expect(a).toEqual({ kind: "needs-human", reason: "dangerous tier: money" });
+  test("a blocking escalation outranks the cycle cap (the reason is the escalation, not the cap)", () => {
+    const a = decide({ gate: result(["reviewer-red"]), blockingEscalation: "judgment call: which rule?", cycles: MAX_CYCLES });
+    expect(a).toEqual({ kind: "needs-human", reason: "judgment call: which rule?" });
+  });
+
+  test("a sign-off tier that never reaches a clean gate still hits the cap as needs-human, not sign-off", () => {
+    const a = decide({ gate: result(["reviewer-red"]), signoffReason: "dangerous tier: schema", cycles: MAX_CYCLES });
+    expect(a.kind).toBe("needs-human");
+    expect(a.reason).toContain("8-cycle cap");
   });
 
   test("end to end: evaluateGate → nextSweepAction on a fresh in-review job wants CI to settle", () => {
     const g = evaluateGate({ kind: "in_review", preservationProven: null, checks: { ci: "pending", "secrets-scan": "pending" }, reviewerRedFindings: null });
-    expect(nextSweepAction({ cycles: 1, gate: g, escalation: null }).kind).toBe("wait-ci");
+    expect(nextSweepAction({ cycles: 1, gate: g, blockingEscalation: null, signoffReason: null }).kind).toBe("wait-ci");
   });
 });
 

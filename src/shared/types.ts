@@ -266,7 +266,7 @@ export type SweepKind = "in_review" | "rescue";
 
 export type SweepState =
   | "queued" | "implementing" | "fixing" | "reviewing" | "ci"
-  | "ready" | "needs_human" | "merged" | "failed";
+  | "ready" | "signoff" | "needs_human" | "merged" | "failed";
 
 /** The outcome of one In-Review sweep (scanInReview): Linear sync → re-review advanced PRs → enqueue → drive. */
 export interface InReviewSweepResult {
@@ -290,7 +290,7 @@ export interface SweepJob {
   state: SweepState;
   cycles: number;          // fix/implement -> review loop; cap 8
   gate: unknown | null;    // { ac, ci, findings, grade }
-  reason: string | null;   // why needs_human / failed
+  reason: string | null;   // why needs_human / signoff / failed
   createdAt: number;
   updatedAt: number;
 }

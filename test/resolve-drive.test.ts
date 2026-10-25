@@ -118,4 +118,14 @@ describe("redriveJob (lead re-drives a stopped job with guidance)", () => {
     expect(redriveJob(s, ready.id, "do x").ok).toBe(false); // not needs_human
     expect(redriveJob(s, "nope", "do x")).toEqual({ ok: false, error: "job not found" });
   });
+
+  test("a signoff job is refused: re-drive is for a stuck decision, not a clean sign-off", () => {
+    const s = new Store(":memory:");
+    const job = s.createSweepJob({ kind: "fix", ticketId: "t-so", ticketKey: "COR-160", prNumber: 7 });
+    s.transitionSweepJob(job.id, { state: "signoff", reason: "dangerous tier: schema" });
+    const r = redriveJob(s, job.id, "do x");
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("signoff");
+    expect(s.getSweepJob(job.id)!.state).toBe("signoff"); // unchanged (approvable, but not re-drivable)
+  });
 });

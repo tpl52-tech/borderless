@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import {
   CONSOLE_SCREENS, NAV_LABELS, crumbLabel, cell, clampCursor, moveCursor, attachTarget, editInput,
-  heroStats, readyRows, needsYouRows, stateTone, kindTone, kindLabel,
+  heroStats, readyRows, signoffRows, needsYouRows, stateTone, kindTone, kindLabel,
   type SweepRow,
 } from "../src/client/console-model.ts";
 
@@ -51,17 +51,19 @@ describe("heroStats + partitions (the SWEEPS numbers + side panels, all from one
   const rows = [
     sweep({ state: "ready" }),
     sweep({ state: "ready" }),
+    sweep({ state: "signoff" }),
     sweep({ state: "needs_human" }),
     sweep({ state: "reviewing" }),
     sweep({ state: "queued" }),
     sweep({ state: "merged" }),
   ];
-  test("counts scope / active / ready / needs-you", () => {
-    expect(heroStats(rows)).toEqual({ inScope: 6, active: 2, ready: 2, needsYou: 1 });
-    expect(heroStats([])).toEqual({ inScope: 0, active: 0, ready: 0, needsYou: 0 });
+  test("counts scope / active / ready / signoff / needs-you", () => {
+    expect(heroStats(rows)).toEqual({ inScope: 7, active: 2, ready: 2, signoff: 1, needsYou: 1 });
+    expect(heroStats([])).toEqual({ inScope: 0, active: 0, ready: 0, signoff: 0, needsYou: 0 });
   });
-  test("readyRows / needsYouRows select the right subsets", () => {
+  test("readyRows / signoffRows / needsYouRows select the right subsets", () => {
     expect(readyRows(rows).map((r) => r.state)).toEqual(["ready", "ready"]);
+    expect(signoffRows(rows).map((r) => r.state)).toEqual(["signoff"]);
     expect(needsYouRows(rows).map((r) => r.state)).toEqual(["needs_human"]);
   });
 });
@@ -70,6 +72,7 @@ describe("state / kind tones (match the HTML mock)", () => {
   test("state tone", () => {
     expect(stateTone("ready")).toBe("green");
     expect(stateTone("merged")).toBe("green");
+    expect(stateTone("signoff")).toBe("amber");
     expect(stateTone("needs_human")).toBe("pink");
     expect(stateTone("failed")).toBe("red");
     expect(stateTone("queued")).toBe("dim");

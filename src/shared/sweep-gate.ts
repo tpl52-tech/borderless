@@ -103,8 +103,9 @@ export type SweepActionKind =
   | "spawn-worker" // fix (in_review) or implement (rescue) — advances a cycle
   | "spawn-reviewer" // run the independent reviewer on the current head
   | "wait-ci" // required checks still pending — poll again
-  | "ready" // gate passed → ready-to-merge (a human merges)
-  | "needs-human"; // escalate (dangerous/judgment) or the 8-cycle cap
+  | "ready" // gate passed, nothing risky → ready-to-merge (a human merges)
+  | "sign-off" // gate passed but a dangerous tier was touched → driven clean, awaiting a human glance
+  | "needs-human"; // a real decision (collision/judgment) or the 8-cycle cap
 
 export interface SweepAction {
   kind: SweepActionKind;
@@ -116,22 +117,33 @@ export interface SweepDecisionInput {
   cycles: number;
   gate: GateResult;
   /**
-   * A reason to stop for the human NOW instead of iterating: a dangerous tier (auth/money/schema/
-   * .github/irreversible) or a genuine no-clearly-better-option judgment call. null = keep
-   * self-resolving (PRD §4 — no rubber-stamp asks).
+   * A reason to stop for the human NOW instead of iterating: a genuine no-clearly-better-option judgment call
+   * or a cross-ticket collision: a real decision, not a rubber-stamp. Outranks everything, including a
+   * passing gate. null = keep self-resolving (PRD §4).
    */
-  escalation: string | null;
+  blockingEscalation: string | null;
+  /**
+   * A dangerous tier was touched (auth/money/schema/ci-config): mechanically the change may be fine, but the
+   * MERGE needs a human glance. This never blocks the drive: the sweep still fixes/reviews to a passing gate,
+   * then hands off for sign-off instead of auto-"ready" (PRD §4, "risky tiers always get explicit human
+   * review"). null = no risky tier; ignored until the gate passes. A tier that coincides with a blocking
+   * escalation is folded into that reason upstream, so it won't appear here.
+   */
+  signoffReason: string | null;
 }
 
-/** Decide the next move for a sweep job from the gate result + cycle budget + escalation (PRD §4-§5). */
+/** Decide the next move for a sweep job from the gate result + cycle budget + escalations (PRD §4-§5). */
 export function nextSweepAction(input: SweepDecisionInput): SweepAction {
-  const { gate, cycles, escalation } = input;
+  const { gate, cycles, blockingEscalation, signoffReason } = input;
 
-  // Escalation outranks everything, including a passing gate: a dangerous tier or a no-clearly-better
-  // judgment call always gets an explicit human decision, never an auto-"ready" rubber-stamp (PRD §4,
-  // "risky tiers always get explicit human review").
-  if (escalation) return { kind: "needs-human", reason: escalation };
-  if (gate.pass) return { kind: "ready" };
+  // A blocking escalation outranks everything, including a passing gate: a cross-ticket collision or a
+  // no-clearly-better judgment call always gets an explicit human decision, never an auto-"ready"
+  // rubber-stamp (PRD §4).
+  if (blockingEscalation) return { kind: "needs-human", reason: blockingEscalation };
+
+  // Gate passed. A dangerous tier doesn't block the drive, but the merge waits on a human glance, so hand
+  // off for sign-off rather than auto-merging a risky change (PRD §4). No tier → genuinely ready.
+  if (gate.pass) return signoffReason ? { kind: "sign-off", reason: signoffReason } : { kind: "ready" };
 
   const step = nextStep(gate.blockers);
 

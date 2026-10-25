@@ -100,6 +100,7 @@
   .ph { display: flex; justify-content: space-between; align-items: center; padding: .5rem .8rem;
     border-bottom: 1px solid var(--line); color: var(--green); letter-spacing: .1em; font-size: .78rem; font-weight: 700; }
   .ph.pink { color: var(--pink); }
+  .ph.amber { color: var(--amber); }
   .ph-meta { color: var(--dim); font-weight: 500; font-size: .88em; letter-spacing: .04em; }
   .pb { padding: .85rem .8rem; } .pb.nopad { padding: 0; }
   .note { font-size: .78rem; color: var(--ink-2); margin: 0 0 .7rem; }
@@ -274,6 +275,11 @@
             <div class="panel g">
               <div class="ph">READY_TO_MERGE <span class="ph-meta" id="s-readymeta">0</span></div>
               <div class="pb" id="s-ready"></div>
+            </div>
+
+            <div class="panel">
+              <div class="ph amber">AWAITING_SIGNOFF <span class="ph-meta" id="s-signoffmeta">0</span></div>
+              <div class="pb" id="s-signoff"></div>
             </div>
 
             <div class="panel p">
@@ -477,7 +483,7 @@
   // ---- helpers ----
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const stateClass = (st) => ({ ready: "s-green", merged: "s-green", needs_human: "s-pink", failed: "s-pink", queued: "s-dim", ci: "s-dim" }[st] || "s-ink");
+  const stateClass = (st) => ({ ready: "s-green", merged: "s-green", signoff: "s-amber", needs_human: "s-pink", failed: "s-pink", queued: "s-dim", ci: "s-dim" }[st] || "s-ink");
   const ACTIVE = new Set(["implementing", "fixing", "reviewing", "ci", "queued"]);
   // KIND column: in_review drives an author's PR (muted); rescue + qa-fix build from scratch (pink).
   const KIND_LABEL = { in_review: "review", rescue: "rescue", fix: "fix" };
@@ -488,10 +494,11 @@
     // SWEEPS
     const sw = d.sweeps || [];
     const ready = sw.filter((j) => j.state === "ready");
+    const signoff = sw.filter((j) => j.state === "signoff");
     const needs = sw.filter((j) => j.state === "needs_human");
     const active = sw.filter((j) => ACTIVE.has(j.state)).length;
     $("s-heronum").textContent = String(needs.length);
-    $("s-herosub").innerHTML = `${sw.length} in scope &middot; <b style="color:var(--green)">${ready.length} ready</b> &middot; <b style="color:var(--pink)">${needs.length} need you</b> &middot; ${active} active. Agents drive to the gate; you decide.`;
+    $("s-herosub").innerHTML = `${sw.length} in scope &middot; <b style="color:var(--green)">${ready.length} ready</b> &middot; <b style="color:var(--amber)">${signoff.length} to sign off</b> &middot; <b style="color:var(--pink)">${needs.length} need you</b> &middot; ${active} active. Agents drive to the gate; you decide.`;
     $("s-queuemeta").textContent = `${sw.length} JOBS`;
     $("s-queue").innerHTML = sw.length
       ? sw.map((j) => `<tr><td>${esc(j.ticketKey)}</td><td class="${KIND_CLASS[j.kind] || "k-review"}">${KIND_LABEL[j.kind] || esc(j.kind)}</td><td>${esc(j.owner) || "&mdash;"}</td><td class="${stateClass(j.state)}">${esc(String(j.state).toUpperCase())}</td><td>${esc(j.cycles)}</td></tr>`).join("")
@@ -500,6 +507,10 @@
     $("s-ready").innerHTML = ready.length
       ? ready.map((j) => `<div class="row-card clickable" data-id="${esc(j.id)}"><div class="rc-top"><b>${esc(j.ticketKey)}</b> <span class="muted">${j.prNumber != null ? "PR #" + esc(j.prNumber) : ""}</span></div></div>`).join("")
       : `<p class="note">nothing at the gate</p>`;
+    $("s-signoffmeta").textContent = String(signoff.length);
+    $("s-signoff").innerHTML = signoff.length
+      ? signoff.map((j) => `<div class="row-card"><div class="rc-top"><b style="color:var(--amber)">${esc(j.ticketKey)}</b> <span class="muted">${j.prNumber != null ? "PR #" + esc(j.prNumber) : ""}</span></div>${j.reason ? `<p class="note" style="margin:.4rem 0 0">${esc(j.reason)}</p>` : ""}</div>`).join("")
+      : `<p class="note">nothing to sign off &mdash; clean risky-tier PRs land here for your glance</p>`;
     $("s-needsmeta").textContent = String(needs.length);
     $("s-needs").innerHTML = needs.length
       ? needs.map((j) => `<div class="row-card clickable" data-id="${esc(j.id)}"><div class="rc-top"><b style="color:var(--pink)">${esc(j.ticketKey)}</b> <span class="muted">${esc(j.cycles)} cyc</span></div>${j.reason ? `<p class="note" style="margin:.4rem 0 0">${esc(j.reason)}</p>` : ""}</div>`).join("")

@@ -20,7 +20,7 @@ import { ensureDaemon, navDirection, runSurface, type SurfaceAction } from "./ru
 import { PALETTE, toneColor, type Tone } from "./theme.ts";
 import {
   CONSOLE_SCREENS, NAV_LABELS, crumbLabel, cell, clampCursor, moveCursor, attachTarget, editInput,
-  heroStats, readyRows, needsYouRows, stateTone, kindTone, kindLabel,
+  heroStats, readyRows, signoffRows, needsYouRows, stateTone, kindTone, kindLabel,
   type SweepRow, type BoardRow, type AssignRow, type RosterRow, type DeskRow,
 } from "./console-model.ts";
 
@@ -75,9 +75,9 @@ function Sidebar({ screenIdx }: { screenIdx: number }) {
 }
 
 /** A bordered, color-accented panel with a header row (title + optional right-aligned meta). */
-function Panel({ title, meta, accent, children }: { title: string; meta?: string; accent?: "green" | "pink"; children: React.ReactNode }) {
-  const borderColor = accent === "green" ? PALETTE.green2 : accent === "pink" ? PALETTE.pink2 : PALETTE.line;
-  const titleColor = accent === "pink" ? PALETTE.pink : PALETTE.green;
+function Panel({ title, meta, accent, children }: { title: string; meta?: string; accent?: "green" | "pink" | "amber"; children: React.ReactNode }) {
+  const borderColor = accent === "green" ? PALETTE.green2 : accent === "pink" ? PALETTE.pink2 : accent === "amber" ? PALETTE.amber : PALETTE.line;
+  const titleColor = accent === "pink" ? PALETTE.pink : accent === "amber" ? PALETTE.amber : PALETTE.green;
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={borderColor} paddingX={1} marginBottom={1}>
       <Box>
@@ -160,6 +160,7 @@ const ROSTER_COLUMNS: Column<RosterRow>[] = [
 function SweepsView({ sweeps, cursor, empty }: { sweeps: SweepRow[]; cursor: number; empty: string }) {
   const stats = heroStats(sweeps);
   const ready = readyRows(sweeps);
+  const signoff = signoffRows(sweeps);
   const needs = needsYouRows(sweeps);
   return (
     <Box flexDirection="column">
@@ -172,6 +173,8 @@ function SweepsView({ sweeps, cursor, empty }: { sweeps: SweepRow[]; cursor: num
         <Text>
           <Text color={PALETTE.ink2}>{stats.inScope} in scope · </Text>
           <Text color={PALETTE.green}>{stats.ready} ready</Text>
+          <Text color={PALETTE.ink2}> · </Text>
+          <Text color={PALETTE.amber}>{stats.signoff} to sign off</Text>
           <Text color={PALETTE.ink2}> · </Text>
           <Text color={PALETTE.ink}>{stats.active} active</Text>
           <Text color={PALETTE.ink2}> · </Text>
@@ -194,6 +197,18 @@ function SweepsView({ sweeps, cursor, empty }: { sweeps: SweepRow[]; cursor: num
                   <Text bold color={PALETTE.green}>{r.ticketKey}</Text>
                   <Text color={PALETTE.ink2}>{r.prNumber != null ? `  PR#${r.prNumber}` : ""}  ⏎ merge</Text>
                 </Text>
+              ))}
+          </Panel>
+          <Panel title="AWAITING_SIGNOFF" meta={String(signoff.length)} accent="amber">
+            {signoff.length === 0 ? <Text color={PALETTE.dim}>nothing to sign off</Text>
+              : signoff.map((r) => (
+                <Box key={r.ticketKey} flexDirection="column">
+                  <Text wrap="truncate">
+                    <Text bold color={PALETTE.amber}>{r.ticketKey}</Text>
+                    <Text color={PALETTE.ink2}>{r.prNumber != null ? `  PR#${r.prNumber}` : ""}  ⏎ glance + merge</Text>
+                  </Text>
+                  {r.reason ? <Text wrap="truncate" color={PALETTE.ink2}>{r.reason}</Text> : null}
+                </Box>
               ))}
           </Panel>
           <Panel title="NEEDS_YOU" meta={String(needs.length)} accent="pink">

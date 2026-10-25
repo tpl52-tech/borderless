@@ -37,8 +37,10 @@ function countBy<T>(items: T[], key: (t: T) => string): string {
 export function buildFleetContext(store: Store, docs: FleetDocs = {}, roster: Member[] = ROSTER): string {
   const jobs = store.listSweepJobs();
   const needsHuman = jobs.filter((j) => j.state === "needs_human");
-  // "active" and "waiting on a human" are disjoint — a needs_human job is listed only once, below.
-  const active = jobs.filter((j) => j.state !== "merged" && j.state !== "failed" && j.state !== "needs_human");
+  const awaitingSignoff = jobs.filter((j) => j.state === "signoff");
+  // "active", "awaiting sign-off", and "waiting on a human" are disjoint: a resting job is listed once, below.
+  const RESTING = new Set(["merged", "failed", "needs_human", "signoff"]);
+  const active = jobs.filter((j) => !RESTING.has(j.state));
   const issues = store.listLinearIssues();
 
   const jobLine = (j: SweepJob) =>
@@ -53,6 +55,7 @@ export function buildFleetContext(store: Store, docs: FleetDocs = {}, roster: Me
     "",
     `Sweep jobs by state: ${countBy(jobs, (j) => j.state)}`,
     active.length ? `Active jobs:\n${active.map(jobLine).join("\n")}` : "Active jobs: none",
+    awaitingSignoff.length ? `Awaiting your sign-off (clean, but touched a risky tier):\n${awaitingSignoff.map(jobLine).join("\n")}` : "Awaiting your sign-off: none",
     needsHuman.length ? `Waiting on a human:\n${needsHuman.map(jobLine).join("\n")}` : "Waiting on a human: none",
     "",
     `Linear issues by state: ${countBy(issues, (i) => i.stateName ?? "—")}`,

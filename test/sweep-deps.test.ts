@@ -54,6 +54,7 @@ describe("isRestingWithPr (head-advance re-review candidate)", () => {
   test("true for a resting in-review job with a PR + reviewed head", () => {
     expect(isRestingWithPr(job({ state: "needs_human" }))).toBe(true);
     expect(isRestingWithPr(job({ state: "ready" }))).toBe(true);
+    expect(isRestingWithPr(job({ state: "signoff" }))).toBe(true); // awaiting a glance, but a new push re-reviews
   });
 
   test("false while the job is still being driven (not resting)", () => {

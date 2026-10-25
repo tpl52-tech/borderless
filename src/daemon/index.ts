@@ -57,7 +57,7 @@ import { delegate, liveCreateIssue, type DelegateResult } from "./lead-delegate.
 import { liveSlackDm } from "./slack.ts";
 import { askBorderless, type FleetDocs } from "./ask-borderless.ts";
 import { httpOpenRouterChat } from "./openrouter/chat.ts";
-import { claudeCliChat, claudeCliChatStream } from "./claude-chat.ts";
+import { claudeCliChat, claudeCliChatStream, type StreamChat } from "./claude-chat.ts";
 import type { Chat, Message } from "./openrouter/runner.ts";
 import { resolveChatSeed } from "../shared/resolve-chat.ts";
 import { approveJob, redriveJob } from "./resolve-drive.ts";
@@ -437,6 +437,16 @@ export function startDaemon(home = stateHome()): Daemon {
     return claudeCliChat({ model: config.askModel }); // subscription: no key, answer-only (sandboxed)
   };
 
+  // Streaming counterpart of makeChat for the resolve-chat: subscription streams token-by-token; OpenRouter has
+  // no streaming wired here, so wrap its one-shot answer into a single onDelta. Null when unconfigured.
+  const makeStreamChat = (): StreamChat | null => {
+    if (backend === "openrouter") {
+      const chat = makeChat();
+      return chat ? async (messages, onDelta) => { const r = await chat(messages, []); if (r.text) onDelta(r.text); } : null;
+    }
+    return claudeCliChatStream({ model: config.askModel });
+  };
+
   const askRun: UdsServerDeps["askRun"] = async (question, allowActions) => {
     const chat = makeChat();
     if (!chat) return { answer: "", steps: 0, costMicros: 0, configured: false }; // openrouter selected, no key
@@ -473,6 +483,8 @@ export function startDaemon(home = stateHome()): Daemon {
   const resolveChatStream: WebServerDeps["resolveChatStream"] = async (jobId, question, history, onDelta) => {
     const job = store.getSweepJob(jobId); // the exact job the lead clicked — not "latest for the ticket"
     if (!job) return { configured: true }; // job gone — nothing to discuss
+    const chat = makeStreamChat();
+    if (!chat) return { configured: false }; // openrouter selected, no key
     const issue = store.getLinearIssueByIdentifier(job.ticketKey);
     const seed = resolveChatSeed({
       ticketKey: job.ticketKey, title: issue?.title ?? null, description: issue?.description ?? null,
@@ -483,15 +495,7 @@ export function startDaemon(home = stateHome()): Daemon {
       ...history.map((t) => ({ role: t.role, content: t.text })),
       { role: "user", content: question },
     ];
-    if (backend === "openrouter") {
-      // OpenRouter has no token streaming wired here — emit the full answer as one chunk (advisory, no tools).
-      const chat = makeChat();
-      if (!chat) return { configured: false }; // openrouter selected, no key
-      const res = await chat(messages, []);
-      if (res.text) onDelta(res.text);
-      return { configured: true };
-    }
-    await claudeCliChatStream({ model: config.askModel })(messages, onDelta); // subscription: stream token-by-token
+    await chat(messages, onDelta);
     return { configured: true };
   };
 

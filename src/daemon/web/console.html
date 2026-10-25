@@ -635,7 +635,7 @@
     const q = sdField.value.trim(); if (!q || !sdId) return;
     sdField.value = ""; sdBubble("You", q);
     const ctext = sdBubble("Borderless", "…").querySelector(".ctext"); // fills in live as tokens stream
-    let answer = "";
+    let answer = "", failed = false;
     try {
       const res = await fetch("/api/resolve-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: sdId, question: q, history: sdHistory }) });
       if (!res.body) { ctext.textContent = "no response"; return; }
@@ -650,11 +650,11 @@
           let ev; try { ev = JSON.parse(line); } catch { continue; }
           if (ev.delta != null) { answer += ev.delta; ctext.textContent = answer; }       // a token
           else if (ev.configured === false) ctext.textContent = "Chat backend is off — set one in ~/.borderless/config.json";
-          else if (ev.error) ctext.textContent = "error: " + ev.error;
+          else if (ev.error) { ctext.textContent = "error: " + ev.error; failed = true; }
           sdStream.scrollTop = sdStream.scrollHeight;
         }
       }
-      if (answer) sdHistory.push({ role: "user", text: q }, { role: "assistant", text: answer });
+      if (answer && !failed) sdHistory.push({ role: "user", text: q }, { role: "assistant", text: answer }); // don't replay a failed turn
       else if (ctext.textContent === "…") ctext.textContent = "(no answer)";
     } catch (e) { ctext.textContent = "chat failed"; }
     sdStream.scrollTop = sdStream.scrollHeight;

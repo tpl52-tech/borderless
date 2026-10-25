@@ -101,14 +101,14 @@ export function parseStreamJsonLine(line: string): { delta?: string } {
 export function claudeCliChatStream(opts: { model?: string } = {}): StreamChat {
   return async (messages, onDelta) => {
     const scratch = mkdtempSync(join(tmpdir(), "bl-ask-")); // neutral cwd — never the secrets dir
+    const args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", ...sandboxArgs(opts.model)];
+    const proc = Bun.spawn(["claude", ...args], {
+      stdin: new TextEncoder().encode(flattenMessages(messages)),
+      stdout: "pipe", stderr: "pipe", cwd: scratch,
+    });
+    const errPromise = new Response(proc.stderr).text(); // drain stderr concurrently (avoid a pipe deadlock)
+    const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
     try {
-      const args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", ...sandboxArgs(opts.model)];
-      const proc = Bun.spawn(["claude", ...args], {
-        stdin: new TextEncoder().encode(flattenMessages(messages)),
-        stdout: "pipe", stderr: "pipe", cwd: scratch,
-      });
-      const errPromise = new Response(proc.stderr).text(); // drain stderr concurrently (avoid a pipe deadlock)
-      const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
       const dec = new TextDecoder();
       let buf = "";
       const pump = (line: string) => { const d = parseStreamJsonLine(line); if (d.delta) onDelta(d.delta); };
@@ -123,6 +123,9 @@ export function claudeCliChatStream(opts: { model?: string } = {}): StreamChat {
       const code = await proc.exited;
       if (code !== 0) throw new Error(`claude CLI exited ${code}: ${(await errPromise).trim().slice(0, 200)}`);
     } finally {
+      // If onDelta threw (e.g. the client disconnected mid-answer), don't orphan the CLI: drop the pipe + kill it.
+      try { reader.releaseLock(); } catch { /* already released */ }
+      try { proc.kill(); } catch { /* already exited */ }
       rmSync(scratch, { recursive: true, force: true });
     }
   };

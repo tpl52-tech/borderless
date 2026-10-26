@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import { Store } from "../src/daemon/store.ts";
-import { consolePayload, sweepOwner, sweepRow, rosterRow, boardRow, assignRow } from "../src/shared/console-rows.ts";
+import { consolePayload, sweepOwner, sweepRow, visibleSweepRows, rosterRow, boardRow, assignRow } from "../src/shared/console-rows.ts";
 import { ROSTER } from "../src/shared/roster.ts";
 
 const TESS = "b21d8c6e-f3a3-4894-979f-0e8619ca9f48"; // Tess's Linear id (shared/roster.ts)
@@ -24,6 +24,16 @@ describe("sweepOwner / sweepRow / rosterRow (the shapes both consoles share)", (
     expect(boardRow({ issue: { identifier: "COR-2", title: "Donate form" } as any, downstream: 4 })).toEqual({ ticketKey: "COR-2", title: "Donate form", downstream: 4 });
     expect(assignRow({ ticketId: "i2", ticketKey: "COR-2", netid: "ktt38", name: "Kenan Tat", load: 1 })).toEqual({ ticketKey: "COR-2", netid: "ktt38", name: "Kenan Tat", load: 1 });
   });
+  test("visibleSweepRows hides merged jobs (its PR landed), keeps every other state", () => {
+    const s = new Store(":memory:");
+    for (const [i, st] of (["queued", "ready", "signoff", "needs_human", "failed", "merged"] as const).entries()) {
+      const j = s.createSweepJob({ kind: "in_review", ticketId: "i" + i, ticketKey: "COR-" + i, prNumber: 10 + i });
+      s.transitionSweepJob(j.id, { state: st });
+    }
+    const shown = visibleSweepRows(s.listSweepJobs()).map((r) => r.state).sort();
+    expect(shown).not.toContain("merged");
+    expect(shown).toEqual(["failed", "needs_human", "queued", "ready", "signoff"]);
+  });
 });
 
 describe("consolePayload (live snapshot from already-read store data)", () => {
@@ -42,6 +52,13 @@ describe("consolePayload (live snapshot from already-read store data)", () => {
     expect(p.roster.length).toBe(12);
     expect(p.rosterLoad.length).toBe(12);
     expect(p.rosterLoad.every((m) => typeof m.load === "number")).toBe(true);
+  });
+  test("a merged job is hidden from the console payload", () => {
+    const s = new Store(":memory:");
+    s.upsertLinearIssue({ id: "i1", identifier: "COR-1", title: "Login", stateName: "In Review", stateType: "started" });
+    const j = s.createSweepJob({ kind: "in_review", ticketId: "i1", ticketKey: "COR-1", prNumber: 7 });
+    s.transitionSweepJob(j.id, { state: "merged" });
+    expect(consolePayload(s.listLinearIssues(), s.listSweepJobs()).sweeps).toEqual([]); // merged → off-screen
   });
   test("empty store → empty screens, not a crash", () => {
     const p = consolePayload([], []);

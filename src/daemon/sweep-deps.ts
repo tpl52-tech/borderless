@@ -177,10 +177,22 @@ export async function hydrateInReviewJob(store: Store, job: SweepJob, cfg: { rep
   return store.transitionSweepJob(job.id, { prNumber: number, headSha });
 }
 
-/** The live reader reReviewAdvancedPrs fetches a PR's current head with: `headOf(await fetchPr(repo, n))`,
- *  injected so the re-review decision (below) is unit-testable without gh — mirrors SweepEngineDeps' I/O seams. */
-export function liveHeadReader(repo: string): (prNumber: number) => Promise<string | null> {
-  return (prNumber) => fetchPr(repo, prNumber).then(headOf);
+/** A memoizing per-sweep PR fetcher: one `fetchPr` per PR number, shared across the sweep's two resting-PR
+ *  passes (reconcile + head-advance re-review) so a resting PR is fetched once, not once per pass. Build a FRESH
+ *  one each sweep: a PR's state moves, so the cache must not outlive the sweep. */
+export function sweepPrFetcher(repo: string): (prNumber: number) => Promise<Record<string, any>> {
+  const cache = new Map<number, Promise<Record<string, any>>>();
+  return (prNumber) => {
+    let pr = cache.get(prNumber);
+    if (!pr) { pr = fetchPr(repo, prNumber); cache.set(prNumber, pr); }
+    return pr;
+  };
+}
+
+/** Reader for reReviewAdvancedPrs: a PR's current head oid, from an injected per-sweep PR fetcher (so the
+ *  re-review decision is unit-testable without gh, and the fetch is shared with reconcile; see sweepPrFetcher). */
+export function liveHeadReader(getPr: (prNumber: number) => Promise<Record<string, any>>): (prNumber: number) => Promise<string | null> {
+  return (prNumber) => getPr(prNumber).then(headOf);
 }
 
 /**
@@ -223,6 +235,56 @@ export async function reReviewAdvancedPrs(
     }
   });
   return reopened;
+}
+
+/** A PR's out-of-band resolution, for reconciling the job that was waiting on it. */
+export type PrOutcome = "merged" | "closed" | "open";
+
+/** Reader for reconcileResolvedPrs: a PR's resolution (merged / closed / open), from an injected per-sweep PR
+ *  fetcher (shared with the head-advance reader via sweepPrFetcher, so a resting PR is fetched once per sweep).
+ *  Unit-testable without gh; a gh throw propagates and the caller fails soft (leaves the job resting). */
+export function livePrOutcome(getPr: (prNumber: number) => Promise<Record<string, any>>): (prNumber: number) => Promise<PrOutcome> {
+  return async (prNumber) => {
+    const pr = await getPr(prNumber) as { state?: string; mergedAt?: string | null };
+    const state = String(pr.state ?? "").toUpperCase();
+    if (state === "MERGED" || pr.mergedAt) return "merged";
+    if (state === "CLOSED") return "closed";
+    return "open";
+  };
+}
+
+/** The resting states that can hold a PR a human resolved out of band, the reconcile candidates. A job still
+ *  being driven (ci/reviewing/fixing) is the engine's; terminal (merged/failed) is already done. */
+const RECONCILABLE: ReadonlySet<SweepState> = new Set<SweepState>(["ready", "signoff", "needs_human"]);
+
+/**
+ * Reconcile resting jobs against GitHub so a job leaves the console once its PR is resolved out of band: a
+ * resting job (ready/signoff/needs_human) whose PR was merged becomes `merged` (terminal, hidden from the
+ * console by visibleSweepRows), and whose PR was closed without merging becomes `failed`. Runs ahead of enqueue
+ * in the sweep, so a freshly-merged PR drops out of READY_TO_MERGE on the next sweep. Fail-soft per job: a gh
+ * hiccup (or an open/unknown result) leaves the job resting, to retry next sweep. Outcomes fetched concurrently.
+ * Returns the jobs it resolved.
+ */
+export async function reconcileResolvedPrs(
+  store: Pick<Store, "listSweepJobs" | "transitionSweepJob" | "recordSweepEvent">,
+  outcomeFor: (prNumber: number) => Promise<PrOutcome>,
+): Promise<SweepJob[]> {
+  const resting = store.listSweepJobs().filter((j) => RECONCILABLE.has(j.state) && j.prNumber != null);
+  const outcomes = await Promise.allSettled(resting.map((j) => outcomeFor(j.prNumber!)));
+  const resolved: SweepJob[] = [];
+  resting.forEach((job, i) => {
+    const res = outcomes[i]!;
+    if (res.status !== "fulfilled" || res.value === "open") return; // unknown/open → leave it resting
+    const to: SweepState = res.value === "merged" ? "merged" : "failed";
+    try {
+      // merged keeps its prior reason (hidden anyway); a close-without-merge records why it ended.
+      resolved.push(store.transitionSweepJob(job.id, res.value === "merged" ? { state: to } : { state: to, reason: "PR closed without merging" }));
+      store.recordSweepEvent(job.id, "state_change", { from: job.state, to, reason: res.value === "merged" ? "PR merged on GitHub" : "PR closed without merging" });
+    } catch (err) {
+      console.error(`reconcile ${job.ticketKey}:`, err instanceof Error ? err.message : err);
+    }
+  });
+  return resolved;
 }
 
 /** Build the engine's deps from the live session manager + gh. Live-only; see file header. */

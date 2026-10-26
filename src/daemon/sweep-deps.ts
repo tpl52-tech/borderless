@@ -177,10 +177,22 @@ export async function hydrateInReviewJob(store: Store, job: SweepJob, cfg: { rep
   return store.transitionSweepJob(job.id, { prNumber: number, headSha });
 }
 
-/** The live reader reReviewAdvancedPrs fetches a PR's current head with: `headOf(await fetchPr(repo, n))`,
- *  injected so the re-review decision (below) is unit-testable without gh — mirrors SweepEngineDeps' I/O seams. */
-export function liveHeadReader(repo: string): (prNumber: number) => Promise<string | null> {
-  return (prNumber) => fetchPr(repo, prNumber).then(headOf);
+/** A memoizing per-sweep PR fetcher: one `fetchPr` per PR number, shared across the sweep's two resting-PR
+ *  passes (reconcile + head-advance re-review) so a resting PR is fetched once, not once per pass. Build a FRESH
+ *  one each sweep: a PR's state moves, so the cache must not outlive the sweep. */
+export function sweepPrFetcher(repo: string): (prNumber: number) => Promise<Record<string, any>> {
+  const cache = new Map<number, Promise<Record<string, any>>>();
+  return (prNumber) => {
+    let pr = cache.get(prNumber);
+    if (!pr) { pr = fetchPr(repo, prNumber); cache.set(prNumber, pr); }
+    return pr;
+  };
+}
+
+/** Reader for reReviewAdvancedPrs: a PR's current head oid, from an injected per-sweep PR fetcher (so the
+ *  re-review decision is unit-testable without gh, and the fetch is shared with reconcile; see sweepPrFetcher). */
+export function liveHeadReader(getPr: (prNumber: number) => Promise<Record<string, any>>): (prNumber: number) => Promise<string | null> {
+  return (prNumber) => getPr(prNumber).then(headOf);
 }
 
 /**
@@ -228,11 +240,12 @@ export async function reReviewAdvancedPrs(
 /** A PR's out-of-band resolution, for reconciling the job that was waiting on it. */
 export type PrOutcome = "merged" | "closed" | "open";
 
-/** The live reader reconcileResolvedPrs uses: a PR's resolution via `fetchPr`. Injected so the reconcile logic
- *  is unit-testable without gh. A gh throw propagates and the caller fails soft (leaves the job resting). */
-export function livePrOutcome(repo: string): (prNumber: number) => Promise<PrOutcome> {
+/** Reader for reconcileResolvedPrs: a PR's resolution (merged / closed / open), from an injected per-sweep PR
+ *  fetcher (shared with the head-advance reader via sweepPrFetcher, so a resting PR is fetched once per sweep).
+ *  Unit-testable without gh; a gh throw propagates and the caller fails soft (leaves the job resting). */
+export function livePrOutcome(getPr: (prNumber: number) => Promise<Record<string, any>>): (prNumber: number) => Promise<PrOutcome> {
   return async (prNumber) => {
-    const pr = await fetchPr(repo, prNumber) as { state?: string; mergedAt?: string | null };
+    const pr = await getPr(prNumber) as { state?: string; mergedAt?: string | null };
     const state = String(pr.state ?? "").toUpperCase();
     if (state === "MERGED" || pr.mergedAt) return "merged";
     if (state === "CLOSED") return "closed";
@@ -240,7 +253,7 @@ export function livePrOutcome(repo: string): (prNumber: number) => Promise<PrOut
   };
 }
 
-/** The resting states that can hold a PR a human resolved out of band — the reconcile candidates. A job still
+/** The resting states that can hold a PR a human resolved out of band, the reconcile candidates. A job still
  *  being driven (ci/reviewing/fixing) is the engine's; terminal (merged/failed) is already done. */
 const RECONCILABLE: ReadonlySet<SweepState> = new Set<SweepState>(["ready", "signoff", "needs_human"]);
 

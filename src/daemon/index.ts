@@ -50,7 +50,7 @@ import { singleFlight } from "../shared/single-flight.ts";
 import type { InReviewSweepResult, FixSweepResult } from "../shared/types.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
 import { buildTerritory } from "../shared/collision.ts";
-import { liveSweepDeps, needsHydration, hydrateInReviewJob, reReviewAdvancedPrs, liveHeadReader, reconcileResolvedPrs, livePrOutcome } from "./sweep-deps.ts";
+import { liveSweepDeps, needsHydration, hydrateInReviewJob, reReviewAdvancedPrs, liveHeadReader, reconcileResolvedPrs, livePrOutcome, sweepPrFetcher } from "./sweep-deps.ts";
 import { createSweepSupervisor, type SweepSupervisor } from "./sweep-supervisor.ts";
 import { scanRescues, authorizeRescue, liveProgressCheck } from "./rescue-scan.ts";
 import { delegate, liveCreateIssue, type DelegateResult } from "./lead-delegate.ts";
@@ -568,13 +568,15 @@ export function startDaemon(home = stateHome()): Daemon {
 
   const scanInReviewImpl = async (stateName = "In Review"): Promise<InReviewSweepResult> => {
     const { synced, configured } = await syncBoard();
+    // One PR fetch per resting PR, shared by both resting-PR passes below (reconcile + head-advance re-review).
+    const getPr = config.repo ? sweepPrFetcher(config.repo) : null;
     // A human may have merged or closed a resting PR out of band since the last sweep: reconcile those jobs to
     // a terminal state first, so a merged PR drops off the console instead of lingering in READY_TO_MERGE.
-    if (config.repo) await reconcileResolvedPrs(store, livePrOutcome(config.repo));
+    if (getPr) await reconcileResolvedPrs(store, livePrOutcome(getPr));
     // A human may have pushed a fix to a resting PR since we last reviewed it; re-open those for a fresh review
     // before enqueuing brand-new In-Review tickets (both get driven by the one pickup below).
-    const reopened = sweepSupervisor && config.repo
-      ? (await reReviewAdvancedPrs(store, stateName, liveHeadReader(config.repo))).length : 0;
+    const reopened = sweepSupervisor && getPr
+      ? (await reReviewAdvancedPrs(store, stateName, liveHeadReader(getPr))).length : 0;
     const created = store.enqueueInReviewSweeps(stateName, config.leadOpsProject).length;
     const started = sweepSupervisor?.pickup().length ?? 0; // kick the engine on the newly-queued jobs
     return { synced, reopened, created, started, configured };

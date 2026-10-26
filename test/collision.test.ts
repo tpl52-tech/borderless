@@ -58,7 +58,7 @@ describe("buildTerritory — only real, assigned, active, non-lead-ops claims", 
     expect(t.get("mysterybox")!.owner).toBe("a teammate");
   });
   test("a merged ticket (Verifying) owns nothing; a pre-merge ticket still does (same stateType)", () => {
-    // Both are stateType "started" — only the post-merge state name distinguishes landed from in-flight.
+    // Both are stateType "started"; only the verify-stage state name distinguishes landed from in-flight.
     const verifying = buildTerritory([issue({ identifier: "COR-17", title: "SearchResultsList", assignee: "renee-id", stateName: "Verifying" })], "COR-1", ROSTER);
     expect(verifying.get("searchresultslist")).toBeUndefined(); // merged → deliverable landed → owns nothing
     const inReview = buildTerritory([issue({ identifier: "COR-18", title: "SearchResultsList", assignee: "renee-id", stateName: "In Review" })], "COR-1", ROSTER);

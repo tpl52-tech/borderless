@@ -56,9 +56,18 @@ export interface TicketOwner { ticketKey: string; owner: string; state: string; 
 export type Territory = Map<string, TicketOwner>;
 
 /**
+ * The post-merge state name: a ticket here has already merged its PR (it is only awaiting verification), so its
+ * deliverable has LANDED in main and it owns no territory. A new PR building on that merged code is not a
+ * collision. Mirrors verify-scan's default "Verifying" state, where a ticket is classified from its MERGED PR;
+ * its Linear stateType is still "started" (not terminal), so this name check is what tells it has landed.
+ */
+export const MERGED_STATE_NAME = "Verifying";
+
+/**
  * The deliverables owned by OTHER tickets, from the synced board (PRD §4). A ticket "owns" a deliverable
- * only when it is a real claim: not the sweep's own ticket, assigned to someone, not terminal, and not a
- * Lead Ops task (those aren't code). First claimant of a token wins. Pure (roster passed in, as elsewhere).
+ * only when it is a real claim: not the sweep's own ticket, assigned to someone, not terminal, not already
+ * merged (post-merge/Verifying), and not a Lead Ops task (those aren't code). First claimant of a token wins.
+ * Pure (roster passed in, as elsewhere).
  */
 export function buildTerritory(issues: LinearIssue[], targetKey: string, roster: Member[], leadOpsProject?: string): Territory {
   const byLinearId = buildRosterIndexes(roster).byLinearId;
@@ -67,6 +76,7 @@ export function buildTerritory(issues: LinearIssue[], targetKey: string, roster:
     if (issue.identifier === targetKey) continue; // a sweep never collides with its own ticket
     if (!issue.assignee) continue; // only a dedicated, ASSIGNED ticket owns a deliverable
     if (isTerminalState(issue.stateType)) continue; // done/canceled tickets own nothing
+    if (issue.stateName === MERGED_STATE_NAME) continue; // merged, awaiting verification: deliverable landed, owns nothing
     if (isLeadOps(issue, leadOpsProject)) continue; // lead-desk tasks aren't code deliverables
     const owner = byLinearId.get(issue.assignee)?.name ?? "a teammate";
     const state = issue.stateName ?? "open";

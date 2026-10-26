@@ -50,7 +50,7 @@ import { singleFlight } from "../shared/single-flight.ts";
 import type { InReviewSweepResult, FixSweepResult } from "../shared/types.ts";
 import { runSweepJob, type SweepEngineDeps } from "./sweep-engine.ts";
 import { buildTerritory } from "../shared/collision.ts";
-import { liveSweepDeps, needsHydration, hydrateInReviewJob, reReviewAdvancedPrs, liveHeadReader } from "./sweep-deps.ts";
+import { liveSweepDeps, needsHydration, hydrateInReviewJob, reReviewAdvancedPrs, liveHeadReader, reconcileResolvedPrs, livePrOutcome } from "./sweep-deps.ts";
 import { createSweepSupervisor, type SweepSupervisor } from "./sweep-supervisor.ts";
 import { scanRescues, authorizeRescue, liveProgressCheck } from "./rescue-scan.ts";
 import { delegate, liveCreateIssue, type DelegateResult } from "./lead-delegate.ts";
@@ -568,6 +568,9 @@ export function startDaemon(home = stateHome()): Daemon {
 
   const scanInReviewImpl = async (stateName = "In Review"): Promise<InReviewSweepResult> => {
     const { synced, configured } = await syncBoard();
+    // A human may have merged or closed a resting PR out of band since the last sweep: reconcile those jobs to
+    // a terminal state first, so a merged PR drops off the console instead of lingering in READY_TO_MERGE.
+    if (config.repo) await reconcileResolvedPrs(store, livePrOutcome(config.repo));
     // A human may have pushed a fix to a resting PR since we last reviewed it; re-open those for a fresh review
     // before enqueuing brand-new In-Review tickets (both get driven by the one pickup below).
     const reopened = sweepSupervisor && config.repo

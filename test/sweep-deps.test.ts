@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { checkStates, parseReviewVerdict, needsHydration, isRestingWithPr, reReviewAdvancedPrs, workerSeed, reviewerSeed } from "../src/daemon/sweep-deps.ts";
+import { checkStates, parseReviewVerdict, needsHydration, isRestingWithPr, reReviewAdvancedPrs, reconcileResolvedPrs, workerSeed, reviewerSeed } from "../src/daemon/sweep-deps.ts";
 import type { Store } from "../src/daemon/store.ts";
 import type { SweepJob } from "../src/shared/types.ts";
 import type { WorkerFeedback } from "../src/daemon/sweep-engine.ts";
@@ -160,6 +160,65 @@ describe("reReviewAdvancedPrs (re-open resting jobs whose PR head advanced)", ()
     const reopened = await reReviewAdvancedPrs(store, "In Review", headAdvanced);
     expect(reopened.map((j) => j.id)).toEqual(["ok"]); // the collision was swallowed; the other still re-opened
     expect(byId.get("collide")!.state).toBe("needs_human"); // left resting (the throwing UPDATE never applied)
+  });
+});
+
+describe("reconcileResolvedPrs (a merged/closed PR drops its job off the console)", () => {
+  const mk = (over: Partial<SweepJob>): SweepJob => ({
+    id: over.id ?? "j", kind: "in_review", ticketId: over.ticketId ?? "t", ticketKey: over.ticketKey ?? "COR-20",
+    assignee: null, prNumber: 31, headSha: "sha", sessionId: null, state: "ready", cycles: 0,
+    gate: null, reason: null, createdAt: 0, updatedAt: 0, ...over,
+  });
+  const fakeStore = (jobs: SweepJob[]) => {
+    const byId = new Map(jobs.map((j) => [j.id, { ...j }]));
+    const events: Array<{ jobId: string; detail: Record<string, unknown> }> = [];
+    const store = {
+      listSweepJobs: () => [...byId.values()],
+      transitionSweepJob: (id: string, patch: Partial<SweepJob>) => { const next = { ...byId.get(id)!, ...patch }; byId.set(id, next); return next; },
+      recordSweepEvent: (jobId: string, _event: string, detail: Record<string, unknown>) => { events.push({ jobId, detail }); return {} as never; },
+    };
+    return { store: store as unknown as Store, events, byId };
+  };
+
+  test("a merged PR → the job becomes merged (hidden), with an audit event", async () => {
+    const { store, events, byId } = fakeStore([mk({ id: "j1", state: "ready" })]);
+    const resolved = await reconcileResolvedPrs(store, async () => "merged");
+    expect(resolved.map((j) => j.id)).toEqual(["j1"]);
+    expect(byId.get("j1")!.state).toBe("merged");
+    expect(events).toEqual([{ jobId: "j1", detail: { from: "ready", to: "merged", reason: "PR merged on GitHub" } }]);
+  });
+
+  test("a closed-without-merge PR → failed, with a reason", async () => {
+    const { store, byId } = fakeStore([mk({ id: "j1", state: "signoff" })]);
+    await reconcileResolvedPrs(store, async () => "closed");
+    expect(byId.get("j1")!.state).toBe("failed");
+    expect(byId.get("j1")!.reason).toBe("PR closed without merging");
+  });
+
+  test("open PR → left resting; non-resting or PR-less jobs are never even queried", async () => {
+    const { store, byId } = fakeStore([
+      mk({ id: "resting", state: "ready", prNumber: 31 }),
+      mk({ id: "driving", state: "reviewing", prNumber: 32 }),
+      mk({ id: "noPr", state: "needs_human", prNumber: null }),
+    ]);
+    const seen: number[] = [];
+    const resolved = await reconcileResolvedPrs(store, async (n) => { seen.push(n); return "open"; });
+    expect(resolved).toEqual([]);
+    expect(seen).toEqual([31]); // only the resting-with-PR candidate's outcome was fetched
+    expect(byId.get("resting")!.state).toBe("ready");
+    expect(byId.get("driving")!.state).toBe("reviewing");
+    expect(byId.get("noPr")!.state).toBe("needs_human");
+  });
+
+  test("fail-soft: one PR's lookup error doesn't block reconciling the others", async () => {
+    const { store, byId } = fakeStore([
+      mk({ id: "boom", state: "ready", prNumber: 31 }),
+      mk({ id: "ok", state: "ready", prNumber: 32 }),
+    ]);
+    const resolved = await reconcileResolvedPrs(store, async (n) => { if (n === 31) throw new Error("gh exit 1"); return "merged"; });
+    expect(resolved.map((j) => j.id)).toEqual(["ok"]);
+    expect(byId.get("boom")!.state).toBe("ready"); // left resting, retried next sweep
+    expect(byId.get("ok")!.state).toBe("merged");
   });
 });
 

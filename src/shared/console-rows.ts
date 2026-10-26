@@ -5,7 +5,7 @@
  * Pure: store reads are passed in (issues + sweep jobs); no I/O, no daemon imports. Both servers call these.
  */
 
-import type { LinearIssue, SweepJob } from "./types.ts";
+import type { LinearIssue, SweepJob, SweepState } from "./types.ts";
 import { doNext, type DoNextEntry } from "./boards.ts";
 import { activeLoads, suggestAssignments, type AssignmentSuggestion } from "./assign.ts";
 import { deskBoard } from "./lead-desk.ts";
@@ -24,6 +24,17 @@ export function sweepRow(j: SweepJob) {
     id: j.id, ticketKey: j.ticketKey, kind: j.kind, state: j.state, owner: sweepOwner(j.assignee),
     prNumber: j.prNumber, cycles: j.cycles, reason: j.reason, sessionId: j.sessionId,
   };
+}
+
+/** Terminal states hidden from the console. A `merged` job has finished its work (its PR landed) and should
+ *  leave the screen, though its audit row stays in the store. `failed` stays visible: a failure is worth seeing. */
+const HIDDEN_SWEEP_STATES: ReadonlySet<SweepState> = new Set<SweepState>(["merged"]);
+
+/** The sweep rows both consoles render: every job except the hidden terminal ones (merged). The ONE place the
+ *  visibility rule lives, so the Ink TUI and the browser console stay byte-identical (see consolePayload / the
+ *  uds `sweep.list` handler). */
+export function visibleSweepRows(sweepJobs: SweepJob[]) {
+  return sweepJobs.filter((j) => !HIDDEN_SWEEP_STATES.has(j.state)).map(sweepRow);
 }
 
 /** The roster row shape both consoles render (identity-safe: no emails/linearIds). */
@@ -46,7 +57,7 @@ export function consolePayload(issues: LinearIssue[], sweepJobs: SweepJob[], lea
   const loads = activeLoads(issues, ROSTER);
   const ranked = doNext(issues);
   return {
-    sweeps: sweepJobs.map(sweepRow),
+    sweeps: visibleSweepRows(sweepJobs),
     boards: ranked.map(boardRow),
     assign: suggestAssignments(ranked, ROSTER, loads).map(assignRow),
     deskBoard: deskBoard(issues, ROSTER, leadIdent), // Lead Desk v2 board (web console): co-leads, delegated, epics

@@ -19,7 +19,7 @@ import { doNext } from "../shared/boards.ts";
 import { activeLoads, suggestAssignments } from "../shared/assign.ts";
 import { deskOverview, type DelegateRequest, type DelegateResult } from "../shared/lead-desk.ts";
 import { ROSTER } from "../shared/roster.ts";
-import { sweepRow, rosterRow, boardRow, assignRow } from "../shared/console-rows.ts";
+import { visibleSweepRows, rosterRow, boardRow, assignRow } from "../shared/console-rows.ts";
 import type { InReviewSweepResult, FixSweepResult } from "../shared/types.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
@@ -278,7 +278,7 @@ export function startUdsServer(socketPath: string, deps: UdsServerDeps): UdsServ
 
       // --- console reads (PRD §11): the SWEEPS + ROSTER screens share the row shapes with the web console --
       case "sweep.list":
-        return store.listSweepJobs().map(sweepRow);
+        return visibleSweepRows(store.listSweepJobs());
       case "roster.get":
         return ROSTER.map(rosterRow);
 

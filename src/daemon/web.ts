@@ -16,6 +16,7 @@ import { parseDraftAnswers, type DeskDraftResponse, type DraftAnswer } from "../
 import { parseCreateRequest, type DeskCreateRequest, type DeskCreateResult } from "../shared/desk-create.ts";
 import type { VerifyScanResult } from "../shared/verify.ts";
 import type { VerifyRunResult } from "../shared/verify-verdict.ts";
+import type { VerifyQaResult } from "../shared/verify-qa.ts";
 import type { VerifyQaSyncResult } from "../shared/verify-qa-sync.ts";
 import type { VerifyQaFixResult } from "../shared/verify-qa-fix.ts";
 import type { Store } from "./store.ts";
@@ -48,6 +49,12 @@ export interface WebServerDeps {
   verifyScan: () => Promise<VerifyScanResult>;
   /** PRD §13 V2b: run the structural checks over the read-only DB role → a verdict per Verifying ticket. */
   verifyRun: () => Promise<VerifyRunResult>;
+  /** PRD §13: the screen-observable counterpart to the backend checks — author a `manual-qa` run-sheet sub-issue
+   *  in Linear for each Verifying ticket with a UI half that lacks one. These are what Cue QA lists for prod
+   *  testing (it sources run sheets by the manual-qa label). The browser button always writes; idempotent (a
+   *  ticket that already has a child is skipped) and deduped onto one run upstream (singleFlight), so a second
+   *  tab or the Sync-less `ao verify qa --write` racing it can't double-author. */
+  runAuthorQa: () => Promise<VerifyQaResult>;
   /** PRD §13: the screen-testable counterpart — carry Cue QA tester verdicts (Supabase) back to their Linear
    *  manual-qa sub-issues: a comment per verdict + move to Done on a pass. The browser button always writes
    *  (there is no dry mode from the UI). Idempotent on the per-verdict ref marker (a re-click after the run is a
@@ -102,6 +109,9 @@ export function startWebServer(deps: WebServerDeps): WebServer {
       }
       if (pathname === "/api/verify/run" && req.method === "POST") {
         return Response.json(await deps.verifyRun()); // executes the catalog checks over the read-only role
+      }
+      if (pathname === "/api/verify/qa-author" && req.method === "POST") {
+        return Response.json(await deps.runAuthorQa()); // author manual-qa run sheets → Linear (Cue QA sources these); idempotent
       }
       if (pathname === "/api/verify/qa-sync" && req.method === "POST") {
         return Response.json(await deps.runQaSync()); // push Cue QA verdicts → Linear (comment + Done on a pass); idempotent

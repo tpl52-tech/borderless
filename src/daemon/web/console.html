@@ -405,6 +405,12 @@
         </div>
 
         <div class="panel g" style="margin-top:1rem">
+          <div class="ph"><span>QA_RUNSHEETS <span class="ph-meta" id="vqw-meta">&mdash;</span></span>
+            <button class="btn xs o-green" id="v-qaauthor" title="Author a manual-qa run sheet in Linear for each screen-observable Verifying ticket that lacks one — Cue QA lists these for prod testing">&#10133; Author run sheets</button></div>
+          <div class="pb" id="vqw-cards"><p class="note">the screen-observable half that needs prod testing: for each <b style="color:var(--green)">Verifying</b> ticket with a UI half and no run sheet yet, author a <b style="color:var(--green)">manual-qa</b> sub-issue in Linear from its acceptance criteria. <b style="color:var(--green)">Cue QA</b> sources these by the manual-qa label, so they show up there for testers once authored. Idempotent &mdash; a re-click never re-authors a ticket that already has one.</p></div>
+        </div>
+
+        <div class="panel g" style="margin-top:1rem">
           <div class="ph"><span>QA_VERDICTS <span class="ph-meta" id="vqa-meta">&mdash;</span></span>
             <button class="btn xs o-green" id="v-qa" title="Push Cue QA tester verdicts back to their Linear manual-qa sub-issues (comment + move to Done on a pass)">&#8635; Sync to Linear</button></div>
           <div class="pb" id="vqa-cards"><p class="note">the screen-testable half: tester verdicts recorded in <b style="color:var(--green)">Cue QA</b> live in Supabase until they&rsquo;re pushed. Press Sync to carry each one back to its Linear manual-qa sub-issue as a comment, and move the passes to <b style="color:var(--green)">Done</b>. Idempotent &mdash; a re-click never double-posts.</p></div>
@@ -935,6 +941,37 @@
         ? `<p class="note">no verify DB configured &mdash; set <b>verifyDbUrl</b> (a read-only Postgres role) in ~/.borderless/config.json</p>`
         : rows.length ? advNote + rows.map(verifyCardHtml).join("") : `<p class="note">nothing in Verifying</p>`;
     } catch { vrCards.innerHTML = `<p class="note s-pink">run failed &mdash; is the daemon configured (repo + verifyDbUrl)?</p>`; }
+  }));
+
+  // ---- VERIFY: author manual-qa run sheets in Linear for the screen-observable tickets (the button always writes; idempotent) ----
+  const vQw = $("v-qaauthor"), vqwCards = $("vqw-cards"), vqwMeta = $("vqw-meta");
+  // The button always writes, so the pass never returns the dry-run `would-create` action — the renderer handles
+  // the write-mode outcomes (an unknown action still falls back gracefully below).
+  const QW_ACTION = { created: ["authored", "s-green"], "skipped-no-parent": ["skipped", "s-amber"], error: ["error", "s-pink"] };
+
+  const qwCardHtml = (r) => {
+    const [label, cls] = QW_ACTION[r.action] || [r.action, "s-ink"];
+    const made = r.ticketKey ? (r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.ticketKey)}</a>` : esc(r.ticketKey)) : "";
+    const tail = made ? ` &rarr; ${made}` : r.detail ? ` <span class="muted">${esc(r.detail)}</span>` : "";
+    return `<div class="row-card"><div class="rc-top"><span class="st ${cls}">${label}</span> <b>${esc(r.parentKey)}</b> <span class="muted">${esc(r.title)}</span>${tail}</div></div>`;
+  };
+
+  vQw.addEventListener("click", () => withBusy(vQw, "⟳ authoring…", async () => {
+    vqwCards.innerHTML = `<p class="note">authoring manual-qa run sheets in Linear…</p>`;
+    try {
+      const res = await fetch("/api/verify/qa-author", { method: "POST" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      if (data.configured === false) {
+        vqwMeta.textContent = "NOT CONFIGURED";
+        vqwCards.innerHTML = `<p class="note">set <b>repo</b> + <b>branchOwner</b> + <b>linearApiKey</b> + <b>linearTeamKeys</b> in ~/.borderless/config.json</p>`;
+        return;
+      }
+      const rows = data.results || [];
+      const made = rows.filter((r) => r.action === "created").length;
+      vqwMeta.textContent = rows.length ? (made ? `${made} AUTHORED` : "NO CHANGES") : "NONE";
+      vqwCards.innerHTML = rows.length ? rows.map(qwCardHtml).join("") : `<p class="note">every screen-observable Verifying ticket already has a run sheet</p>`;
+    } catch { vqwCards.innerHTML = `<p class="note s-pink">author failed &mdash; is the daemon configured (repo + linearApiKey)?</p>`; }
   }));
 
   // ---- VERIFY: push Cue QA tester verdicts back to their Linear sub-issues (comment + Done on a pass; idempotent) ----

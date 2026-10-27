@@ -285,7 +285,11 @@ export function startDaemon(home = stateHome()): Daemon {
     if (config.linearApiKey && teamKey) {
       const linear = httpLinearClient(config.linearApiKey);
       const runsheetChat = claudeCliChat({ model: config.askModel }); // subscription ($0) — generates the tester run sheet
-      runVerifyQa = async (ticketKey, write = false) => {
+      // singleFlight keyed on ticket + mode: a second concurrent write run — the browser "Author run sheets"
+      // button clicked in two tabs, or racing `ao verify qa --write` — joins the in-flight one instead of both
+      // scanning, both reading the same existingParentKeys, and both creating duplicate sub-issues (a TOCTOU
+      // double-author). A dry run keys separately so it never joins a write.
+      runVerifyQa = singleFlight(async (ticketKey, write = false) => {
         // Narrow to the one ticket before the (gh-heavy) scan, mirroring verify.run — `ao verify qa COR-17`
         // shouldn't classify the whole board.
         let rows: VerifyRow[];
@@ -308,7 +312,7 @@ export function startDaemon(home = stateHome()): Daemon {
           write,
         });
         return { results, configured: true, wrote: write };
-      };
+      }, (ticketKey, write = false) => `${ticketKey ?? "__all__"}:${write ? "write" : "dry"}`);
     }
   }
   // Verdict writeback (PRD §13): Supabase (Cue QA's shared results) → the Linear manual-qa sub-issues. Independent
@@ -610,7 +614,7 @@ export function startDaemon(home = stateHome()): Daemon {
   // a non-essential read mirror — a bind failure (port taken, another instance) must NEVER abort the daemon.
   let web: WebServer | undefined;
   try {
-    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runQaSync: () => runVerifyQaSync(true), runQaFix: () => runVerifyQaFix(true), runInReviewSweep: () => scanInReview("In Review"), runFixSweep: () => scanFix(), repo: config.repo, resolveChatStream, approveJob: (id) => approveJob(store, id), redrive, deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
+    web = startWebServer({ store, leadOpsProject: config.leadOpsProject, leadIdent: config.branchOwner, projectLabel: config.projectLabel ?? "Borderless", askRun, syncBoard, verifyScan: runVerifyScan, verifyRun: runVerifyRun, runAuthorQa: () => runVerifyQa(undefined, true), runQaSync: () => runVerifyQaSync(true), runQaFix: () => runVerifyQaFix(true), runInReviewSweep: () => scanInReview("In Review"), runFixSweep: () => scanFix(), repo: config.repo, resolveChatStream, approveJob: (id) => approveJob(store, id), redrive, deskDraft, deskCreate: deskCreateGuarded, port: config.webPort ?? DEFAULT_WEB_PORT });
     console.log(`borderless web console on ${web.url}`);
   } catch (err) {
     console.error(`web console disabled: ${err instanceof Error ? err.message : err}`);

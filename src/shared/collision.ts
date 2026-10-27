@@ -56,9 +56,20 @@ export interface TicketOwner { ticketKey: string; owner: string; state: string; 
 export type Territory = Map<string, TicketOwner>;
 
 /**
+ * The verify-stage state name. A ticket here is treated as having landed its deliverable, so it owns no
+ * territory and a new PR building on that code is not a collision. This is a best-effort proxy for "landed",
+ * not a guarantee: a verify-stage ticket is normally classified from a MERGED PR (mirrors verify-scan's default
+ * "Verifying" state), but the team occasionally reaches Verifying before opening a PR (see verify-plan.ts), and
+ * that rare case simply isn't guarded. That is an acceptable recall gap for this precision-biased, best-effort
+ * guard. Its Linear stateType stays "started" (not terminal), so the state name is what signals the stage.
+ */
+export const VERIFYING_STATE_NAME = "Verifying";
+
+/**
  * The deliverables owned by OTHER tickets, from the synced board (PRD §4). A ticket "owns" a deliverable
- * only when it is a real claim: not the sweep's own ticket, assigned to someone, not terminal, and not a
- * Lead Ops task (those aren't code). First claimant of a token wins. Pure (roster passed in, as elsewhere).
+ * only when it is a real claim: not the sweep's own ticket, assigned to someone, not terminal, not in the
+ * verify stage (treated as landed), and not a Lead Ops task (those aren't code). First claimant of a token wins.
+ * Pure (roster passed in, as elsewhere).
  */
 export function buildTerritory(issues: LinearIssue[], targetKey: string, roster: Member[], leadOpsProject?: string): Territory {
   const byLinearId = buildRosterIndexes(roster).byLinearId;
@@ -67,6 +78,7 @@ export function buildTerritory(issues: LinearIssue[], targetKey: string, roster:
     if (issue.identifier === targetKey) continue; // a sweep never collides with its own ticket
     if (!issue.assignee) continue; // only a dedicated, ASSIGNED ticket owns a deliverable
     if (isTerminalState(issue.stateType)) continue; // done/canceled tickets own nothing
+    if (issue.stateName === VERIFYING_STATE_NAME) continue; // verify stage: treated as landed, owns nothing (best-effort)
     if (isLeadOps(issue, leadOpsProject)) continue; // lead-desk tasks aren't code deliverables
     const owner = byLinearId.get(issue.assignee)?.name ?? "a teammate";
     const state = issue.stateName ?? "open";

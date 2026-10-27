@@ -572,14 +572,14 @@ export function startDaemon(home = stateHome()): Daemon {
     const getPr = config.repo ? sweepPrFetcher(config.repo) : null;
     // A human may have merged or closed a resting PR out of band since the last sweep: reconcile those jobs to
     // a terminal state first, so a merged PR drops off the console instead of lingering in READY_TO_MERGE.
-    if (getPr) await reconcileResolvedPrs(store, livePrOutcome(getPr));
+    const reconciled = getPr ? (await reconcileResolvedPrs(store, livePrOutcome(getPr))).length : 0;
     // A human may have pushed a fix to a resting PR since we last reviewed it; re-open those for a fresh review
     // before enqueuing brand-new In-Review tickets (both get driven by the one pickup below).
     const reopened = sweepSupervisor && getPr
       ? (await reReviewAdvancedPrs(store, stateName, liveHeadReader(getPr))).length : 0;
     const created = store.enqueueInReviewSweeps(stateName, config.leadOpsProject).length;
     const started = sweepSupervisor?.pickup().length ?? 0; // kick the engine on the newly-queued jobs
-    return { synced, reopened, created, started, configured };
+    return { synced, reconciled, reopened, created, started, configured };
   };
   // Dedupe concurrent sweeps of the same column onto one in-flight run — the web SWEEP button double-clicked,
   // or a button + a terminal `ao sweep` at once, must join one run, never spawn a duplicate agent fleet.

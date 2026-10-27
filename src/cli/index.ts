@@ -78,7 +78,7 @@ export async function main(argv: string[]): Promise<void> {
         "sweep.scanInReview", stateName ? { stateName } : {},
       );
       const note = r.configured ? "" : " — Linear not configured (no API key / teams)";
-      console.log(`sweep: synced ${r.synced} issue(s), re-opened ${r.reopened} advanced, enqueued ${r.created} job(s), started ${r.started} run(s)${note}`);
+      console.log(`sweep: synced ${r.synced} issue(s), cleared ${r.reconciled} merged/closed, re-opened ${r.reopened} advanced, enqueued ${r.created} job(s), started ${r.started} run(s)${note}`);
     });
     return;
   }

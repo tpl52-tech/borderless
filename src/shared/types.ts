@@ -269,9 +269,10 @@ export type SweepState =
   | "queued" | "implementing" | "fixing" | "reviewing" | "ci"
   | "ready" | "signoff" | "needs_human" | "merged" | "failed";
 
-/** The outcome of one In-Review sweep (scanInReview): Linear sync → re-review advanced PRs → enqueue → drive. */
+/** The outcome of one In-Review sweep (scanInReview): Linear sync → reconcile resolved PRs → re-review advanced PRs → enqueue → drive. */
 export interface InReviewSweepResult {
   synced: number;      // Linear issues pulled into the store
+  reconciled: number;  // resting jobs dropped because their PR was merged (or closed) out of band
   reopened: number;    // resting jobs re-opened because their PR head advanced past what they reviewed
   created: number;     // brand-new in-review jobs enqueued
   started: number;     // jobs the supervisor kicked off this sweep

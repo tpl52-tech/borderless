@@ -79,7 +79,7 @@ export function memberByGithub(login: string): Member | undefined {
 }
 
 /**
- * The roster member for a Cue QA tester, matched by the tester's first name (e.g. "renee" → Renee Gowda). The
+ * The roster member for a Cue QA tester, matched by the tester's first name (e.g. "sabrina" → Sabrina Gerson). The
  * single source for both the Linear id to assign AND the display name to credit, so the two can't drift. null
  * when no SINGLE member has that first name (unknown tester, or a first-name collision), so the verdict is left
  * unassigned and the writeback comment still credits the raw name.

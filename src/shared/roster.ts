@@ -30,7 +30,6 @@ export const ROSTER: Member[] = [
   { name: "Neha Bommireddy", netid: "nb644", emails: ["nb644@cornell.edu"], linearIds: ["4bcdb0df-85e3-4fa2-a150-30a759131b1e"], github: "nehabommireddy", lead: true },
   { name: "Enaika Kishnani", netid: "ek756", emails: ["ek756@cornell.edu"], linearIds: ["58d355dd-7e2a-4bbb-b76f-c44e43c6e42e"], github: "enaikak" },
   { name: "Willow Chen", netid: "wc697", emails: ["wc697@cornell.edu"], linearIds: ["b391333e-0039-40a9-8930-423ddbaeaa05"], github: "willowchen2" },
-  { name: "Renee Gowda", netid: "rsg276", emails: ["rsg276@cornell.edu"], linearIds: ["dd7f7d59-a191-48f6-bde4-1fdad5e7ef1c"], github: "reneegowda" },
   { name: "Roma Rangaswamy", netid: "rr829", emails: ["rr829@cornell.edu"], linearIds: ["9d39d67f-7998-4bb8-92bf-15966231566b"], github: "RomaR2007" },
   { name: "Sabrina Gerson", netid: "sjg326", emails: ["sjg326@cornell.edu"], linearIds: ["8ad608d2-2181-4938-8470-b9610617f422"], github: "sjg326" },
   { name: "Samantha Ahn", netid: "sa2389", emails: ["sa2389@cornell.edu"], linearIds: ["699ad942-327f-4009-8b8a-c2249833be97"], github: "SamanthaAhn17" },
@@ -80,7 +79,7 @@ export function memberByGithub(login: string): Member | undefined {
 }
 
 /**
- * The roster member for a Cue QA tester, matched by the tester's first name (e.g. "renee" → Renee Gowda). The
+ * The roster member for a Cue QA tester, matched by the tester's first name (e.g. "sabrina" → Sabrina Gerson). The
  * single source for both the Linear id to assign AND the display name to credit, so the two can't drift. null
  * when no SINGLE member has that first name (unknown tester, or a first-name collision), so the verdict is left
  * unassigned and the writeback comment still credits the raw name.

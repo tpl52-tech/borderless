@@ -58,7 +58,6 @@ describe("roster (lead-console PRD §5)", () => {
 
   describe("testerLinearId (Cue QA tester → Linear user)", () => {
     test("matches a tester by first name to their primary Linear id", () => {
-      expect(testerLinearId("renee")).toBe("dd7f7d59-a191-48f6-bde4-1fdad5e7ef1c"); // Renee Gowda
       expect(testerLinearId("sabrina")).toBe("8ad608d2-2181-4938-8470-b9610617f422"); // Sabrina Gerson
     });
 
@@ -68,7 +67,8 @@ describe("roster (lead-console PRD §5)", () => {
     });
 
     test("case-insensitive, and null for an unknown or empty tester (left unassigned)", () => {
-      expect(testerLinearId("Renee")).toBe("dd7f7d59-a191-48f6-bde4-1fdad5e7ef1c");
+      expect(testerLinearId("Sabrina")).toBe("8ad608d2-2181-4938-8470-b9610617f422"); // case-insensitive
+      expect(testerLinearId("renee")).toBeNull(); // removed from the roster
       expect(testerLinearId("ghost")).toBeNull();
       expect(testerLinearId("")).toBeNull();
       expect(testerLinearId(undefined)).toBeNull();
